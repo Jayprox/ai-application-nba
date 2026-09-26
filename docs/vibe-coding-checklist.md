@@ -1,6 +1,8 @@
-# Vibe Coding — Project Checklist Template
+# Vibe Coding — Project Checklist (Chalk That NBA)
 
-> Copy this file into every new project repo. Fill it out top to bottom before writing code.
+> Reset from Chalk That NFL's filled-in copy on 2026-09-26 — NFL's answers and
+> build log live in `ai-application-nfl/docs/vibe-coding-checklist.md` if you
+> want a worked example. Fill this out top to bottom before writing code.
 > Goal: quality portfolio apps, not just working demos.
 
 ---
@@ -12,35 +14,44 @@
 - [x] **Why this stack?** — Be able to answer this in an interview. Write it down.
 - [x] **What does "done" look like?** — Describe the app running successfully in 2–3 sentences.
 
+*(Approved by JD 2026-09-26.)*
+
 ```
 PITCH:
-Chalk That NFL is a stats research app — no predictive calculations — giving
-full-roster access (offense, defense, special teams, kicking) to season
-averages, last-5-game trends, career stats, and injury status, filterable
-by situational splits (home/away, time slot, weather) for both teams and
-players. It's Part 1 of a two-part platform: Part 2 (future, separate
-service) layers AI-driven projections and confidence scores on top. Built
-as a StatMuse-style research/query layer specifically so future AI agents
-can query it directly for prediction research, without depending on a
-third-party tool's rate limits or ToS.
+Chalk That NBA is a stats research app — no predictive calculations —
+giving access to every active NBA player's and team's season averages,
+last-5 and last-10 game trends, game logs, and full career stats (back to
+1996-97, when NBA.com's complete box scores begin), filterable by
+basketball-specific situational splits (home/away, 1st vs 2nd night of a
+back-to-back, days of rest, national TV, altitude), plus real
+leaderboards (top-N by season average). It models the NBA's full season
+structure — regular season, NBA Cup, play-in, playoffs — rather than
+treating the year as one flat schedule. It's Part 1 of the Chalk That
+platform: Part 2 (a future, separate service) is a team of AI agents that
+query this same API directly to condense hours of research into picks,
+without depending on a third-party tool's rate limits or ToS.
 
 STACK RATIONALE:
-Swift (iOS, fast-follow) + React (web, ships first) both hit the same
-Node.js/Express backend for guaranteed data parity. JWT auth. Redis-backed
-cache with short, data-type-specific TTLs (freshness matters — live stats
-move fast, career stats don't). PostgreSQL for storage. Railway for
-hosting. The future AI agent service stays separate from the main
-backend, talking to the same shared Postgres/Redis, and authenticates to
-the API via its own API key — never bolted onto the human-facing backend.
+Same stack as Chalk That NFL, per PLATFORM.md — Node/Express API +
+standalone Node ingestion worker (one language end to end), Postgres
+because the data is relational (players x games x splits is a WHERE
+clause), Redis for query-result caching, React/Vite/Tailwind web client
+(Swift iOS fast-follow on the same API), JWT for humans + API keys for
+agents, Railway hosting. NBA-specific: data sourcing is split — NBA.com
+for history/schedule (it blocks datacenter IPs, so it's pulled from a
+residential machine) and Highlightly for live current-season data from
+Railway — decided after real dry-runs, not assumed (architecture.md §3).
 
 DONE LOOKS LIKE:
-A user can browse any current-season NFL team or player and see accurate
-season averages, last-5-game trends, career stats, and injury status —
-filterable by every situational split — sourced live and matching
-official numbers. Deployed as a working React web app on Railway with
-JWT auth wired, with graceful (not just non-broken) handling of
-offseason/preseason/bye-week/rookie empty states. No sportsbook props and
-no iOS app required to call it done.
+A user can browse any current-season NBA team or player and see season
+averages, recent-game trends, game logs, and career stats that match
+NBA.com's official numbers — filterable by any of the 5 situational splits
+with sample size shown, correctly separated by season type (regular
+season / play-in / playoffs), plus working leaderboards. Deployed on
+Railway with JWT auth, the ingestion worker keeping the current season
+fresh from Highlightly, and graceful preseason/offseason/rookie empty
+states. No props, no rankings/matchup layer, no iOS required to call it
+done.
 ```
 
 ---
@@ -54,57 +65,55 @@ no iOS app required to call it done.
 - [x] **Auth strategy** — None / JWT / Session / OAuth? Why?
 - [x] **External dependencies** — APIs, SDKs, third-party services. Note rate limits and costs.
 
-*(Full detail, including the Postgres DDL, identity-crosswalk design rationale,
-Redis TTL strategy, and Railway topology diagram, lives in `docs/architecture.md`.
-This is the condensed version.)*
+*(Full detail lives in `docs/architecture.md`. This is the condensed version.)*
 
 ```
-ENTITIES:
-Stadiums, Teams, Players (canonical UUID id — not tied to any vendor),
-Player ID Crosswalk (maps nflverse/BallDontLie/Highlightly/etc ids to the
-canonical player), Games (precomputed game_slot + weather_condition),
-Team Game Stats, Player Offense/Defense/Special-Teams Game Stats (split
-by position group), Injury Reports (append-only time series), Ingestion
-Runs (freshness/audit log), Users, Refresh Tokens, API Keys (agent
-credentials).
+ENTITIES:  (full DDL: db/schema.sql — rationale: architecture.md §4.1)
+Arenas (elevation, high-altitude flag), Teams, Players (canonical UUID),
+Entity ID Crosswalk (team/player/game ids from NBA.com + Highlightly +
+Odds API -> canonical), Games (season, season_type incl. play-in /
+playoffs / cup_final, cup_stage, local date, neutral site, national-TV
+tier), Playoff Series (play-in + bracket), Team Games (per-team split
+tags: home/away/neutral, rest days, back-to-back night + team box totals),
+Player Game Stats (one wide positionless table), Injury Reports
+(append-only), Ingestion Runs, Users, Refresh Tokens, API Keys.
 
 ARCHITECTURE:
-  [React Web / Swift iOS (fast-follow) / AI Agents (future)]
-        → [backend-api: Node/Express — JWT + API-key auth, query API]
-        → [Postgres + Redis]
+  [React Web / Swift iOS (fast-follow) / AI agents (Part 2)]
+        -> [backend-api: Node/Express — JWT + API-key auth, POST /query]
+        -> [Postgres + Redis]
 
-  [ingestion-worker: Node, own Railway service, no public domain]
-        → [Postgres + Redis]  (writes directly, bypasses backend-api/auth)
-        → [External APIs: nflverse, Open-Meteo, live-stats vendor (TBD)]
+  [ingestion-worker: Node, Railway, no public domain]
+        -> Highlightly (current-season games, box scores, lineups)
+        -> [Postgres + Redis]  (direct write, bypasses backend-api)
 
+  [backfill scripts: Node, run from JD's Mac — NBA.com blocks Railway IPs]
+        -> NBA.com stats/cdn (history 1996-97+, schedule, national-TV tags)
+        -> [Postgres]  (direct write, logs to ingestion_runs)
 
 KEY ROUTES:
 Auth: POST /login, POST /refresh, POST /logout
-Query: POST /query (structured: entity, stat, scope, splits → response w/
-  sample size + freshness metadata) — same endpoint for humans and agents
-POST /query/nl (fast-follow, not v1 — NL question → same structured query
-  internally, no separate data path)
-
+Query: POST /query — the one shared engine (entity, stat, scope, splits ->
+  data + sample size + freshness). NBA scopes: season | last5 | last10 |
+  career | game_log | leaderboard. NBA splits: venue (home/away),
+  b2b_night (1/2), rest_days (0/1/2/3+), national_tv (major/nba_tv/local),
+  altitude (yes/no); plus season + season_type. Leaderboards are a /query
+  scope, not a separate endpoint (PLATFORM.md §2).
+Browse: GET /teams, GET /teams/:id, GET /players (?active=true default),
+  GET /players/:id, GET /games?date=, GET /games/:id (box score)
+Ops: GET /health
 
 AUTH:
-JWT (short-lived access token + revocable refresh token) for human users.
-Separate long-lived API keys (no session, no expiry) for AI agents/
-services — same query API, different credential type, distinguished by
-the auth middleware. Chosen because agents need permanent machine
-credentials, not a login session, and keeping that separate keeps the
-API surface identical regardless of who's calling it.
-
+Unchanged from PLATFORM.md §2: short-lived JWT + rotating refresh token
+(replay revokes every session) for humans; long-lived hashed API keys for
+agents. Same middleware, same API surface.
 
 EXTERNAL DEPS + LIMITS:
-nflverse — free, open (CC-BY-4.0), historical stats/injuries/weather,
-  batch-updated (not real-time).
-Open-Meteo — forecast weather; free tier while building (10k calls/day,
-  non-commercial only); $29/mo Standard tier required once live/commercial.
-Live-stats vendor — parked between BallDontLie (free: 5 req/min; paid:
-  $9.99–$39.99/mo) and Highlightly (free: 100 req/day; paid:
-  $7.99–$44.99/mo).
-Sportsbook odds (deferred/backlog) — The Odds API Business tier ($99/mo)
-  is the leading candidate for NFL player props when that phase starts.
+NBA.com stats/cdn — free, unofficial, undocumented; blocks datacenter IPs
+  (verified from Railway) so only reachable from a residential machine.
+Highlightly — PRO plan, quota header 7,500 (period TBC); box scores
+  verified exact vs NBA.com. Injuries not yet confirmed.
+The Odds API — free 500 credits/mo; paid from $30/mo. Fast-follow only.
 ```
 
 ---
@@ -112,31 +121,47 @@ Sportsbook odds (deferred/backlog) — The Odds API Business tier ($99/mo)
 ## Phase 3 — MVP Scope
 *Cut ruthlessly. Everything not in v1 goes in the backlog.*
 
+*(Approved by JD 2026-09-26.)*
+
 - [x] **v1 features (must have):**
-  - Full-roster team & player browsing (offense, defense, special teams, kicking)
-  - Season averages, last-5-game trends, and career stats per player
-  - Situational splits: home/away, Sunday early/late/primetime, MNF, TNF,
-    Thanksgiving, weather (sunny/overcast/rain/snow/dome)
-  - Current injury status attached to player records
-  - Graceful handling of offseason/preseason/bye-week/rookie empty states
-  - JWT auth wired (a single test account is acceptable for v1)
-  - Deployed on Railway, reachable via a live URL
+  - Team browse (30 teams by conference/division) + team detail (roster,
+    team-level stats with the same scopes/splits as players)
+  - Player search/browse with an **"Active" toggle, on by default**
+    (same pattern as CT NFL); toggling it off searches every player since
+    1996-97 (retired players get career stats + graceful current-season
+    empty states)
+  - Player detail: scope tabs Season / Last 5 / Last 10 / Career / Game
+    Log, season picker, **season-type selector (Regular default / Play-In
+    / Playoffs / All)** — types never mix unless "All" is chosen
+  - 5 situational splits: home/away (neutral excluded), back-to-back
+    night 1/2, rest days 0/1/2/3+, national TV (major/NBA TV/local),
+    altitude (DEN + UTA) — sample size shown with every result
+  - **Scoreboard** (games by date, incl. preseason/Cup/play-in/playoff
+    labels) + **box score** screen; game-log rows link into box scores
+  - **Leaderboards** — top-N by per-game average for core stats;
+    qualifier: played in >= 70% of the team's games so far (labeled on
+    screen as Chalk That's rule, not the NBA's official one)
+  - Injury badge on player records — *if* an injury source is confirmed
+    (architecture.md §3.2); otherwise ships without and is tracked
+  - Empty states: preseason, offseason, rookie, retired player, split
+    with zero games, season type not reached (e.g. team missed playoffs)
+  - JWT auth wired (single test account OK), deployed on Railway
 - [x] **Backlog (explicitly out of scope for now):**
-  - Sportsbook props/odds (FanDuel, DraftKings, BetMGM, Caesars)
-  - Swift iOS app (web ships first; same API, no rework needed later)
-  - Natural-language search bar (StatMuse-style query)
-  - Part 2: the AI agent/projections service entirely
-  - Email verification for self-serve signup — auth is username/password
-    for v1, accounts created directly via `scripts/create-test-user.js`;
-    email is stored (optional) but unverified and unused for login
-  - *(Not backlog, but still open: which live-stats vendor powers
-    current-season data — BallDontLie vs. Highlightly, undecided)*
+  - Everything in Part 2's fast-follow: player props (The Odds API),
+    composite position rankings, matchup-insight splits, team-unit
+    offense/defense rankings
+  - NBA Cup split filter (Cup stage is stored, just not filterable)
+  - Swift iOS app (same API, later)
+  - Natural-language search bar
+  - Standings page, playoff bracket *view* (bracket is in the schema)
+  - User-adjustable leaderboard qualifier; advanced stats (TS%, usage…)
+  - Self-serve signup / email verification
 - [x] **Success metric** — How will you know v1 is shippable?
-  A user can look up any current-season NFL team or player and see
-  accurate season averages, last-5-game trends, career stats, and injury
-  status — correctly filtered by any situational split — sourced live and
-  matching official numbers, on a deployed app reachable at a real
-  Railway URL.
+  A user can look up any NBA team, player, or game and see numbers that
+  match NBA.com — season/L5/L10/career/game log, by season type, under
+  any of the 5 splits with sample size shown — plus correct leaderboards
+  and box scores, on a live Railway URL, with the ingestion worker keeping
+  the current season fresh from Highlightly.
 
 ---
 
@@ -147,50 +172,52 @@ Sportsbook odds (deferred/backlog) — The Odds API Business tier ($99/mo)
 - [x] **Key user flows** — Walk through the 1–2 flows that matter most
 - [x] **Component sketch** — Rough layout for the main screen (ASCII or Figma link)
 
+*Approved by JD 2026-09-26.* Clickable mockup of all 8 screens, built on
+real 2025-26 data: **"Chalk That NBA — MVP Screens"** design canvas in
+JD's Claude artifacts (claude.ai/code/artifacts). Player Detail's scope
+tabs, season-type selector and all 5 splits recompute live from
+Jokić's real 65 regular-season + 6 playoff games.
+
 ```
 SCREENS:
-  1. Login (single test account for MVP, but a real screen/flow)
-  2. Team browse — list of all 32 teams
-  3. Team detail — roster + team-level records (home/away, situational splits)
-  4. Player search/browse — find a player by name/team/position
-  5. Player detail — season averages, last-5-game trends, career stats,
-     injury status, situational-split filters applied here
-  (Not a separate screen, but a state every relevant screen must handle
-   gracefully per MVP scope: offseason/preseason/bye-week/rookie-with-no-history)
+  1. Login — sign-in card only (single test account in v1)
+  2. Scoreboard — games by date, date picker; LANDING PAGE after login
+  3. Box score — both teams, starters marked, DNPs listed, team totals,
+     plus the split tags written for each team at ingestion
+  4. Leaderboards — Points / Rebounds / Assists / 3PM tabs, top 10,
+     qualifier explained on screen (70% of team games)
+  5. Player search — name search, team filter, "Active only" toggle (on
+     by default; off = every player since 1996-97)
+  6. Player detail (main screen) — scope tabs, season + season-type
+     selector, 5 split filters, sample size + W-L of the sample
+  7. Teams — 30 teams by conference/division; altitude arenas marked
+  8. Team detail — record, home/away, team per-game stats, roster;
+     same scopes/splits as player detail via POST /query (entity: team)
+  Nav bar on every signed-in screen: Scoreboard · Teams · Players · Leaders
 
 MAIN FLOW:
-  User lands on a player (via search, or drilling in from their team page)
-  → views their base stats → applies one or more situational-split
-  filters (home/away, weather, time slot) → sees the filtered numbers
-  with sample size shown alongside. This loop — stats plus a split, with
-  context on how much data backs it — is the actual differentiator, so
-  the main screen is designed around it.
+  Player (via search, leaderboard, box score or team roster) -> pick
+  scope + season type -> apply splits -> read the filtered numbers with
+  sample size and W-L. Second flow: Scoreboard -> box score -> player.
 
-MAIN SCREEN LAYOUT (Player Detail):
-  +-------------------------------------------------------------+
-  | < Back to Team              [Injury: Questionable - Ankle]  |
-  |                                                               |
-  |  Patrick Mahomes                 QB  |  Kansas City Chiefs   |
-  +-------------------------------------------------------------+
-  | [Season Avg] [Last 5 Games] [Career] [Game Log]              |  <- scope tabs
-  +-------------------------------------------------------------+
-  | Splits:  [Home/Away v]  [Time Slot v]  [Weather v]  [Clear]  |  <- split filters
-  +-------------------------------------------------------------+
-  |                                                               |
-  |  Passing Yards        287.4        (8 games)                 |
-  |  Passing TDs            2.1        (8 games)                 |
-  |  Completions            24.3       (8 games)                 |
-  |  Interceptions           0.6       (8 games)                 |
-  |                                                               |
-  +-------------------------------------------------------------+
-  | Data synced 4m ago                                           |  <- freshness metadata
-  +-------------------------------------------------------------+
+MAIN SCREEN LAYOUT (Player Detail) — see the mockup; condensed:
+  [<- Players]                                [Injury badge / pending]
+  Nikola Jokić  C · Denver Nuggets     Season [2025-26]  [Reg|PI|PO|All]
+  [Season Avg] [Last 5] [Last 10] [Career] [Game Log]      <- scope
+  Venue[All|Home|Away] B2B[All|N1|N2] Rest[All|0|1|2|3+]
+  National TV[All|Major|NBA TV|Local] Altitude[All|Yes|No]  [Clear]
+  Season average · 65 games   45-20 in these games · 2025-26 regular
+  [PTS 27.7][REB 12.9][AST 10.7][3PM 1.7][FG% .569] ...10 stat tiles
+  Real NBA.com data · Synced Xm ago
 
-  Note: this layout is a direct visual of the System Design decisions —
-  scope tabs map to the query API's `scope` field, split dropdowns map to
-  its `splits` object, the "(8 games)" is the sample-size metadata, and
-  "synced 4m ago" comes from ingestion_runs via the freshness metadata.
-  Nothing here needs new backend work — it surfaces what's already designed.
+DECISIONS FROM THE MOCKUP (defaults as built, JD approved the screens):
+  - Last 5 / Last 10 apply AFTER splits: "Last 10 + Home" = his last 10
+    home games (not home games within his last 10). Query-engine rule.
+  - Leaderboard ties get sequential ranks (no shared rank) in v1.
+  - Team roster sorted by PPG with GP shown beside it (a 1-game player
+    can rank high — GP column makes that visible).
+  - Empty states seen in practice: Play-In for a top-6 seed; a split with
+    zero games; national-TV data not yet loaded.
 ```
 
 ---
@@ -198,241 +225,17 @@ MAIN SCREEN LAYOUT (Player Detail):
 ## Phase 5 — Build Order
 *Always: data → server → UI. Never build UI against mocks if you can help it.*
 
-*(Order planned below — execution not started yet. Check items off as each
-is actually built, not as it's planned.)*
+*(To be worked out together once Phases 1–4 are settled. Check items off as
+each is actually built, not as it's planned.)*
 
-- [x] Schema / DB setup — provision Postgres + Redis on Railway, run `db/schema.sql`
-      *(Done: Railway project "chalk-that-nfl" created, Postgres + Redis
-      provisioned, backend-api/ingestion-worker services created with
-      DATABASE_URL/REDIS_URL wired, schema applied — all 14 tables confirmed live.)*
-- [x] Seed data (scoped, pass 1) — `scripts/seed.js` seeds real nflverse
-      data: 30 stadiums, 32 teams, 2,752 current-season players + their
-      `player_id_crosswalk` rows. Ran clean against the live Railway
-      Postgres. Deliberately scoped down — historical games/box-score
-      stats are NOT loaded yet; that's a separate follow-up pass once
-      this is verified, not blocking Core API routes from starting.
-- [x] Core API routes — real Postgres-backed `/login`/`/refresh`/`/logout`
-      (username/password), `POST /query` (the shared query engine — season/
-      last5/career/game_log scope, home/away + weather + time-slot splits),
-      plus `GET /teams`, `GET /players`, and `/health`. Verified end-to-end
-      against the live Railway deploy: login issues real tokens, `/teams`
-      and `/players` return real seeded data, `/query` correctly returns a
-      graceful `sample_size: 0` empty state (expected — historical game
-      stats aren't loaded yet).
-- [x] Historical data backfill — `scripts/backfill-historical.js` loads 5
-      completed seasons (2021-2025) of real games + player box-score stats
-      (offense/defense/special-teams) from nflverse, plus the 2026
-      schedule, and derives `team_game_stats` from the loaded player rows.
-      *(Done: first run surfaced a real bug — nflverse's `games.csv` uses
-      `'LA'` for the Rams while our `teams` table uses `'LAR'`, which
-      caused 112 Rams games to be skipped, which cascaded into a
-      foreign-key violation that rolled back every season's player-stats
-      load entirely (all 5 seasons, zero rows). Root-caused via direct
-      diff of `games.csv` against our real team abbreviations, fixed with
-      an alias-normalization step (`LA` → `LAR`) applied everywhere an
-      nflverse abbreviation is looked up (also documented in
-      `docs/architecture.md` §3 since `ingestion-worker` will need the
-      same fix later). A `scripts/cleanup-before-rerun.js` one-off was
-      added to clear the `team_game_stats` rows the failed run had already
-      inserted with null derived stats, since a re-run's `ON CONFLICT DO
-      NOTHING` wouldn't have replaced them. Re-run after both fixes:
-      1,696 games inserted (0 skipped), all 5 seasons of player stats
-      loaded clean (no rollbacks — ~5,600-5,700 offense / ~9,700-10,100
-      defense / ~1,300-1,700 special-teams rows per season), 3,392
-      team_game_stats rows (1,696 games × 2 teams, no gaps). Verified
-      end-to-end via `POST /query` for Patrick Mahomes' 2024 season —
-      real, correct numbers (242.5 pass yds/gm, 23.5/34.9 completions,
-      1.63 TDs, 0.68 INTs across 19 games) instead of the earlier
-      `sample_size: 0` empty state. Note: `meta.freshness.synced_at`
-      correctly returns `null` for this data — the one-time backfill
-      script doesn't write to `ingestion_runs`; that starts once
-      "Ingestion worker automation" (below) exists.)*
-- [x] Frontend scaffold — React routing + layout shell for all 5 screens.
-      *(Done: `frontend/` — Vite + React (JS) + Tailwind CSS v4 +
-      react-router-dom v7. Routes for all 5 screens (`/login`, `/teams`,
-      `/teams/:teamId`, `/players`, `/players/:playerId`), gated by a
-      `ProtectedRoute` + shared nav `Layout`. Login is wired real
-      end-to-end against `POST /login` (with token storage + transparent
-      refresh-on-401 via a single shared `apiFetch` wrapper — not a mock);
-      the other 4 screens are routed shells pending Features 1-5. Required
-      adding `cors` to the backend (`server.js`, `CORS_ORIGIN` env var) so
-      the browser can call the API cross-origin — documented in
-      `docs/architecture.md` §4.5/§4.6. `npm run build`, lint, and
-      `npm audit` all clean (0 vulnerabilities).)*
-- [x] Feature 1: Team browse + team detail wired end-to-end (real data).
-      *(Done: `TeamBrowsePage` fetches `GET /teams` and groups all 32 teams
-      by conference/division; `TeamDetailPage` fetches `GET /teams/:id`
-      and shows stadium info plus the current roster grouped by position
-      group (offense/defense/special-teams), each player linking to
-      `/players/:id`. Added a shared `useApiFetch` hook (loading/error
-      state + auto-redirect to `/login` on a failed session, used by every
-      data-backed screen from here on) and a shared `AsyncState` component
-      for loading/error UI, so Features 2-5 reuse the same pattern rather
-      than each re-implementing it. `npm run build`, lint, and `npm audit`
-      all clean.)*
-- [x] Feature 2: Player search/browse wired end-to-end.
-      *(Done: `PlayerBrowsePage` fetches `GET /players` with live
-      `?name=` (debounced 300ms), `?team=` (dropdown populated from
-      `GET /teams`), and `?position_group=` filters — any combination,
-      updating the result list as you type/select. Shows a "showing first
-      100" notice when the backend's result cap is hit rather than
-      silently truncating. Extracted `constants/positionGroups.js` and
-      `constants/playerStatus.js` so the position-group labels and status
-      badge styling are shared with Team detail (Feature 1) instead of
-      duplicated. `npm run build`, lint, and `npm audit` all clean.)*
-- [x] Feature 3: Player detail — base stats (season avg / last-5 / career
-      scope tabs) wired end-to-end.
-      *(Done: `PlayerDetailPage` — the app's main screen per the Phase 4
-      component sketch — has real scope tabs (Season Avg / Last 5 Games /
-      Career / Game Log) and a season selector, all wired to `POST
-      /query`. Stat columns are position-group-aware (offense/defense/
-      special-teams, via `constants/statColumns.js`, mirroring the
-      backend's own `PLAYER_STAT_COLUMNS`). Game Log renders a real table
-      with opponent parsed from `game_id` (no extra request needed — see
-      the `SEASON_WEEK_AWAY_HOME` format from the historical backfill).
-      Shows sample size + freshness (`meta.freshness.synced_at` correctly
-      reads "not yet synced" — `ingestion_runs` isn't populated until
-      Ingestion worker automation exists). Added a `useStatsQuery` hook
-      (POST counterpart to `useApiFetch`, same loading/error/session
-      handling) so future `/query`-backed screens don't reinvent this.
-      Split filters (Feature 4) and the injury badge (Feature 5) are
-      deliberately not here yet. `npm run build`, lint, and `npm audit`
-      all clean.)*
-- [x] Feature 4: Situational split filters wired into player detail.
-      *(Done: added the Home/Away, Time Slot, and Weather dropdowns from
-      the Phase 4 mockup, plus Clear, directly beneath the scope tabs on
-      `PlayerDetailPage`. All three combine freely and feed `POST
-      /query`'s `splits` object, persisting across scope-tab switches.
-      Added `constants/splits.js` mirroring the backend's
-      `VALID_GAME_SLOTS`/`VALID_WEATHER` exactly. Known, documented
-      limitation carried over from the historical backfill: weather
-      splits other than "Dome" will correctly return a graceful
-      zero-sample-size result for now — `games.csv` only gives us roof
-      type, not real precipitation data, so sunny/overcast/rain/snow are
-      never actually populated until a future weather-API ingestion pass
-      (see `docs/architecture.md` §3). Not a bug. `npm run build`, lint,
-      and `npm audit` all clean.)*
-- [x] Feature 5: Injury status wired into player records + UI badge.
-      *(Done: added an `InjuryBadge` component rendering the Phase 4
-      mockup's "[Injury: Questionable - Ankle]" badge next to the back
-      link on `PlayerDetailPage`, sourced from `GET /players/:id`'s
-      existing `current_injury` field (no backend change needed — that
-      route already returned it, unused until now). Renders nothing for a
-      healthy player rather than an empty placeholder. Known, honest gap:
-      `injury_reports` isn't populated by either `scripts/seed.js` or
-      `scripts/backfill-historical.js` — nflverse's historical pass covers
-      games/box-scores, not injury reports, and a live injury feed is
-      still an open decision (`docs/architecture.md` §3, current-season
-      vendor undecided) — so no player will actually show a badge until
-      that source exists. Not a bug; documented in `InjuryBadge.jsx`
-      itself so it isn't mistaken for one later. `npm run build`, lint,
-      and `npm audit` all clean.)*
-- [x] Feature 6: Empty states (offseason/preseason/bye-week/rookie) across
-      all screens.
-      *(Done: added `EmptyStatsMessage` to `PlayerDetailPage` — where all
-      four named scenarios actually live — replacing the flat "no games"
-      text with a reason picked from what's already known client-side: a
-      zero-sample career scope reads as "likely a rookie, or a player
-      without tracked game history"; an active split filter reads as "try
-      clearing a split"; season 2026 specifically (the one season known
-      to have zero stats system-wide post-backfill) reads as "hasn't been
-      played yet"; anything else reads as "not on an NFL roster that
-      season" (covers inactive years, pre-rookie years, retirement).
-      Bye week needed no special case — Game Log already skips it
-      gracefully on its own since there's simply no game row that week.
-      Team browse/detail and Player browse already had generic (not
-      scenario-specific) empty/no-results states from Features 1-2, which
-      is the right level of effort there since none of the four named
-      scenarios apply to a roster list or a search result. `npm run
-      build`, lint, and `npm audit` all clean.)*
-
-      **All 6 Features done — the full Phase 4 screen set (Login, Team
-      browse/detail, Player browse/detail) is now wired end-to-end to
-      real, live Postgres data**, verified manually in the browser after
-      every feature. Remaining Phase 5 items: Ingestion worker automation
-      and Deploy.
-- [x] Ingestion worker automation — turn the one-time seed into the real
-      scheduled worker (fixed / proximity / game-window jobs)
-      *(Code done, deploy pending your `git push`. `worker/ingestion-worker.js`
-      replaces the old design-stage skeleton: the scheduler (all four
-      schedule shapes — fixed/proximity/day-of-week-proximity/game-window),
-      `ingestion_runs` logging, retry/backoff, and real identity resolution
-      (crosswalk lookup → name+team+position match → new-player fallback
-      flagged `manual_review`, per the original design doc) are all real.
-      `sync_roster`, `sync_schedule`, and `sync_historical_stats` are fully
-      implemented against nflverse's current-season files (same sources
-      `scripts/backfill-historical.js` used) with `ON CONFLICT DO UPDATE`
-      so scores/statuses/stat corrections actually land on a re-run, not
-      just first-insert like the one-time backfill. `sync_forecast_weather`
-      / `sync_injury_reports` / `sync_live_stats` still have real, firing
-      schedules but stubbed bodies — genuinely blocked on the still-open
-      live-stats vendor decision and an unprovisioned Open-Meteo key, not
-      skipped work. Added a manual dry-run mode
-      (`node worker/ingestion-worker.js <jobType>`) to test a job against
-      real data before trusting the unattended schedule, same pattern as
-      running the backfill script by hand. `worker/` is a self-contained
-      Railway service (own `package.json`) so it can get `rootDirectory:
-      worker`, same monorepo pattern as `web`. Full writeup in
-      `docs/architecture.md`'s new "Ingestion worker (as built)" section.
-
-      Dry-run caught two real bugs before deploy, both fixed: (1)
-      `sync_schedule` divided its games-synced count by 15 (leftover
-      copy-paste from the exact bug already fixed once in
-      `scripts/backfill-historical.js`'s `loadGames()`), producing a
-      fractional count that crashed `ingestion_runs`'s integer column —
-      fixed the increment, and added a defensive `Math.round()` in
-      `logRunSuccess` so a bad count from any future job fails in that
-      job's own try/catch instead of crashing the logging step outright.
-      (2) The CLI's one-shot dry-run mode called `scheduleRetry()` on
-      failure same as the live scheduler, but then exited immediately —
-      the retry's `setTimeout` never got to fire before the process died,
-      so a failed dry-run silently looked like it just... stopped, with no
-      second attempt. `runJob()` now takes a `{ retry }` option; the CLI
-      passes `retry: false` and exits 0/1 based on the real outcome
-      instead. `sync_roster` (2,930 players) and the corrected
-      `sync_schedule` both verified clean against real data; the
-      `sync_historical_stats` 404 for `stats_player_week_2026.csv` is
-      expected, not a bug — nflverse hasn't published a 2026 stats file
-      yet since the season hasn't been played.
-      **Deployed and confirmed live.** `ingestion-worker`'s `rootDirectory`
-      was set to `worker` and its GitHub source connected (same pattern as
-      `web`); build succeeded and the deploy logs show real proof of life,
-      not just a clean process start:
-      `[ingestion-worker] loaded last-run times for 3 job type(s) from
-      ingestion_runs` — meaning it reached the production database and
-      read back the three jobs we'd just dry-run — followed by
-      `[ingestion-worker] started.` confirming the scheduler is actually
-      ticking. Restart policy set to `ON_FAILURE` (max 5 retries), since
-      unlike `backend-api`/`web` this is a background process with no
-      request/response healthcheck to lean on. No public domain, matching
-      the architecture doc — it only makes outbound calls plus a
-      private-network connection to Postgres/Redis. All three Railway
-      services (`backend-api`, `web`, `ingestion-worker`) are now live —
-      **Phase 5 is fully complete.**)*
-- [x] Deploy — live on Railway with a real URL.
-      *(Done: `backend-api` (root of the repo, `node backend/server.js`)
-      and a new `web` service (`frontend/`, Vite build + a small Express
-      static server with SPA fallback — see `frontend/server.js`) are
-      both connected to the GitHub repo and live:
-      - Backend: https://backend-api-production-15ce.up.railway.app
-      - Web app: https://web-production-5f05d.up.railway.app
-
-      Verified via real Railway deploy logs (not just "build succeeded")
-      — both show a clean process start with no crash:
-      `[server] chalk-that-nfl backend-api listening on :8080` and
-      `[web] chalk-that-nfl-web serving dist/ on :8080`. Added
-      `CORS_ORIGIN` (backend-api) and `VITE_API_URL` (web, baked in at
-      *build* time — had to be set before the first deploy, not after)
-      so the two services can actually talk to each other cross-origin;
-      backend-api needed one redeploy after CORS_ORIGIN was added since
-      the var landed after its container had already started. Also set
-      `healthcheckPath: /health` on backend-api so Railway's own
-      deploy-readiness check now confirms real DB connectivity, not just
-      "the process started." Full details in `docs/architecture.md`'s new
-      "Deploy (as built)" section. `ingestion-worker` is intentionally
-      still undeployed — that's the one remaining Phase 5 item. Confirmed
-      working end-to-end in the browser on the live URLs — login through
-      real team/player data, same as every other feature.)*
+- [ ] Schema / DB setup
+- [ ] Seed data
+- [ ] Core API routes
+- [ ] Historical data backfill
+- [ ] Frontend scaffold
+- [ ] Features (list TBD)
+- [ ] Ingestion worker automation
+- [ ] Deploy
 
 **Checkpoint after each feature:** Does it still match the system design? Any drift?
 
@@ -441,135 +244,24 @@ is actually built, not as it's planned.)*
 ## Phase 6 — Hardening Pass
 *This is what separates a demo from a portfolio app. Don't skip it.*
 
-- [x] Error handling on all API calls (try/catch, user-facing error states)
-      *(Audited, not newly built — this fell out of how Phase 5 was
-      structured. Backend: every route handler in `backend/routes/*.js`
-      has its own try/catch returning a JSON `{error}` body with the right
-      status code, plus a global fallback handler in `backend/server.js`
-      so an uncaught bug never reaches a client as a raw stack trace.
-      Frontend: every data-backed screen goes through `useApiFetch` or
-      `useStatsQuery`, which centralize try/catch, `AuthError`
-      handling (session-expired -> bounce to `/login`), and surface
-      everything else through the shared `AsyncState` component. Two real
-      gaps found and fixed while reviewing this: `POST /query` returned a
-      generic 500 for a malformed player id or a non-numeric `season`
-      instead of a clean 404/400 like `/players/:id` already did for the
-      same class of input — fixed and confirmed live via a real
-      unauthenticated-shape request through the browser's own session
-      (`entity_id: "not-a-uuid"` -> 404 "player not found"; `season:
-      "abc"` -> 400 "season must be a 4-digit year").)*
-- [x] Loading states (skeleton loaders or spinners where data is async)
-      *(Every data screen shows a loading message via `AsyncState`
-      (Team/Player browse and detail) while `POST /query` is in flight
-      (Player detail's stat views); `LoginPage` has its own `submitting`
-      state disabling the button and swapping its label to "Signing in…".
-      Found and fixed two real bugs while stress-testing this — see
-      "Console errors cleared" below; both were really loading-state bugs
-      wearing a different hat.)*
-- [x] Empty states (what does the UI show with no data?)
-      *(Done in Phase 5 Feature 6 — scenario-aware messages for
-      rookie/no-history, an active split with zero results, an
-      unplayed 2026 week, and "not on a roster that season"; Team/Player
-      browse have generic "no results" states from Features 1-2. Verified
-      live again during this pass, e.g. Aaron Donald (retired) correctly
-      shows "No recorded games for Aaron Donald in 2025 — they may not
-      have been on an NFL roster that season" rather than an empty grid.)*
-- [x] Input validation (client-side + server-side)
-      *(Server-side was already solid — `POST /query` validates
-      `entity_type`/`scope`/`season`/`splits.*` against explicit allow-lists,
-      `/players` validates `position_group`, `/teams/:id` validates a
-      numeric id, `/login` requires both fields. Closed the one real gap:
-      `season` wasn't checked to actually be a 4-digit year, so a
-      non-numeric value reached Postgres as a raw type-cast error and
-      surfaced as a 500 — now a clean 400 before the query ever runs (see
-      above). Client-side: `LoginPage`'s fields are `required`; every
-      other input is a fixed dropdown/tab, not free text, so there's
-      nothing else to malform.)*
-- [x] Environment variables (no API keys in code, no `.env` committed)
-      *(Confirmed clean: `.env` is gitignored at the repo root (the bare
-      `.env` pattern applies recursively, so `frontend/.env` and
-      `worker/.env` are covered too), `.env.example` only has placeholder
-      text, `JWT_SECRET`/`DATABASE_URL`/`CORS_ORIGIN` are all read from
-      `process.env` with no hardcoded fallback secrets, and
-      `backend/auth.js` fails loudly at startup if `JWT_SECRET` is unset
-      rather than silently signing tokens with `undefined`. Grepped the
-      whole repo (`*.js`, `*.jsx`, excluding `.env.example`) for
-      connection strings/API-key-shaped literals — zero hits.)*
-- [x] Basic auth/access control review (nothing exposed that shouldn't be)
-      *(`authenticate` middleware gates every route except `/health`,
-      `/login`, `/refresh`, `/logout` — confirmed by reading
-      `backend/server.js`'s route registration order. CORS is a real
-      allow-list (`CORS_ORIGIN`), never `'*'`. Closed one real gap:
-      `backend/auth.js`'s own comment said a replayed (already-rotated)
-      refresh token should be treated as a compromise signal and revoke
-      the whole session — but the code only ever rejected the one
-      request. Now it actually does what the comment said: presenting an
-      already-used refresh token revokes every refresh token that user
-      currently holds, not just the one presented. Reviewed and
-      *deliberately left alone*: tokens are still returned in the JSON
-      body rather than an httpOnly cookie — that's an accepted MVP
-      tradeoff already called out in `backend/routes/auth.js`'s own
-      header comment, and changing it is a bigger scope decision (affects
-      the future Swift app's auth model too) than a hardening-pass fix.)*
-- [x] Mobile responsiveness check (even if it's a "desktop app")
-      *(Verified live on the deployed app at a 390×844 viewport (iPhone-class
-      width) across Teams, Team Detail, Player Browse, and Player Detail —
-      nav bar, filters, stat grid, and empty states all reflow to a single
-      column cleanly with nothing clipped or overlapping. No changes
-      needed; the existing Tailwind classes (`flex-wrap`, responsive
-      `sm:grid-cols-2`, `overflow-x-auto` on the game log table) already
-      covered this.)*
-- [x] Console errors cleared
-      *(Went in expecting a clean report and found a real, reproducible
-      crash instead: clicking the **Game Log** tab on any player detail
-      page whited out the entire app with `TypeError: e.map is not a
-      function`. Root cause — switching `scope` re-renders
-      `PlayerDetailPage` with the new scope *before* `useStatsQuery`'s
-      effect has run, so for one render the page tries to `.map()` over
-      the *previous* scope's plain-object stats as if it were the new
-      scope's array of game rows, with no error boundary to catch it.
-      Fixed by having `useStatsQuery`/`useApiFetch` track which query
-      their `data` actually corresponds to (via state set only inside
-      `refetch()`, not a ref touched during render — oxlint's
-      `react(refs)` rule caught that first attempt) and reporting
-      `loading: true` for any render where the current data is stale.
-      Stress-testing *that* fix by rapid-clicking through all four scope
-      tabs surfaced a second, related bug: overlapping in-flight requests
-      with no cancellation meant an out-of-order response could
-      permanently overwrite the correct state, leaving the UI stuck on
-      "Loading stats…" forever. Fixed by tracking the most-recently-started
-      request and ignoring any response that's been superseded by the time
-      it resolves. Both fixes verified live post-deploy: single click on
-      Game Log (real data renders, no crash), and two separate rapid
-      4-click sequences in different orders (both settle correctly on the
-      actually-last-clicked tab with correct, matching data, no stuck
-      loading, clean console throughout).)*
-
-**Phase 6 complete.**
+- [ ] Error handling on all API calls (try/catch, user-facing error states)
+- [ ] Loading states (skeleton loaders or spinners where data is async)
+- [ ] Empty states (what does the UI show with no data?)
+- [ ] Input validation (client-side + server-side)
+- [ ] Environment variables (no API keys in code, no `.env` committed)
+- [ ] Basic auth/access control review (nothing exposed that shouldn't be)
+- [ ] Mobile responsiveness check (even if it's a "desktop app")
+- [ ] Console errors cleared
 
 ---
 
 ## Phase 7 — Portfolio Packaging
 *An unpackaged app is invisible to recruiters and collaborators.*
 
-- [x] **README.md**
-  - Written at repo root: what it is (framed around the real long-term
-    goal — a data layer a team of AI agents will query to help make
-    "smarter bets," not just a stats browser), a tech-stack table with a
-    one-line rationale per choice, step-by-step local setup (schema →
-    seed → historical backfill → test user → backend → frontend), both
-    live URLs, 4 real screenshots taken live off the deployed app (Teams,
-    a team roster, a player's season averages, and a player's game log —
-    the exact screen that had the Phase 6 crash, now working), and an
-    honest Known Limitations section (stubbed ingestion jobs, no test
-    suite, no rate limiting, refresh tokens in localStorage, no signup
-    flow, the NL-search/AI-agent layer being designed-not-built, no iOS
-    yet, no sportsbook odds).
-- [x] **Deployed** — all 3 Railway services (`backend-api`, `web`,
-      `ingestion-worker`) confirmed live; URLs in the README.
-- [ ] **Loom or screen recording** — not done. Optional, skipping for now.
-- [x] **Can you explain it in 2 minutes?** — see Architect's Gut Check
-      below; answered for real rather than left as a practice prompt.
+- [ ] **README.md** — what it is, stack, setup, live URL, screenshots, known limitations
+- [ ] **Deployed** — live URL
+- [ ] **Loom or screen recording** (optional)
+- [ ] **Can you explain it in 2 minutes?**
 
 ---
 
@@ -577,59 +269,11 @@ is actually built, not as it's planned.)*
 
 Answer these. If you stumble on any, go back.
 
-1. **Why did you choose this stack over alternatives?** Node/Express on
-   both the API and the ingestion worker so the whole backend is one
-   language, matching the sibling Chalk That MLB app rather than
-   introducing a second stack to context-switch between. Postgres over a
-   document store because the data is genuinely relational — players,
-   games, and four different `*_game_stats` tables all joined by foreign
-   key — and a `WHERE`/`JOIN` is the natural way to express "Mahomes,
-   home games, snow, 2024 season" rather than something to fight around.
-   React + Vite + plain JS (not TypeScript) to match the plain-JS backend.
-   Railway over something like Vercel+a separate DB host because one
-   project holding 3 services plus managed Postgres/Redis, all on the
-   same private network, meant no juggling connection strings across
-   providers.
-2. **What's the hardest technical problem you solved?** Not a backend
-   problem — a React render-timing race in the shared `useApiFetch`/
-   `useStatsQuery` hooks. Switching the Player page's scope tab from
-   "Season Avg" to "Game Log" changed what *shape* of data the render
-   expected (object vs. array) one render before the effect that would
-   have refetched it had run, so for one frame the hook was still
-   returning the old shape and `rows.map(...)` threw on a plain object —
-   whited out the whole app, with no error boundary to catch it. It only
-   showed up under live stress-testing, not code review. The fix — a
-   `useState`-tracked "which key does this data actually belong to" flag
-   computed during render, plus a *separate* ref (written only from a
-   dependency-less effect, never during render) to catch a second,
-   related out-of-order-response race — is now documented in
-   `docs/architecture.md` §4.7 as a general pattern, not a one-off patch.
-3. **What would you do differently if you rebuilt it?** Add a real
-   automated test suite from day one instead of relying on manual
-   dry-runs and live browser stress-testing — the Game Log bug above was
-   *found* that way, but a regression test would have caught it
-   automatically on every future change instead of needing another
-   deliberate stress-testing pass. I'd also lock in the current-season
-   live-stats vendor earlier — it's been "parked" since Phase 2 and three
-   ingestion jobs are still stubs waiting on it.
-4. **What breaks first under load or edge cases?** `/login` and
-   `/refresh` have no rate limiting — flagged explicitly in the Phase 6
-   hardening pass and deliberately deferred, and it's the honest answer
-   to "what's weakest under abuse." Under normal load, the Redis cache in
-   front of the query engine is what keeps repeat `/query` calls cheap;
-   without it (or if Redis went down), every request would recompute an
-   aggregate query against `*_game_stats` directly — correct, just
-   slower, no cached fast path.
-5. **If a junior dev joined, could they navigate the codebase in 30
-   min?** Yes, and it's been stress-tested in a real sense already —
-   every design decision that isn't obvious from the code itself
-   (why ingestion is a separate service, why `/query` is one endpoint for
-   every scope, why the stale-key pattern exists in the shared hooks) is
-   written down in `docs/architecture.md`, organized by whether it's a
-   reusable platform pattern or an NFL-specific choice. `docs/
-   vibe-coding-checklist.md` has the phase-by-phase build log with real
-   bugs and fixes, for the "why does this look like this" questions the
-   architecture doc doesn't answer.
+1. **Why did you choose this stack over alternatives?**
+2. **What's the hardest technical problem you solved?**
+3. **What would you do differently if you rebuilt it?**
+4. **What breaks first under load or edge cases?**
+5. **If a junior dev joined, could they navigate the codebase in 30 min?**
 
 ---
 
@@ -638,14 +282,11 @@ Answer these. If you stumble on any, go back.
 
 | Date | What I built | Decision made | Why |
 |------|-------------|---------------|-----|
-| Phase 1-2 | Vision, platform-vs-NFL-specific split, schema design | Independent canonical player IDs + a crosswalk table, instead of anchoring to one vendor's IDs | Mirrors the real-world Chadwick Bureau Register pattern for baseball; makes swapping/adding a data vendor a data change, not a schema migration |
-| Phase 3-4 | Screen inventory, `/query` API contract, situational splits scope | One shared query engine (`POST /query`) for every client, no separate endpoints per screen | The same endpoint has to work for a human clicking filters today and an AI agent calling it directly later — never two parallel APIs |
-| Phase 5 | Schema live on Railway Postgres/Redis, `scripts/seed.js`, Core API routes, `scripts/backfill-historical.js`, React frontend scaffold + 5 features wired to real data, both services deployed | Historical backfill uses `ON CONFLICT DO NOTHING` (one-time), not the incremental upsert the worker uses | A one-time load shouldn't silently overwrite anything; correctness first, speed of the actual sync loop is the worker's job |
-| Phase 5 | Found and fixed the nflverse `'LA'` vs `'LAR'` team-abbreviation mismatch that was silently dropping 112 Rams games and cascading into a full-season rollback | Added an alias-normalization step wherever an nflverse abbreviation is looked up, documented in `docs/architecture.md` §3 | A one-line data quirk that would otherwise re-break the ingestion worker the same way later |
-| Phase 5 | Ingestion worker automation — real scheduling for all 4 shapes, 3 of 6 jobs fully real (nflverse-sourced), 3 left as honest stubs | Worker always targets the *current* season and upserts (`ON CONFLICT DO UPDATE`), unlike the one-time backfill | Scores/statuses/flex-schedule times need to actually update on a re-run, not just insert once |
-| Phase 6 | Full hardening pass: input validation on `POST /query`, refresh-token replay → cascade revoke in `auth.js`, mobile responsiveness check, env var audit | Replaying an already-rotated refresh token now revokes every session for that user, not just the one request | Replay of a rotated token is a real theft signal, not an ordinary expired-token case |
-| Phase 6 | Found (via my own live stress-testing, not a bug report) and fixed a production-crashing render race in the Game Log tab, plus a related out-of-order-response stuck-loading bug | `useState`-based staleness check computed during render + a ref written only from an effect, never during render | The crash happens in the render itself, before any effect runs — no amount of clearing data inside an effect can prevent it |
-| Phase 7 | README.md, live screenshots, Architect's Gut Check answered for real, this log filled in | Framed the README's "what it is" around the actual long-term goal (an AI-agent-queryable data layer for betting research), not just "a stats browser" | The portfolio packaging should represent where the project is actually headed, not just where Part 1 currently stops |
+| 2026-09-26 | Phase 4: clickable mockup of all 8 screens on real data | Landing page = Scoreboard; login = plain sign-in card; Last-N applies after splits | Building the mock on real data surfaced the Last-N/split ordering question before any query-engine code existed |
+| 2026-09-26 | Phase 3 scope | Added Scoreboard + Box Score screens; leaderboard qualifier = 70% of team games; season-type selector (Regular default); Active toggle on player search (default on) | NBA fans think in games/nights; a qualifier keeps 1-game outliers off leaderboards; mixing playoff and regular stats silently would be wrong numbers |
+| 2026-09-26 | `db/schema.sql` + `db/tests/schema_constraints.sql` | Split tags live on a per-team `team_games` row, not on `games`; stat-consistency CHECKs enforced at write time | Rest/back-to-back differ between the two teams in one game; the CHECKs passed against 52K real NBA.com rows, so any violation later is an ingestion bug worth failing loudly on |
+| 2026-09-26 | Phase 1 decisions | Trend windows: last 5 AND last 10 (not NFL's last-5 only); backfill depth: 1996-97 onward | 82-game season makes 5 games a thin sample; 1996-97 is where NBA.com box scores gain +/- and it covers every active career (LeBron 2003-04: 79 games, verified) |
+| 2026-09-26 | Vendor dry-run #1 (NBA.com via browser, Railway probe) | Ingestion worker calls stats.nba.com / cdn.nba.com directly from Node — no Python `nba_api` dependency | Keeps PLATFORM.md's one-language backend; `nba_api` is only a header wrapper around these endpoints |
 
 ---
 

@@ -62,3 +62,20 @@ test('malformed JSON body -> 400, not 500', async () => {
   const r = await fetch(s.base + '/query', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${s.login.access_token}` }, body: '{nope' });
   assert.equal(r.status, 400);
 });
+
+test('security headers on every API response', async () => {
+  const r = await fetch(s.base + '/health');
+  assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(r.headers.get('cache-control'), 'no-store');
+  assert.equal(r.headers.get('x-powered-by'), null);
+});
+
+// Keep this LAST in the file: it locks this test user out for 15 minutes.
+test('brute force: 10 wrong passwords for one account -> 429 (even for the right password), other accounts unaffected', async () => {
+  for (let i = 0; i < 10; i++) assert.equal((await post('/login', { username: s.username, password: `guess-${i}` })).status, 401);
+  const locked = await post('/login', { username: s.username, password: s.password });
+  assert.equal(locked.status, 429);
+  assert.ok(Number(locked.headers.get('retry-after')) > 0);
+  assert.equal((await post('/login', { username: 'someone_else', password: 'x' })).status, 401, 'a different account is not locked');
+  assert.equal((await post('/login', { username: 'a'.repeat(101), password: 'x' })).status, 400);
+});

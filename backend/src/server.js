@@ -14,6 +14,12 @@ export function createApp({ db, cache, corsOrigins = (process.env.CORS_ORIGIN ??
   jwtSecret(); // fail fast at startup if unset
   const app = express();
   app.disable('x-powered-by');
+  app.set('trust proxy', 1);                       // Railway's edge proxy: req.ip = the real client (rate limits)
+  app.use((_req, res, next) => {                   // API-only security headers (no HTML served here)
+    res.set({ 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer',
+      'cache-control': 'no-store', 'strict-transport-security': 'max-age=31536000' });
+    next();
+  });
   app.use(cors({ origin: corsOrigins, credentials: false })); // allow-list, never '*'
   app.use(express.json({ limit: '32kb' }));
 

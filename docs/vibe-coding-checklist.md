@@ -303,7 +303,7 @@ each is actually built, not as it's planned.)*
       `main` (all SUCCESS). Verified from the browser: web serves deep links,
       unauthenticated API calls get 401, CORS allows only the web domain,
       worker's first run logged (quota 7,466/7,500).*
-- [ ] Phase 6 hardening
+- [x] Phase 6 hardening (see Phase 6 section)
 
 **Checkpoint after each feature:** Does it still match the system design? Any drift?
 
@@ -312,14 +312,31 @@ each is actually built, not as it's planned.)*
 ## Phase 6 — Hardening Pass
 *This is what separates a demo from a portfolio app. Don't skip it.*
 
-- [ ] Error handling on all API calls (try/catch, user-facing error states)
-- [ ] Loading states (skeleton loaders or spinners where data is async)
-- [ ] Empty states (what does the UI show with no data?)
-- [ ] Input validation (client-side + server-side)
-- [ ] Environment variables (no API keys in code, no `.env` committed)
-- [ ] Basic auth/access control review (nothing exposed that shouldn't be)
-- [ ] Mobile responsiveness check (even if it's a "desktop app")
-- [ ] Console errors cleared
+- [x] Error handling on all API calls (try/catch, user-facing error states) — *every
+      fetch goes through `useFetch` -> ErrorBox (404 / 5xx / offline / retry);
+      render crashes caught by an ErrorBoundary per route; backend error
+      handler never leaks stacks; API-key lookup failures are a 500, not an
+      unhandled rejection; worker logs and keeps looping.*
+- [x] Loading states — *every async screen shows a status block while loading.*
+- [x] Empty states — *scoreboard empty days (links to nearest game days),
+      no matching splits, empty roster/leaders, no search results, preview games.*
+- [x] Input validation (client-side + server-side) — */query `validate()`, id/date/
+      season checks on every browse route, search capped at 80 chars, login
+      field lengths, 32 kb body limit; Postgres statement timeout 15 s.*
+- [x] Environment variables (no API keys in code, no `.env` committed) — *checked
+      tracked files + full git history: only `.env.example` (empty values).*
+- [x] Basic auth/access control review — *everything but /health, /login,
+      /refresh, /logout needs a JWT or API key; JWT alg pinned to HS256;
+      login + refresh brute-force limit (10 failures per account / 30 per IP
+      per 15 min -> 429); security headers + no-store on the API; CORS
+      allow-list; `create-user` rejects weak passwords (12+ chars, no
+      "password"/"123456", not the username). Known limits: rate limit is
+      in-memory (one replica, resets on deploy); Postgres has a public TCP
+      proxy for the Mac scripts (strong generated password).*
+- [x] Mobile responsiveness check — *all 8 screens checked at 390 px (Playwright):
+      nav wraps, tables scroll with a sticky name column, splits fold away.*
+- [x] Console errors cleared — *no errors in the Playwright runs or on the live
+      site (only the expected 401 when a wrong password is typed).*
 
 ---
 
@@ -350,6 +367,7 @@ Answer these. If you stumble on any, go back.
 
 | Date | What I built | Decision made | Why |
 |------|-------------|---------------|-----|
+| 2026-09-27 | Phase 6 hardening | Brute-force limit counts failures only, per account and per IP; weak passwords refused at account creation | The site is public: stop password guessing without ever slowing down normal users |
 | 2026-09-27 | Deployed to Railway | Web served by a zero-dependency Node server instead of `vite preview`; build tools as regular dependencies | Nothing dev-only in production, and deep links like /players/:id work on refresh |
 | 2026-09-27 | Ingestion worker | Scores every 5 min during game windows, box scores at final + one 3h re-check; unknown players created only when nobody similar exists; NBA.com reconciles weekly | Stays well inside the Highlightly quota; a wrong player link is worse than a delayed one; NBA.com is the source we verified, so it gets the last word |
 | 2026-09-27 | Frontend slice 2 (Teams, Players, Player/Team detail, Leaders) | Player pages default to the player's own rest (NBA.com's definition) with a one-tap switch to the team's schedule; filters live in the URL | "Offer both" without doubling the filter rows; URL state makes any split view shareable and keeps Back working |

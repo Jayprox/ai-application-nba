@@ -17,7 +17,9 @@ export default function Login() {
     setBusy(true); setError(null);
     try { await login(username.trim(), password); }
     catch (err) {
-      setError(err.status === 401 ? 'Wrong username or password.' : err.status ? 'Sign-in failed. Try again.' : "Can't reach the server.");
+      setError(err.status === 401 ? 'Wrong username or password.'
+        : err.status === 429 ? 'Too many failed attempts. Wait 15 minutes, then try again.'
+        : err.status ? 'Sign-in failed. Try again.' : "Can't reach the server.");
       setBusy(false);
     }
   }

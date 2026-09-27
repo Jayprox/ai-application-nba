@@ -58,6 +58,7 @@ export function browseRoutes(db, { currentSeason = '2026-27' } = {}) {
   // Name search is accent/suffix/punctuation tolerant ("jokic", "cook", "pj").
   r.get('/players', wrap(async (req, res) => {
     const q = String(req.query.q ?? '').trim();
+    if (q.length > 80) return res.status(400).json({ error: 'q is too long (80 characters max)' });
     const active = req.query.active !== 'false';
     const team = req.query.team;
     if (team !== undefined && !/^\d+$/.test(String(team))) return res.status(400).json({ error: 'team must be a team id' });

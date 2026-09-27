@@ -65,7 +65,7 @@ export function authenticate(db) {
     const h = req.get('authorization') ?? '';
     if (h.startsWith('Bearer ')) {
       try {
-        const p = jwt.verify(h.slice(7), jwtSecret());
+        const p = jwt.verify(h.slice(7), jwtSecret(), { algorithms: ['HS256'] });
         req.principal = { kind: 'user', id: p.sub, name: p.name };
         return next();
       } catch (e) {
@@ -74,11 +74,13 @@ export function authenticate(db) {
     }
     const key = req.get('x-api-key');
     if (key) {
-      const { rows: [k] } = await db.query('SELECT id, name FROM api_keys WHERE key_hash = $1 AND revoked_at IS NULL', [sha256(key)]);
-      if (!k) return res.status(401).json({ error: 'invalid_api_key' });
-      db.query('UPDATE api_keys SET last_used_at = now() WHERE id = $1', [k.id]).catch(() => {});
-      req.principal = { kind: 'agent', id: k.id, name: k.name };
-      return next();
+      try {
+        const { rows: [k] } = await db.query('SELECT id, name FROM api_keys WHERE key_hash = $1 AND revoked_at IS NULL', [sha256(key)]);
+        if (!k) return res.status(401).json({ error: 'invalid_api_key' });
+        db.query('UPDATE api_keys SET last_used_at = now() WHERE id = $1', [k.id]).catch(() => {});
+        req.principal = { kind: 'agent', id: k.id, name: k.name };
+        return next();
+      } catch (e) { return next(e); }   // a DB hiccup is a 500, never an unhandled rejection
     }
     return res.status(401).json({ error: 'authentication_required' });
   };

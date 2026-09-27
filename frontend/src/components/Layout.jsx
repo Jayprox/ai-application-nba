@@ -1,4 +1,5 @@
-import { NavLink, Outlet, useNavigate } from 'react-router';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
+import ErrorBoundary from './ErrorBoundary.jsx';
 import { useAuth } from '../lib/auth.jsx';
 
 const LINKS = [['/', 'Scoreboard'], ['/teams', 'Teams'], ['/players', 'Players'], ['/leaders', 'Leaders']];
@@ -8,6 +9,7 @@ const link = ({ isActive }) =>
 export default function Layout() {
   const { logout } = useAuth();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   return (
     <div className="min-h-dvh">
       <header className="bg-ink">
@@ -25,7 +27,7 @@ export default function Layout() {
         </nav>
       </header>
       <main className="mx-auto flex max-w-[1280px] flex-col gap-6 px-4 py-6 sm:px-10 sm:py-8">
-        <Outlet />
+        <ErrorBoundary key={pathname}><Outlet /></ErrorBoundary>
       </main>
     </div>
   );

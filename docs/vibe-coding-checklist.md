@@ -346,8 +346,8 @@ each is actually built, not as it's planned.)*
 - [x] **README.md** — what it is, stack, setup, live URL, screenshots, known limitations
       — *root README: features, NBA.com-verified numbers, architecture
       diagram (Mermaid), stack, layout, local setup, data operations, tests,
-      API example, limitations.* **Screenshots: JD to add 4 PNGs to
-      `docs/screenshots/` (names listed there).**
+      API example, limitations. Screenshots from the live site in
+      `docs/screenshots/` (scoreboard, player detail, box score, leaders).*
 - [x] **Deployed** — live URL: https://web-production-081bcf.up.railway.app
 - [ ] **Loom or screen recording** (optional)
 - [x] **Can you explain it in 2 minutes?** — *draft below, in JD's words to adjust.*

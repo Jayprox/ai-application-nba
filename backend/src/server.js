@@ -9,6 +9,7 @@ import { authenticate, jwtSecret } from './auth.js';
 import { authRoutes } from './routes/auth.js';
 import { queryRoutes } from './routes/query.js';
 import { browseRoutes } from './routes/browse.js';
+import { leagueRoutes } from './routes/league.js';
 
 export function createApp({ db, cache, corsOrigins = (process.env.CORS_ORIGIN ?? 'http://localhost:5173').split(',').map((s) => s.trim()), currentSeason = process.env.CURRENT_SEASON ?? '2026-27' }) {
   jwtSecret(); // fail fast at startup if unset
@@ -31,6 +32,7 @@ export function createApp({ db, cache, corsOrigins = (process.env.CORS_ORIGIN ??
   app.use(authenticate(db));                       // everything below needs JWT or API key
   app.use(queryRoutes(db, cache, { currentSeason }));
   app.use(browseRoutes(db, { currentSeason }));
+  app.use(leagueRoutes(db));
 
   app.use((_req, res) => res.status(404).json({ error: 'not found' }));
   app.use((err, _req, res, _next) => {             // never leak stack traces

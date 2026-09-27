@@ -9,6 +9,7 @@ import TeamDetail from './pages/TeamDetail.jsx';
 import Players from './pages/Players.jsx';
 import PlayerDetail from './pages/PlayerDetail.jsx';
 import Leaders from './pages/Leaders.jsx';
+import Standings from './pages/Standings.jsx';
 import NotFound from './pages/NotFound.jsx';
 
 export default function App() {
@@ -25,6 +26,7 @@ export default function App() {
             <Route path="players" element={<Players />} />
             <Route path="players/:id" element={<PlayerDetail />} />
             <Route path="leaders" element={<Leaders />} />
+            <Route path="standings" element={<Standings />} />
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>

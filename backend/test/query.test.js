@@ -147,6 +147,25 @@ test('Jokić 2025-26 = NBA.com (65 GP, 27.7 PPG) and Dončić leads scoring (33.
   assert.deepEqual([lb.body.data[0].full_name, lb.body.data[0].value, lb.body.data[0].gp], ['Luka Dončić', 33.5, 64]);
 });
 
+test('advanced stats = NBA.com: TS% / eFG% (LeBron 2003-04 .488 / .438, Morant 2019-20 .556 / .509)', async () => {
+  const l = (await q(lebron, 'season', '2003-04')).body.data;
+  assert.equal(l.ts_pct, 0.488); assert.equal(l.efg_pct, 0.438);
+  const m = (await q(morant, 'season', '2019-20')).body.data;
+  assert.equal(m.ts_pct, 0.556); assert.equal(m.efg_pct, 0.509);
+  assert.ok(Math.abs(m.pts_per36 - 20.7) <= 0.1, `Morant pts/36 ${m.pts_per36} vs NBA.com 20.7`);
+  const c = (await s.query({ entity: 'player', id: lebron, scope: 'career' })).body.data;
+  assert.equal(c.by_season.find((x) => x.season === '2003-04').ts_pct, 0.488, 'career rows carry it too');
+});
+
+test('team ratings: points per 100 estimated possessions; NBA Cup is a season type (not for leaderboards)', async () => {
+  const { rows: [t] } = await s.db.query("SELECT id FROM teams WHERE abbreviation = 'CLE'");
+  const r = (await s.query({ entity: 'team', id: t.id, scope: 'season', season: '2003-04' })).body.data;
+  assert.ok(r.off_rtg > 85 && r.off_rtg < 125 && r.def_rtg > 85 && r.def_rtg < 125, JSON.stringify(r));
+  const cup = await q(lebron, 'season', '2003-04', {}, { season_type: 'cup' });
+  assert.equal(cup.status, 200);
+  assert.equal(cup.body.meta.sample_size, 0, 'no NBA Cup before 2023-24');
+});
+
 test('validation: clean 400/404s, never a 500', async () => {
   const cases = [
     [{ scope: 'nope', id: lebron, season: '2003-04' }, 400],
@@ -160,6 +179,7 @@ test('validation: clean 400/404s, never a 500', async () => {
     [{ scope: 'leaderboard', season: '2003-04', stat: 'fg_pct' }, 400],
     [{ scope: 'leaderboard', season: '2003-04', splits: { venue: 'home' } }, 400],
     [{ entity: 'team', id: 1, season: '2003-04', splits: { player_rest: 0 } }, 400],
+    [{ scope: 'leaderboard', season: '2003-04', season_type: 'cup' }, 400],
   ];
   for (const [body, status] of cases) assert.equal((await s.query(body)).status, status, JSON.stringify(body));
 });

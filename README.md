@@ -25,6 +25,9 @@ The second app on the Chalk That platform, after [Chalk That NFL](https://github
 - **Rest two ways:** measured from the player's own games (NBA.com's definition, so a player back from injury is rested) or from the team's schedule.
 - **Scopes:** season average, last 5, last 10, career, game log. Splits apply before the window, so *Last 10 + Away* means his last 10 road games.
 - **Leaderboards** with a stated qualifier: played in 70% of team games.
+- **Standings and playoff bracket** for every season: records computed live from games, ranked by NBA.com's official standings (tiebreakers included).
+- **Efficiency stats:** TS%, eFG%, free-throw rate and per-36 numbers for players; offensive/defensive rating for teams.
+- **NBA Cup** as its own season type (2023-24 on).
 - **One query API** (`POST /query`) serves the web app today and AI agents tomorrow (API-key auth).
 
 ### Verified against NBA.com
@@ -39,6 +42,7 @@ The test suite pins real published numbers, not hand-made fixtures:
 | Nikola Jokić 2025-26 | 65 GP, 27.7 PPG |
 | 2025-26 scoring leader | Luka Dončić, 33.5 PPG in 64 games |
 | Every team's W-L, every season | Equals NBA.com standings (checked on every load) |
+| TS% / eFG% (LeBron 2003-04, Morant 2019-20) | .488 / .438 and .556 / .509, same as NBA.com |
 
 Matching the rest splits exactly meant learning NBA.com's own rules. A season opener's rest counts from the last preseason game. The 2020 bubble scrimmages count too. The 2007-08 Heat–Hawks game, replayed after the Shaq/Marion trade, puts Shawn Marion in two games on one date.
 
@@ -83,7 +87,7 @@ Full decisions and trade-offs: [`docs/architecture.md`](docs/architecture.md). B
 | Data | Postgres 18: 14 tables, CHECK constraints that reject impossible stat lines at write time |
 | Ingestion | Standalone Node worker (Highlightly), planner-driven polling |
 | Hosting | Railway: `backend-api`, `web`, `ingestion-worker`, Postgres, Redis |
-| Tests | `node:test` (backend, worker, scripts) and Vitest + Testing Library (frontend): 91 tests |
+| Tests | `node:test` (backend, worker, scripts) and Vitest + Testing Library (frontend): 101 tests |
 
 ## Repo layout
 
@@ -112,6 +116,7 @@ npm run db:apply
 npm run db:seed
 npm run db:backfill -- --season 2025-26
 npm run db:schedule
+npm run db:standings
 
 cd backend
 npm install
@@ -131,6 +136,7 @@ Fill in `DATABASE_PUBLIC_URL` and `HIGHLIGHTLY_API_KEY` in `.env` before running
 |---|---|
 | Weekly during the season | `npm run db:backfill -- --season 2026-27`: NBA.com overwrites live data and reports any rows that differed |
 | NBA changes the schedule (Cup knockouts, postponements) | `npm run db:schedule` |
+| Official standings rank (also written by the backfill) | `npm run db:standings` |
 | One-off live sync for a date | `cd worker && npm run sync -- --date 2026-10-21` |
 | Health check | `npm run db:status`: row counts, failed runs, Highlightly quota, players waiting for review |
 
@@ -144,7 +150,7 @@ cd frontend && npm test
 ```
 
 - **Repo root:** names, tagging and rest rules.
-- **backend:** 33 tests, including the NBA.com number checks.
+- **backend:** 39 tests, including the NBA.com number checks.
 - **worker:** mapping and polling planner. Add `WORKER_TEST_DATABASE_URL` pointing at a local test database to also run the end-to-end sync.
 - **frontend:** fetch-hook race conditions, token refresh, filter-to-query mapping.
 
@@ -167,4 +173,4 @@ Returns the averages plus `meta`: sample size, W-L in those games, the filters a
 - **NBA.com blocks cloud IPs,** so the historical loads and the weekly reconcile run from a laptop.
 - **Injuries aren't shown yet.** The source is still being evaluated against real preseason data.
 - **The sign-in lockout is in memory:** one backend instance, and it resets on redeploy.
-- **Railway doesn't always redeploy on `git push`;** reconnecting the service's source forces a fresh build.
+- **Auto-deploy needs the Railway GitHub App** installed on the repo; without it, reconnecting a service's source forces a fresh build.

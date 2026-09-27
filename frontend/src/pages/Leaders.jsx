@@ -7,8 +7,8 @@ import { PageTitle, Pills, Select, Tabs } from '../components/Controls.jsx';
 import { Empty, ErrorBox, Loading } from '../components/States.jsx';
 
 const STATS = [['pts', 'Points'], ['reb', 'Rebounds'], ['ast', 'Assists'], ['fg3m', '3-pointers'], ['stl', 'Steals'], ['blk', 'Blocks']];
-// The leaderboard scope has no play-in option: too few games to rank.
-const TYPES = SEASON_TYPE_OPTIONS.filter(([v]) => v !== 'play_in');
+// The leaderboard scope has no play-in or Cup option: too few games to rank.
+const TYPES = SEASON_TYPE_OPTIONS.filter(([v]) => v !== 'play_in' && v !== 'cup');
 
 export default function Leaders() {
   const [params, setParams] = useSearchParams();

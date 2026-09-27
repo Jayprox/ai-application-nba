@@ -152,11 +152,12 @@ The Odds API — free 500 credits/mo; paid from $30/mo. Fast-follow only.
   - Everything in Part 2's fast-follow: player props (The Odds API),
     composite position rankings, matchup-insight splits, team-unit
     offense/defense rankings
-  - NBA Cup split filter (Cup stage is stored, just not filterable)
+  - ~~NBA Cup split filter~~ — *done 2026-09-27: "NBA Cup" season type.*
   - Swift iOS app (same API, later)
   - Natural-language search bar
-  - Standings page, playoff bracket *view* (bracket is in the schema)
-  - User-adjustable leaderboard qualifier; advanced stats (TS%, usage…)
+  - ~~Standings page, playoff bracket view~~ — *done 2026-09-27.*
+  - User-adjustable leaderboard qualifier; usage rate (needs team possessions per player);
+    ~~advanced stats (TS%, eFG%, per-36, ratings)~~ — *done 2026-09-27.*
   - Self-serve signup / email verification
 - [x] **Success metric** — How will you know v1 is shippable?
   A user can look up any NBA team, player, or game and see numbers that
@@ -421,6 +422,7 @@ Answer these. If you stumble on any, go back.
 
 | Date | What I built | Decision made | Why |
 |------|-------------|---------------|-----|
+| 2026-09-27 | Backlog: standings + bracket, advanced stats, NBA Cup filter, auto-deploy diagnosis | Standings computed live but ranked by NBA.com's stored official rank; advanced stats from season sums | Tiebreakers are the league's call, not ours; sums (not averages of percentages) are how NBA.com computes TS%/eFG%, and the tests prove the match |
 | 2026-09-27 | Phase 7: README, pitch, gut-check drafts | README leads with NBA.com-verified numbers | Trust is the product: showing the checks is the fastest way to earn it |
 | 2026-09-27 | Phase 6 hardening | Brute-force limit counts failures only, per account and per IP; weak passwords refused at account creation | The site is public: stop password guessing without ever slowing down normal users |
 | 2026-09-27 | Deployed to Railway | Web served by a zero-dependency Node server instead of `vite preview`; build tools as regular dependencies | Nothing dev-only in production, and deep links like /players/:id work on refresh |

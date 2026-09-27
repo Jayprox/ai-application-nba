@@ -6,4 +6,4 @@ export function useSeasons() {
   return useFetch('seasons', (signal) => api('/seasons', { signal }));
 }
 
-export const SEASON_TYPE_OPTIONS = [['regular', 'Regular'], ['play_in', 'Play-In'], ['playoffs', 'Playoffs'], ['all', 'All']];
+export const SEASON_TYPE_OPTIONS = [['regular', 'Regular'], ['play_in', 'Play-In'], ['playoffs', 'Playoffs'], ['all', 'All'], ['cup', 'NBA Cup']];

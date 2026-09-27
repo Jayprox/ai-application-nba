@@ -15,6 +15,7 @@ import { loadEnv, publicDbUrl } from './lib/env.mjs';
 import { rows, nbaStandings, nbaScheduleSeason, nbaGameLog } from './lib/sources.mjs';
 import { upsertArena } from './lib/arenas.mjs';
 import { linkToWorkerCreated, workerCreatedPlayers } from './lib/worker-players.mjs';
+import { writeStandings } from './lib/standings.mjs';
 import { seasonTypeFromGameId, isNeutralSite, nationalTvTier, nationalBroadcasterList, cupStage, localGameDate, restTags, buildSeries } from './lib/tagging.mjs';
 
 const FIRST = 2003, LAST = 2025;               // 2003-04 .. 2025-26 = the default run
@@ -286,6 +287,9 @@ async function loadSeason(db, season, maps, data) {
     WHERE p.game_id = ANY($1::uuid[]) AND NOT p.dnp`, [loadedIds]);
   if (pc.n !== P.game.length) problems.push(`player rows: loaded ${pc.n}, logs had ${P.game.length}`);
   if (problems.length) throw new Error('checks failed:\n    - ' + problems.slice(0, 10).join('\n    - '));
+
+  // ---- official standings rank (NBA.com tiebreakers) for the Standings page
+  counts.standings = await writeStandings(db, season, standings, maps.team);
 
   const neutral = [...games.values()].filter((g) => g.neutral).map((g) => `${g.date} ${g.away.TEAM_ABBREVIATION}@${g.home.TEAM_ABBREVIATION} ${g.sched.arenaCity ?? '?'}`);
   const byType = {}; for (const g of games.values()) byType[g.type] = (byType[g.type] ?? 0) + 1;

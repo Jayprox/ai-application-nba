@@ -25,6 +25,8 @@ const alt = await q(`SELECT a.name, a.city, a.elevation_ft, count(g.id)::int gam
 console.log('  altitude arenas: ' + alt.map((a) => `${a.name} (${a.city}, ${a.elevation_ft} ft, ${a.games} games)`).join(' | '));
 const seedRuns = await q(`SELECT id, status, details->>'players_pruned' pruned, details->>'players_updated' updated, finished_at FROM ingestion_runs WHERE job_type = 'seed_reference' ORDER BY id`);
 console.log('  seed runs: ' + seedRuns.map((r) => `#${r.id} ${r.status} (updated ${r.updated ?? '-'}, pruned ${r.pruned ?? '-'})`).join(' | '));
+const st = await q(`SELECT season, count(*)::int n FROM team_seasons GROUP BY 1 ORDER BY 1`).catch(() => null);
+console.log('  official standings (team_seasons): ' + (st === null ? 'table missing — npm run db:migrate' : st.length ? `${st.length} season(s), ${st[0].season} .. ${st.at(-1).season}` : 'none yet — npm run db:standings'));
 // Ingestion worker (Highlightly): last run, quota, players waiting for a human.
 const [w] = await q(`SELECT count(*)::int runs, max(finished_at) FILTER (WHERE status = 'success') last_ok,
   count(*) FILTER (WHERE status = 'failed' AND started_at > now() - interval '1 day')::int failed_24h,

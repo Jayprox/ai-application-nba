@@ -10,7 +10,9 @@ export class QueryError extends Error {
 }
 
 const SCOPES = ['season', 'last5', 'last10', 'career', 'game_log', 'leaderboard'];
-const SEASON_TYPES = { regular: ['regular'], play_in: ['play_in'], playoffs: ['playoffs'], all: ['regular', 'play_in', 'playoffs'] };
+const SEASON_TYPES = { regular: ['regular'], play_in: ['play_in'], playoffs: ['playoffs'], all: ['regular', 'play_in', 'playoffs'],
+  // NBA Cup: every Cup game (group stage + knockouts, which count as regular season, plus the final). 2023-24 on.
+  cup: ['regular', 'cup_final'] };
 const SPLITS = {
   venue: ['home', 'away'],
   b2b: [1, 2],                 // TEAM schedule: did the team play yesterday / tomorrow
@@ -50,6 +52,7 @@ export function validate(q) {
     throw new QueryError(400, 'player_rest / player_b2b apply to player queries; use rest / b2b for teams');
   if (scope === 'leaderboard') {
     if (Object.keys(splits).length) throw new QueryError(400, 'splits are not supported on leaderboards (v1)');
+    if (seasonType === 'cup') throw new QueryError(400, 'leaderboards support regular, play_in, playoffs or all');
     if (!LEADERBOARD_STATS.includes(q.stat ?? 'pts')) throw new QueryError(400, `stat must be one of ${LEADERBOARD_STATS.join(', ')}`);
   }
   const limit = q.limit === undefined ? 10 : Number(q.limit);
@@ -62,6 +65,7 @@ function filters(v, params, { withSeason = true } = {}) {
   const w = ["g.status = 'final'"];
   const p = (x) => { params.push(x); return `$${params.length}`; };
   w.push(`g.season_type = ANY(${p(SEASON_TYPES[v.seasonType])}::text[])`);
+  if (v.seasonType === 'cup') w.push('g.cup_stage IS NOT NULL');
   if (withSeason && v.season) w.push(`g.season = ${p(v.season)}`);
   const s = v.splits;
   if (s.venue) w.push(`tg.venue_split = ${p(s.venue)}`);        // neutral sites excluded from both (§6.1)
@@ -75,6 +79,19 @@ function filters(v, params, { withSeason = true } = {}) {
 }
 
 const avgCols = (alias) => STATS.map((c) => `round(avg(${alias}.${c})::numeric, 1)::float8 AS ${c}`).join(', ');
+// Advanced (Phase 8, all from stored columns; season-level ratios use SUMS, as NBA.com does):
+//   TS% = PTS / (2 * (FGA + 0.44 FTA))   eFG% = (FGM + 0.5 * 3PM) / FGA   FT rate = FTA / FGA
+//   per 36 = total / minutes * 36 (players)
+//   possessions ~ FGA - OREB + TOV + 0.44 FTA; ratings per 100 of them (teams; NBA.com counts
+//   possessions from play-by-play, so its ratings differ slightly — labelled "est." in the UI).
+const advCols = (a, entity) => `
+  round((sum(${a}.pts)::numeric / nullif(2 * (sum(${a}.fga) + 0.44 * sum(${a}.fta)), 0)), 3)::float8 AS ts_pct,
+  round(((sum(${a}.fgm) + 0.5 * sum(${a}.fg3m))::numeric / nullif(sum(${a}.fga), 0)), 3)::float8 AS efg_pct,
+  round((sum(${a}.fta)::numeric / nullif(sum(${a}.fga), 0)), 3)::float8 AS ft_rate,
+  ${entity === 'player'
+    ? ['pts', 'reb', 'ast'].map((c) => `round((sum(${a}.${c}) * 36 / nullif(sum(${a}.minutes), 0))::numeric, 1)::float8 AS ${c}_per36`).join(', ')
+    : `round((100 * sum(${a}.pts) / nullif(sum(${a}.fga) - sum(${a}.oreb) + sum(${a}.tov) + 0.44 * sum(${a}.fta), 0))::numeric, 1)::float8 AS off_rtg,
+       round((100 * sum(${a}.opp_pts) / nullif(sum(${a}.fga) - sum(${a}.oreb) + sum(${a}.tov) + 0.44 * sum(${a}.fta), 0))::numeric, 1)::float8 AS def_rtg`}`;
 const pctCols = (alias) => `
   round((sum(${alias}.fgm)::numeric / nullif(sum(${alias}.fga), 0)), 3)::float8 AS fg_pct,
   round((sum(${alias}.fg3m)::numeric / nullif(sum(${alias}.fg3a), 0)), 3)::float8 AS fg3_pct,
@@ -113,17 +130,17 @@ async function playerQuery(db, v) {
 
   if (v.scope === 'career') {
     const { rows } = await db.query(
-      `SELECT g.season, string_agg(DISTINCT tm.abbreviation, '/') AS team, count(*)::int AS gp, count(*) FILTER (WHERE tg.won)::int AS w, ${avgCols('s')}, ${pctCols('s')}
+      `SELECT g.season, string_agg(DISTINCT tm.abbreviation, '/') AS team, count(*)::int AS gp, count(*) FILTER (WHERE tg.won)::int AS w, ${avgCols('s')}, ${pctCols('s')}, ${advCols('s', 'player')}
          ${base.replace('LEFT JOIN arenas a ON a.id = g.arena_id', 'LEFT JOIN arenas a ON a.id = g.arena_id JOIN teams tm ON tm.id = s.team_id')}
         GROUP BY g.season ORDER BY g.season`, params);
-    const { rows: [tot] } = await db.query(`SELECT count(*)::int AS gp, count(*) FILTER (WHERE tg.won)::int AS w, ${avgCols('s')}, ${pctCols('s')} ${base}`, params);
+    const { rows: [tot] } = await db.query(`SELECT count(*)::int AS gp, count(*) FILTER (WHERE tg.won)::int AS w, ${avgCols('s')}, ${pctCols('s')}, ${advCols('s', 'player')} ${base}`, params);
     return { data: { totals: stripCounts(tot), by_season: rows.map(stripCounts) }, sample: tot.gp, record: `${tot.w}-${tot.gp - tot.w}`, notes, player };
   }
 
   // season / last5 / last10 — splits first, then the window ("Last 10 + Home" = last 10 home games)
   const n = v.scope === 'last5' ? 5 : v.scope === 'last10' ? 10 : null;
   const inner = `SELECT s.*, tg.won ${base} ORDER BY g.game_date_local DESC${n ? ` LIMIT ${n}` : ''}`;
-  const { rows: [r] } = await db.query(`SELECT count(*)::int AS gp, count(*) FILTER (WHERE x.won)::int AS w, ${avgCols('x')}, ${pctCols('x')} FROM (${inner}) x`, params);
+  const { rows: [r] } = await db.query(`SELECT count(*)::int AS gp, count(*) FILTER (WHERE x.won)::int AS w, ${avgCols('x')}, ${pctCols('x')}, ${advCols('x', 'player')} FROM (${inner}) x`, params);
   return { data: r.gp ? stripCounts(r) : null, sample: r.gp, record: `${r.w}-${r.gp - r.w}`, notes, player };
 }
 
@@ -147,7 +164,7 @@ async function teamQuery(db, v) {
   const n = v.scope === 'last5' ? 5 : v.scope === 'last10' ? 10 : null;
   const group = v.scope === 'career' ? 'GROUP BY x.season ORDER BY x.season' : '';
   const inner = `SELECT tg.*, g.season, ${oppPts} AS opp_pts ${base} ORDER BY g.game_date_local DESC${n ? ` LIMIT ${n}` : ''}`;
-  const sel = `count(*)::int AS gp, count(*) FILTER (WHERE x.won)::int AS w, ${avgCols('x')}, round(avg(x.opp_pts)::numeric, 1)::float8 AS opp_pts, ${pctCols('x')}`;
+  const sel = `count(*)::int AS gp, count(*) FILTER (WHERE x.won)::int AS w, ${avgCols('x')}, round(avg(x.opp_pts)::numeric, 1)::float8 AS opp_pts, ${pctCols('x')}, ${advCols('x', 'team')}`;
   const { rows: [r] } = await db.query(`SELECT ${sel} FROM (${inner}) x`, params);
   const data = r.gp ? stripCounts(r) : null;
   if (v.scope === 'career') {

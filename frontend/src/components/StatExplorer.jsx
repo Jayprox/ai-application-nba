@@ -134,14 +134,15 @@ export default function StatExplorer({ entity, id, name, seasons, seasonTypes = 
   );
 }
 
-const TYPE_NAME = { regular: 'regular season', play_in: 'play-in', playoffs: 'playoffs' };
-const TYPE_BUTTON = { regular: 'Regular season', play_in: 'Play-In', playoffs: 'Playoffs' };
+const TYPE_NAME = { regular: 'regular season', play_in: 'play-in', playoffs: 'playoffs', cup: 'NBA Cup' };
+const TYPE_BUTTON = { regular: 'Regular season', play_in: 'Play-In', playoffs: 'Playoffs', cup: 'NBA Cup' };
 
 /** Why there are no games, in plain words, with the one-click way out. Exported for tests. */
 export function NoGames({ name, p, where, splitCount, played, onType, onClear }) {
   const Name = name[0].toUpperCase() + name.slice(1);                  // "the Golden State Warriors" at sentence start
   const possessive = name.endsWith('s') ? `${name}'` : `${name}'s`;    // "Warriors'", "Curry's"
   const link = 'cursor-pointer font-medium text-link underline hover:text-link-hover';
+  if (p.type === 'cup' && p.scope !== 'career' && p.season < '2023-24') return <Empty>The NBA Cup started in 2023-24, so there are no Cup games in {p.season}.</Empty>;
   // A game type he/they simply didn't play that season (e.g. Curry, 2025-26 playoffs: GSW lost in the play-in).
   if (!splitCount && played && p.type !== 'all' && !played.includes(p.type)) {
     const other = played.filter((t) => TYPE_NAME[t]);
@@ -179,14 +180,28 @@ function Tiles({ entity, d }) {
       ['Steals', avg(d.stl)], ['Blocks', avg(d.blk)], ['Turnovers', avg(d.tov)], ['Minutes', avg(d.minutes)], ['+/-', signedAvg(d.plus_minus)]]
     : [['Points', avg(d.pts)], ['Opp points', avg(d.opp_pts)], ['Rebounds', avg(d.reb)], ['Assists', avg(d.ast)], ['3PM', avg(d.fg3m)],
       ['FG%', pct(d.fg_pct)], ['3P%', pct(d.fg3_pct)], ['Steals', avg(d.stl)], ['Blocks', avg(d.blk)], ['Turnovers', avg(d.tov)]];
+  // Efficiency row: all computed from the same games (sums, as NBA.com does).
+  const adv = entity === 'player'
+    ? [['TS%', pct(d.ts_pct), 'True shooting: points per shot, counting 3s and free throws'], ['eFG%', pct(d.efg_pct), 'Effective FG%: a 3 counts 1.5 makes'],
+      ['FT rate', pct(d.ft_rate), 'Free-throw attempts per field-goal attempt'], ['Pts / 36', avg(d.pts_per36), 'Points per 36 minutes'],
+      ['Reb / 36', avg(d.reb_per36), 'Rebounds per 36 minutes'], ['Ast / 36', avg(d.ast_per36), 'Assists per 36 minutes']]
+    : [['Off rtg (est.)', avg(d.off_rtg), 'Points per 100 possessions (possessions estimated from the box score)'],
+      ['Def rtg (est.)', avg(d.def_rtg), 'Opponent points per 100 possessions (estimated)'],
+      ['Net rtg (est.)', d.off_rtg == null || d.def_rtg == null ? '—' : signedAvg(d.off_rtg - d.def_rtg), 'Off rtg minus def rtg'],
+      ['TS%', pct(d.ts_pct), 'True shooting'], ['eFG%', pct(d.efg_pct), 'Effective FG%']];
+  const tile = ([k, v, hint]) => (
+    <div key={k} className="flex flex-col gap-0.5 rounded-[10px] border border-line bg-card px-4 py-3" title={hint}>
+      <span className="eyebrow">{k}</span>
+      <span className="num font-display text-[36px] font-bold leading-tight">{v}</span>
+    </div>
+  );
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-      {tiles.map(([k, v]) => (
-        <div key={k} className="flex flex-col gap-0.5 rounded-[10px] border border-line bg-card px-4 py-3">
-          <span className="eyebrow">{k}</span>
-          <span className="num font-display text-[36px] font-bold leading-tight">{v}</span>
-        </div>
-      ))}
+    <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">{tiles.map(tile)}</div>
+      <section aria-label="Efficiency" className="flex flex-col gap-2">
+        <h3 className="eyebrow m-0">Efficiency</h3>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">{adv.map(tile)}</div>
+      </section>
     </div>
   );
 }
@@ -263,19 +278,20 @@ function Career({ entity, data }) {
   const rows = [...data.by_season].reverse();
   const tot = data.totals;
   if (entity === 'team') {
-    const head = [['Season', L], ['GP', R], ['Pts', R], ['Opp', R], ['Reb', R], ['Ast', R], ['3PM', R], ['FG%', R], ['3P%', R]];
-    const cells = (r) => [r.gp, avg(r.pts), avg(r.opp_pts), avg(r.reb), avg(r.ast), avg(r.fg3m), pct(r.fg_pct), pct(r.fg3_pct)];
+    const head = [['Season', L], ['GP', R], ['Pts', R], ['Opp', R], ['Reb', R], ['Ast', R], ['3PM', R], ['FG%', R], ['3P%', R], ['TS%', R], ['Net', R]];
+    const cells = (r) => [r.gp, avg(r.pts), avg(r.opp_pts), avg(r.reb), avg(r.ast), avg(r.fg3m), pct(r.fg_pct), pct(r.fg3_pct), pct(r.ts_pct),
+      r.off_rtg == null || r.def_rtg == null ? '—' : signedAvg(r.off_rtg - r.def_rtg)];
     return (
-      <Table minWidth={620} head={head}>
+      <Table minWidth={760} head={head}>
         {rows.map((r) => <tr key={r.season}><td className={`${td} ${L} ${sticky}`}>{r.season}</td>{cells(r).map((c, i) => <td key={i} className={`${td} ${R}`}>{c}</td>)}</tr>)}
         <tr className="font-semibold"><td className={`${td} ${L} ${sticky} border-t-2 border-t-ink`}>All seasons</td>{cells(tot).map((c, i) => <td key={i} className={`${td} ${R} border-t-2 border-t-ink`}>{c}</td>)}</tr>
       </Table>
     );
   }
-  const head = [['Season', L], ['Team', L], ['GP', R], ['Min', R], ['Pts', R], ['Reb', R], ['Ast', R], ['3PM', R], ['Stl', R], ['Blk', R], ['TO', R], ['FG%', R]];
-  const cells = (r) => [r.gp, avg(r.minutes), avg(r.pts), avg(r.reb), avg(r.ast), avg(r.fg3m), avg(r.stl), avg(r.blk), avg(r.tov), pct(r.fg_pct)];
+  const head = [['Season', L], ['Team', L], ['GP', R], ['Min', R], ['Pts', R], ['Reb', R], ['Ast', R], ['3PM', R], ['Stl', R], ['Blk', R], ['TO', R], ['FG%', R], ['TS%', R]];
+  const cells = (r) => [r.gp, avg(r.minutes), avg(r.pts), avg(r.reb), avg(r.ast), avg(r.fg3m), avg(r.stl), avg(r.blk), avg(r.tov), pct(r.fg_pct), pct(r.ts_pct)];
   return (
-    <Table minWidth={860} head={head}>
+    <Table minWidth={920} head={head}>
       {rows.map((r) => (
         <tr key={r.season}>
           <td className={`${td} ${L} ${sticky}`}>{r.season}</td><td className={`${td} ${L}`}>{r.team}</td>

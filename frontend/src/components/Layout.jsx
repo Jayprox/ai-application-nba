@@ -2,9 +2,9 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import ErrorBoundary from './ErrorBoundary.jsx';
 import { useAuth } from '../lib/auth.jsx';
 
-const LINKS = [['/', 'Scoreboard'], ['/teams', 'Teams'], ['/players', 'Players'], ['/leaders', 'Leaders']];
+const LINKS = [['/', 'Scoreboard'], ['/standings', 'Standings'], ['/teams', 'Teams'], ['/players', 'Players'], ['/leaders', 'Leaders']];
 const link = ({ isActive }) =>
-  `shrink-0 rounded-md px-3 py-2 text-[15px] font-medium no-underline hover:bg-nav-hover hover:text-white ${isActive ? 'bg-nav-hover text-white' : 'text-nav-text'}`;
+  `shrink-0 rounded-md px-2.5 py-2 text-[14px] font-medium no-underline hover:bg-nav-hover hover:text-white sm:px-3 sm:text-[15px] ${isActive ? 'bg-nav-hover text-white' : 'text-nav-text'}`;
 
 export default function Layout() {
   const { logout } = useAuth();
@@ -21,7 +21,7 @@ export default function Layout() {
             className="ml-auto shrink-0 cursor-pointer rounded-md px-3 py-2 text-[15px] font-medium text-nav-text hover:bg-nav-hover hover:text-white md:order-last">
             Sign out
           </button>
-          <div className="-mx-1 flex w-full gap-1 overflow-x-auto md:mx-0 md:w-auto md:grow">
+          <div className="-mx-1 flex w-full gap-1 overflow-x-auto pr-6 [mask-image:linear-gradient(to_right,black_85%,transparent)] md:mx-0 md:w-auto md:grow md:pr-0 md:[mask-image:none]">
             {LINKS.map(([to, label]) => <NavLink key={to} to={to} end={to === '/'} className={link}>{label}</NavLink>)}
           </div>
         </nav>

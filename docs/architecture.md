@@ -482,6 +482,31 @@ Highlightly (§3.2). Decisions (JD, 2026-09-27):
   suite (real MEM @ HOU dry-run files) needs `WORKER_TEST_DATABASE_URL`
   pointing at a local *test* database (it drops the schema).
 
+## 7.5 Backlog quick wins (as built, 2026-09-27)
+
+- **Standings** (`GET /standings?season=`, page `/standings`): W-L, home/
+  road (neutral sites in neither, as NBA.com), conference record, last 10,
+  streak and games back are computed live from games. The **rank** is
+  NBA.com's official one (tiebreakers are the NBA's call), stored in
+  `team_seasons` (migration 005) by `db:backfill` and `npm run db:standings`,
+  and used only while its W-L equals ours; otherwise win % with a note.
+  Seed lines by era: 1-6 + play-in 7-10 (2020-21+), 2019-20 bubble 8v9,
+  1-8 before.
+- **Bracket** (`GET /bracket?season=`, Playoffs tab): `playoff_series` +
+  series wins counted from finished games; classic order (1v8, 4v5, 3v6,
+  2v7), play-in 7v8, 9v10, then the 8th-seed game.
+- **Advanced stats** in every POST /query scope (season sums, the way
+  NBA.com computes them): TS%, eFG%, FT rate, per-36 pts/reb/ast (players),
+  offensive/defensive rating per 100 *estimated* possessions (teams, labelled
+  "est."; NBA.com counts possessions from play-by-play). Checked: LeBron
+  2003-04 TS .488 / eFG .438 and Morant 2019-20 .556 / .509 = NBA.com.
+- **NBA Cup** season type (`season_type: "cup"` = games with a Cup stage,
+  group stage through the final; 2023-24 on). Not on leaderboards.
+- **Auto-deploy**: Railway ignored pushes because the Railway GitHub App was
+  not installed on `Jayprox/ai-application-nba` (diagnosis: NO_INSTALLATION
+  on all three services). Fix: install the app for this repo (GitHub
+  settings), then auto-deploy can be enabled per service.
+
 ## 8. Railway (as built)
 
 Created 2026-09-26, per PLATFORM.md §4. Deploy configured 2026-09-27 (step 9). Project `chalk-that-nba`,

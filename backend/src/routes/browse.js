@@ -27,10 +27,11 @@ export function browseRoutes(db, { currentSeason = '2026-27' } = {}) {
       `SELECT id, full_name, listed_position, height_in, weight_lb, birth_date FROM players
         WHERE current_team_id = $1 AND is_active ORDER BY full_name`, [team.id]);
     const { rows: types } = await db.query(
-      `SELECT g.season, array_agg(DISTINCT g.season_type ORDER BY g.season_type) AS types
+      `SELECT g.season, array_remove(array_agg(DISTINCT g.season_type ORDER BY g.season_type), 'cup_final') AS types,
+              bool_or(g.cup_stage IS NOT NULL) AS cup
          FROM team_games tg JOIN games g ON g.id = tg.game_id
-        WHERE tg.team_id = $1 AND g.season_type IN ('regular', 'play_in', 'playoffs') AND g.status = 'final' GROUP BY 1`, [team.id]);
-    res.json({ data: { ...team, roster, season_types: Object.fromEntries(types.map((t) => [t.season, t.types])) } });
+        WHERE tg.team_id = $1 AND g.season_type IN ('regular', 'play_in', 'playoffs', 'cup_final') AND g.status = 'final' GROUP BY 1`, [team.id]);
+    res.json({ data: { ...team, roster, season_types: Object.fromEntries(types.map((t) => [t.season, t.cup ? [...t.types, 'cup'] : t.types])) } });
   }));
 
   // Seasons that have finished games, newest first, with the season types
@@ -47,16 +48,18 @@ export function browseRoutes(db, { currentSeason = '2026-27' } = {}) {
     if (!/^\d+$/.test(req.params.id)) return res.status(404).json({ error: 'team not found' });
     const season = String(req.query.season ?? '');
     if (!/^\d{4}-\d{2}$/.test(season)) return res.status(400).json({ error: 'season=YYYY-YY is required' });
-    const types = { regular: ['regular'], play_in: ['play_in'], playoffs: ['playoffs'], all: ['regular', 'play_in', 'playoffs'] }[req.query.season_type ?? 'regular'];
-    if (!types) return res.status(400).json({ error: 'season_type must be regular, play_in, playoffs or all' });
+    const st = req.query.season_type ?? 'regular';
+    const types = { regular: ['regular'], play_in: ['play_in'], playoffs: ['playoffs'], all: ['regular', 'play_in', 'playoffs'], cup: ['regular', 'cup_final'] }[st];
+    if (!types) return res.status(400).json({ error: 'season_type must be regular, play_in, playoffs, all or cup' });
     const { rows } = await db.query(
       `SELECT p.id AS player_id, p.full_name, count(*)::int AS gp,
               round(avg(s.minutes)::numeric, 1)::float8 AS minutes, round(avg(s.pts)::numeric, 1)::float8 AS pts,
               round(avg(s.reb)::numeric, 1)::float8 AS reb, round(avg(s.ast)::numeric, 1)::float8 AS ast
          FROM player_game_stats s JOIN games g ON g.id = s.game_id JOIN players p ON p.id = s.player_id
         WHERE s.team_id = $1 AND g.season = $2 AND g.season_type = ANY($3::text[]) AND g.status = 'final' AND NOT s.dnp
-        GROUP BY p.id, p.full_name ORDER BY pts DESC NULLS LAST, gp DESC, p.full_name`, [Number(req.params.id), season, types]);
-    res.json({ data: rows, meta: { season, season_type: req.query.season_type ?? 'regular', count: rows.length } });
+          AND ($4::bool IS FALSE OR g.cup_stage IS NOT NULL)
+        GROUP BY p.id, p.full_name ORDER BY pts DESC NULLS LAST, gp DESC, p.full_name`, [Number(req.params.id), season, types, st === 'cup']);
+    res.json({ data: rows, meta: { season, season_type: st, count: rows.length } });
   }));
 
   // Name search is accent/suffix/punctuation tolerant ("jokic", "cook", "pj").
@@ -83,13 +86,14 @@ export function browseRoutes(db, { currentSeason = '2026-27' } = {}) {
     // Seasons he played, and which game types in each (so the UI can say
     // "didn't play in the playoffs" instead of showing an unexplained zero).
     const { rows: seasons } = await db.query(
-      `SELECT g.season, array_agg(DISTINCT g.season_type ORDER BY g.season_type) AS types
+      `SELECT g.season, array_remove(array_agg(DISTINCT g.season_type ORDER BY g.season_type), 'cup_final') AS types,
+              bool_or(g.cup_stage IS NOT NULL) AS cup
          FROM player_game_stats s JOIN games g ON g.id = s.game_id
-        WHERE s.player_id = $1 AND g.season_type IN ('regular', 'play_in', 'playoffs') AND g.status = 'final' AND NOT s.dnp
+        WHERE s.player_id = $1 AND g.season_type IN ('regular', 'play_in', 'playoffs', 'cup_final') AND g.status = 'final' AND NOT s.dnp
         GROUP BY 1 ORDER BY 1 DESC`, [p.id]);
     const { rows: [injury] } = await db.query(
       `SELECT status, description, reported_at, source FROM injury_reports WHERE player_id = $1 ORDER BY reported_at DESC LIMIT 1`, [p.id]);
-    res.json({ data: { ...p, seasons: seasons.map((s) => s.season), season_types: Object.fromEntries(seasons.map((s) => [s.season, s.types])), current_injury: injury ?? null } });
+    res.json({ data: { ...p, seasons: seasons.map((s) => s.season), season_types: Object.fromEntries(seasons.map((s) => [s.season, s.cup ? [...s.types, 'cup'] : s.types])), current_injury: injury ?? null } });
   }));
 
   r.get('/games', wrap(async (req, res) => {

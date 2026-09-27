@@ -67,4 +67,4 @@ export function ago(iso, now = Date.now()) {
   return `${d} day${d === 1 ? '' : 's'} ago`;
 }
 
-export const SEASON_TYPE_LOWER = { regular: 'regular season', play_in: 'play-in', playoffs: 'playoffs', all: 'all game types' };
+export const SEASON_TYPE_LOWER = { regular: 'regular season', play_in: 'play-in', playoffs: 'playoffs', all: 'all game types', cup: 'NBA Cup' };

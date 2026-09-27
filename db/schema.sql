@@ -262,11 +262,27 @@ CREATE INDEX ingestion_runs_latest_idx ON ingestion_runs (job_type, finished_at 
 -- Migrations applied (scripts/db-migrate.mjs). A fresh install from this file
 -- already contains every migration below, so they're recorded as applied.
 -- ---------------------------------------------------------------------------
+-- NBA.com's official standings rank per team-season (migration 005). W-L etc.
+-- are computed live from games; the rank (tiebreakers) comes from NBA.com.
+CREATE TABLE team_seasons (
+  season            TEXT NOT NULL CHECK (season ~ '^[0-9]{4}-[0-9]{2}$'),
+  team_id           INTEGER NOT NULL REFERENCES teams (id),
+  conference        TEXT NOT NULL CHECK (conference IN ('East', 'West')),
+  conference_rank   SMALLINT NOT NULL CHECK (conference_rank BETWEEN 1 AND 15),
+  division_rank     SMALLINT,
+  wins              SMALLINT NOT NULL CHECK (wins >= 0),
+  losses            SMALLINT NOT NULL CHECK (losses >= 0),
+  clinch            TEXT,
+  source            TEXT NOT NULL DEFAULT 'nba_stats',
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (season, team_id)
+);
+
 CREATE TABLE schema_migrations (
   id          TEXT PRIMARY KEY,
   applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-INSERT INTO schema_migrations (id) VALUES ('001_playoff_series_best_of_2'), ('002_players_first_season'), ('003_player_rest'), ('004_box_score_sync');
+INSERT INTO schema_migrations (id) VALUES ('001_playoff_series_best_of_2'), ('002_players_first_season'), ('003_player_rest'), ('004_box_score_sync'), ('005_team_seasons');
 
 -- ---------------------------------------------------------------------------
 -- Auth: two-tier (PLATFORM.md §2)

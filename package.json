@@ -14,7 +14,8 @@
     "db:migrate": "node scripts/db-migrate.mjs",
     "db:backfill": "node scripts/backfill.mjs",
     "db:status": "node scripts/db-status.mjs",
-    "db:schedule": "node scripts/load-schedule.mjs"
+    "db:schedule": "node scripts/load-schedule.mjs",
+    "db:standings": "node scripts/load-standings.mjs"
   },
   "dependencies": {
     "pg": "^8.13.0"

@@ -7,9 +7,10 @@ Chalk That NFL) plus this app's own sport-specific decisions below. Update
 it after every real design decision or deviation from plan, not just at the
 end — same convention NFL's own doc follows.
 
-**Status: decisions made 2026-09-25/26, nothing built yet.** This is the
-founding doc for this repo, worked out in a brainstorm before any code was
-written — read this and `PLATFORM.md` first in any session building here.
+**Status: built and live 2026-09-27** (backend-api, web, ingestion-worker on
+Railway; see §7-§8 for the as-built record). Sections 1-6 are the founding
+decisions from the 2026-09-25/26 brainstorm, updated as they changed — read
+this and `PLATFORM.md` first in any session building here.
 
 ---
 

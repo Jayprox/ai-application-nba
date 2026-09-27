@@ -343,10 +343,40 @@ each is actually built, not as it's planned.)*
 ## Phase 7 — Portfolio Packaging
 *An unpackaged app is invisible to recruiters and collaborators.*
 
-- [ ] **README.md** — what it is, stack, setup, live URL, screenshots, known limitations
-- [ ] **Deployed** — live URL
+- [x] **README.md** — what it is, stack, setup, live URL, screenshots, known limitations
+      — *root README: features, NBA.com-verified numbers, architecture
+      diagram (Mermaid), stack, layout, local setup, data operations, tests,
+      API example, limitations.* **Screenshots: JD to add 4 PNGs to
+      `docs/screenshots/` (names listed there).**
+- [x] **Deployed** — live URL: https://web-production-081bcf.up.railway.app
 - [ ] **Loom or screen recording** (optional)
-- [ ] **Can you explain it in 2 minutes?**
+- [x] **Can you explain it in 2 minutes?** — *draft below, in JD's words to adjust.*
+
+### 2-minute explanation (draft)
+
+"Chalk That NBA answers split questions fans and bettors actually ask: how
+does Jokić play on the second night of a back-to-back, or on the road with
+no rest, or at altitude? It covers every game since 2003-04, about 620,000
+player box-score rows, and keeps the current season live.
+
+The key design choice is that situational context is written onto each game
+when it's loaded: home/away/neutral, days of rest, back-to-back night,
+national TV, altitude. Any filter is then just a database WHERE clause, and
+every client (the web app now, AI agents later) goes through one query API.
+
+The hardest part was trust. NBA.com is the reference, so the tests pin its
+published numbers: LeBron's rookie season by days of rest matches it game
+for game. Getting there meant finding NBA.com's own rules. Rest is counted
+from a player's own games, and an opener's rest runs from the last preseason
+game. Bad data can't get in quietly either: database constraints reject
+impossible stat lines, the team W-L is checked against standings on every
+load, and ambiguous player names go to manual review instead of being
+guessed.
+
+It runs on Railway as three services: API, web, and a worker pulling live
+box scores from Highlightly. NBA.com blocks cloud servers, so historical
+loads and a weekly reconcile run from my laptop, and NBA.com always gets the
+last word."
 
 ---
 
@@ -355,10 +385,34 @@ each is actually built, not as it's planned.)*
 Answer these. If you stumble on any, go back.
 
 1. **Why did you choose this stack over alternatives?**
+   *Draft:* It's the Chalk That platform stack (PLATFORM.md), proven on NFL:
+   one language (JS) across API, worker and web; Postgres because the product
+   is filtered aggregates over relational data, and CHECK constraints guard
+   data quality; Railway for one-project-per-app with private networking.
+   NBA-specific: plain Node HTTP instead of Python `nba_api` (it only wraps
+   the same endpoints, and a second language wasn't worth it).
 2. **What's the hardest technical problem you solved?**
+   *Draft:* Matching NBA.com's rest splits exactly. Our first counts were
+   off by one game here and there; the fixes were player-level rest (his
+   games, not the team's), preseason and bubble scrimmages counting as
+   "played", and a game dated to a day it wasn't finished (Marion, 2007).
+   Runner-up: cross-vendor player identity without false merges (20 real
+   NBA name collisions).
 3. **What would you do differently if you rebuilt it?**
+   *Draft:* Start with a local test database and fixture pipeline on day one
+   (it came later). Pick the deploy branch (`main`) from the start. Plan for
+   NBA.com's cloud-IP block before designing ingestion.
 4. **What breaks first under load or edge cases?**
+   *Draft:* Career and leaderboard queries aggregate hundreds of thousands
+   of rows. Redis caching (24 h for finished seasons) and a 15 s statement
+   timeout contain it, but many concurrent uncached career queries would be
+   the first hotspot (fix: materialized per-season aggregates). Edge cases:
+   Highlightly outages (the worker retries, and NBA.com reconciles weekly),
+   and the in-memory sign-in lockout resetting on redeploy.
 5. **If a junior dev joined, could they navigate the codebase in 30 min?**
+   *Draft:* Yes. The README maps the folders to services. architecture.md
+   records every decision with the reason, and the tests read as a spec
+   ("LeBron 2003-04 PLAYER rest = NBA.com").
 
 ---
 
@@ -367,6 +421,7 @@ Answer these. If you stumble on any, go back.
 
 | Date | What I built | Decision made | Why |
 |------|-------------|---------------|-----|
+| 2026-09-27 | Phase 7: README, pitch, gut-check drafts | README leads with NBA.com-verified numbers | Trust is the product: showing the checks is the fastest way to earn it |
 | 2026-09-27 | Phase 6 hardening | Brute-force limit counts failures only, per account and per IP; weak passwords refused at account creation | The site is public: stop password guessing without ever slowing down normal users |
 | 2026-09-27 | Deployed to Railway | Web served by a zero-dependency Node server instead of `vite preview`; build tools as regular dependencies | Nothing dev-only in production, and deep links like /players/:id work on refresh |
 | 2026-09-27 | Ingestion worker | Scores every 5 min during game windows, box scores at final + one 3h re-check; unknown players created only when nobody similar exists; NBA.com reconciles weekly | Stays well inside the Highlightly quota; a wrong player link is worse than a delayed one; NBA.com is the source we verified, so it gets the last word |

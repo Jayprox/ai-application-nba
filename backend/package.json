@@ -6,6 +6,7 @@
   "engines": { "node": ">=20" },
   "scripts": {
     "start": "node src/server.js",
+    "dev": "node scripts/dev.js",
     "test": "node --test --test-concurrency=1 'test/*.test.js'",
     "create-user": "node scripts/create-user.js",
     "create-api-key": "node scripts/create-api-key.js"

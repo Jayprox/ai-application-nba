@@ -67,7 +67,12 @@ export function browseRoutes(db) {
          FROM games g JOIN teams ht ON ht.id = g.home_team_id JOIN teams at ON at.id = g.away_team_id
          LEFT JOIN arenas a ON a.id = g.arena_id LEFT JOIN playoff_series ps ON ps.id = g.playoff_series_id
         WHERE g.game_date_local = $1 ORDER BY g.tipoff_utc NULLS LAST, ht.abbreviation`, [date]);
-    res.json({ data: rows, meta: { date, count: rows.length } });
+    // Nearest game days either side, so the scoreboard can skip empty days
+    // (offseason, All-Star break) instead of stepping one day at a time.
+    const { rows: [nav] } = await db.query(
+      `SELECT (SELECT max(game_date_local) FROM games WHERE game_date_local < $1)::text AS prev_date,
+              (SELECT min(game_date_local) FROM games WHERE game_date_local > $1)::text AS next_date`, [date]);
+    res.json({ data: rows, meta: { date, count: rows.length, prev_date: nav.prev_date, next_date: nav.next_date } });
   }));
 
   r.get('/games/:id', wrap(async (req, res) => {

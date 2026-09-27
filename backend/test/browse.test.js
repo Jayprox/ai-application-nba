@@ -40,6 +40,10 @@ test('scoreboard by date + box score (Tokyo, 2003-10-30: neutral site)', async (
   assert.equal(box.status, 200);
   const cle = box.body.data.teams.find((t) => t.abbreviation === 'CLE');
   assert.equal(cle.players.find((p) => p.full_name === 'LeBron James').pts, 25);
+  assert.equal(r.body.meta.prev_date < '2003-10-30' && r.body.meta.next_date > '2003-10-30', true);
+  const empty = await s.api('GET', '/games?date=2003-08-01');   // offseason: no games, but a way forward
+  assert.equal(empty.body.data.length, 0);
+  assert.equal(empty.body.meta.next_date >= '2003-10-28', true);
   assert.equal((await s.api('GET', '/games?date=bad')).status, 400);
   assert.equal((await s.api('GET', '/games/not-a-uuid')).status, 404);
 });

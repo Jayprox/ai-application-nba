@@ -281,7 +281,15 @@ each is actually built, not as it's planned.)*
       bubble games neutral, Days Rest 8/42/11/6). Migration 003 = player
       rest columns.*
 - [ ] Frontend scaffold + the 8 screens in mockup order (stale-key
-      fetch-hook pattern from day one)
+      fetch-hook pattern from day one) — *JD: slice first, usable on phones.*
+  - [x] Slice 1: scaffold (React + Vite + Tailwind v4 + React Router 7,
+        `frontend/`), sign-in, Scoreboard (prev/next skip to the nearest
+        game day), Box Score / game preview with split tags. `useFetch`
+        stale-key hook + cross-tab-safe token refresh, both unit-tested
+        (11 tests). Backend: `/games` returns prev/next game days; DATE
+        columns come back as 'YYYY-MM-DD'; `npm run dev` reads the root .env.
+  - [ ] Slice 2: Teams, Team detail, Players (Active toggle), Player
+        detail (scopes + both rest filters), Leaders
 - [ ] Ingestion worker (Highlightly) — after the preseason injury re-test
 - [ ] Deploy + Phase 6 hardening
 
@@ -330,6 +338,7 @@ Answer these. If you stumble on any, go back.
 
 | Date | What I built | Decision made | Why |
 |------|-------------|---------------|-----|
+| 2026-09-27 | Frontend slice 1 (sign-in, Scoreboard, Box Score) | Both tokens in localStorage; refresh is single-flight per tab and serialized across tabs with a Web Lock | Refresh tokens rotate and a replay revokes every session, so two tabs refreshing with the same token would sign the user out everywhere |
 | 2026-09-27 | Core API + player rest (migration 003) | Offer both team rest and player rest; preseason games count as "played" for rest | NBA.com's player Days Rest split uses the player's own games, and measures an opener from the last preseason game; matching it exactly is how the numbers can be verified |
 | 2026-09-27 | Schedule loader | Altitude includes Mexico City (any arena >= 4,000 ft) | Mexico City (~7,350 ft) is higher than Denver; the split is about playing at altitude |
 | 2026-09-26 | Backfill live: 23 seasons, 618K player rows | Games with no winner are "not played" and skipped | NBA.com keeps the cancelled 2013-04-16 BOS-IND game in its logs; the independent standings W-L check caught it before bad data landed |

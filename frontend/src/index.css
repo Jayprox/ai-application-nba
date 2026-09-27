@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+/* Design tokens from the approved Phase 4 mockups. */
+@theme {
+  --color-paper: #F3F1EC;
+  --color-card: #FFFFFF;
+  --color-ink: #15171C;
+  --color-muted: #5A5F6B;
+  --color-line: #DAD6CE;
+  --color-rule: #E6E2DA;
+  --color-field: #A9A49A;
+  --color-link: #1F4FB8;
+  --color-link-hover: #163A8A;
+  --color-accent: #B8420E;
+  --color-accent-hover: #9A370B;
+  --color-nav-accent: #F08A4B;
+  --color-nav-text: #C9CCD3;
+  --color-nav-hover: #2A2D35;
+  --color-alt-bg: #FBE3D4;
+  --color-alt-ink: #7A2A06;
+  --color-live: #C0262D;
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Barlow Condensed", ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  html { background: var(--color-paper); color: var(--color-ink); }
+  body { font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+  a { color: var(--color-link); }
+  a:hover { color: var(--color-link-hover); }
+  :focus-visible { outline: 2px solid var(--color-link); outline-offset: 2px; }
+}
+
+@utility num { font-variant-numeric: tabular-nums; }
+@utility eyebrow { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--color-muted); }

@@ -2,6 +2,11 @@
 // from a laptop it's the public proxy URL (TLS).
 import pg from 'pg';
 
+// DATE columns (game_date_local) stay 'YYYY-MM-DD' strings. pg's default
+// turns them into JS Dates at midnight in the SERVER's timezone, which then
+// serialize as timestamps that can land on the wrong day in a browser.
+pg.types.setTypeParser(1082, (v) => v);
+
 export function createPool(url = process.env.DATABASE_URL) {
   if (!url) throw new Error('DATABASE_URL is not set');
   const host = new URL(url).hostname;

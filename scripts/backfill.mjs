@@ -12,11 +12,11 @@
 import pg from 'pg';
 import { randomUUID } from 'node:crypto';
 import { loadEnv, publicDbUrl } from './lib/env.mjs';
-import { rows, nbaStandings, nbaScheduleSeason, nbaGameLog, geocode } from './lib/sources.mjs';
+import { rows, nbaStandings, nbaScheduleSeason, nbaGameLog } from './lib/sources.mjs';
+import { upsertArena } from './lib/arenas.mjs';
 import { seasonTypeFromGameId, isNeutralSite, nationalTvTier, nationalBroadcasterList, cupStage, localGameDate, restTags, buildSeries } from './lib/tagging.mjs';
 
 const FIRST = 2003, LAST = 2025;               // 2003-04 .. 2025-26
-const HIGH_ALTITUDE_FT = 4000;
 const label = (y) => `${y}-${String((y + 1) % 100).padStart(2, '0')}`;
 const log = (...a) => console.log('[backfill]', ...a);
 
@@ -48,7 +48,11 @@ async function fetchSeason(season) {
     team.push(...rows(await nbaGameLog(season, t, 'T')).filter(keep));
     player.push(...rows(await nbaGameLog(season, t, 'P')).filter(keep));
   }
-  return { sched: new Map(sched.map((g) => [g.gameId, g])), standings, team, player };
+  // Preseason (incl. the 2020 bubble scrimmages) only anchors rest days;
+  // those games are never stored. NBA.com's rest splits count them.
+  const preTeam = rows(await nbaGameLog(season, 'Pre Season', 'T'));
+  const prePlayer = rows(await nbaGameLog(season, 'Pre Season', 'P'));
+  return { sched: new Map(sched.map((g) => [g.gameId, g])), standings, team, player, preTeam, prePlayer };
 }
 
 // ------------------------------------------------------------- helpers ----
@@ -63,26 +67,15 @@ async function upsertChunks(db, sqlFn, cols, size = 4000) {
 const STAT_COLS = ['pts', 'fgm', 'fga', 'fg3m', 'fg3a', 'ftm', 'fta', 'oreb', 'dreb', 'reb', 'ast', 'stl', 'blk', 'tov', 'pf', 'plus_minus'];
 const statOf = (r, c) => (r[c.toUpperCase()] ?? null);
 
-const elevationCache = new Map();
-async function arenaElevation(db, city, state) {
-  const key = `${city}|${state}`;
-  if (elevationCache.has(key)) return elevationCache.get(key);
-  // Reuse any arena already stored for this city (arenas get renamed; the city doesn't move).
-  const { rows: known } = await db.query('SELECT elevation_ft FROM arenas WHERE city = $1 AND coalesce(state, \'\') = $2 AND elevation_ft IS NOT NULL LIMIT 1', [city, state]);
-  let ft = known[0]?.elevation_ft ?? null;
-  if (ft == null) {
-    const cc = /^(ON|BC|QC|AB|MB)$/.test(state) ? 'CA' : state.length === 2 && !/^(MX|FR|UK|GB|DE|JP|CN)$/.test(state) ? 'US' : undefined;
-    const res = ((await geocode(city, cc))?.results ?? []).sort((a, b) => (b.population ?? 0) - (a.population ?? 0));
-    ft = res[0]?.elevation != null ? Math.round(res[0].elevation * 3.28084) : null;
-    if (ft == null) log(`  WARN no elevation for ${city}${state ? ', ' + state : ''} — stored as NULL`);
-  }
-  elevationCache.set(key, ft);
-  return ft;
-}
-
 // ---------------------------------------------------------- one season ----
 async function loadSeason(db, season, maps, data) {
-  const { sched, standings, team, player } = data;
+  const { sched, standings, team, player, preTeam = [], prePlayer = [] } = data;
+  const anchorsBy = (list, key) => {
+    const m = new Map();
+    for (const r of list) { const k = String(r[key]); (m.get(k) ?? m.set(k, []).get(k)).push(String(r.GAME_DATE).slice(0, 10)); }
+    return m;
+  };
+  const teamAnchors = anchorsBy(preTeam, 'TEAM_ID'), playerAnchors = anchorsBy(prePlayer, 'PLAYER_ID');
   const counts = { games: 0, team_rows: 0, player_rows: 0, players_created: 0, series: 0, arenas: 0 };
   const teamId = (nba) => { const t = maps.team.get(String(nba)); if (!t) throw new Error(`unknown NBA.com team id ${nba}`); return t; };
 
@@ -115,22 +108,12 @@ async function loadSeason(db, season, maps, data) {
     g.neutral = isNeutralSite(s, season, g.date);
   }
 
-  // ---- arenas
+  // ---- arenas (shared helper: elevation by city, renamed arenas keep altitude)
   const arenaIds = new Map();
   for (const g of games.values()) {
-    const name = (g.sched.arenaName ?? '').trim(), city = (g.sched.arenaCity ?? '').trim();
-    if (!name || name.toLowerCase() === 'tbd' || !city) continue;
-    const key = `${name}|${city}`;
-    if (arenaIds.has(key)) { g.arenaId = arenaIds.get(key); continue; }
-    const state = (g.sched.arenaState ?? '').trim();
-    const ft = await arenaElevation(db, city.split(',')[0], state);
-    const country = /^(ON|BC|QC|AB|MB)$/.test(state) ? 'Canada' : g.neutral && !/^[A-Z]{2}$/.test(state) || /^(MX|FR|UK|GB|DE|JP|CN)$/.test(state) ? (city.split(',')[1]?.trim() || state || 'International') : 'USA';
-    const { rows: [a] } = await db.query(
-      `INSERT INTO arenas (name, city, state, country, elevation_ft, is_high_altitude) VALUES ($1,$2,$3,$4,$5,$6)
-       ON CONFLICT (name, city) DO UPDATE SET elevation_ft = COALESCE(arenas.elevation_ft, EXCLUDED.elevation_ft),
-         is_high_altitude = COALESCE(arenas.elevation_ft, EXCLUDED.elevation_ft, 0) >= ${HIGH_ALTITUDE_FT}
-       RETURNING id`, [name, city, state || null, country, ft, (ft ?? 0) >= HIGH_ALTITUDE_FT]);
-    arenaIds.set(key, a.id); g.arenaId = a.id; counts.arenas++;
+    const before = arenaIds.size;
+    g.arenaId = await upsertArena(db, g.sched, g.neutral, arenaIds, log);
+    if (arenaIds.size > before) counts.arenas++;
   }
 
   // ---- playoff / play-in series
@@ -193,7 +176,7 @@ async function loadSeason(db, season, maps, data) {
     (byTeam.get(k) ?? byTeam.set(k, []).get(k)).push({ gameId: g.id, date: g.date });
   }
   const rest = new Map();
-  for (const [t, list] of byTeam) for (const [gid, tag] of restTags(list)) rest.set(`${t}|${gid}`, tag);
+  for (const [t, list] of byTeam) for (const [gid, tag] of restTags(list, teamAnchors.get(t))) rest.set(`${t}|${gid}`, tag);
   const TG = { game: [], team: [], opp: [], venue: [], rest: [], b2b: [], won: [], min: [], ...Object.fromEntries(STAT_COLS.map((c) => [c, []])) };
   for (const g of games.values()) for (const [side, other, isHome] of [[g.home, g.away, true], [g.away, g.home, false]]) {
     const tag = rest.get(`${side.TEAM_ID}|${g.id}`);
@@ -224,20 +207,30 @@ async function loadSeason(db, season, maps, data) {
     counts.players_created = missing.size;
   }
 
-  // ---- player_game_stats
-  const P = { game: [], player: [], team: [], min: [], ...Object.fromEntries(STAT_COLS.map((c) => [c, []])) };
-  for (const r of player) {
+  // ---- player_game_stats (+ the player's OWN rest/b2b, from the games he played)
+  const played = player.filter((r) => games.has(String(r.GAME_ID)));
+  const byPlayer = new Map();
+  for (const r of played) {
+    const k = String(r.PLAYER_ID);
+    (byPlayer.get(k) ?? byPlayer.set(k, []).get(k)).push({ gameId: String(r.GAME_ID), date: games.get(String(r.GAME_ID)).date });
+  }
+  const pRest = new Map();
+  for (const [pid, list] of byPlayer) for (const [gid, tag] of restTags(list, playerAnchors.get(pid))) pRest.set(`${pid}|${gid}`, tag);
+  const P = { game: [], player: [], team: [], min: [], prest: [], pb2b: [], ...Object.fromEntries(STAT_COLS.map((c) => [c, []])) };
+  for (const r of played) {
     const gid = String(r.GAME_ID);
-    if (!games.has(gid)) continue;
+    const tag = pRest.get(`${r.PLAYER_ID}|${gid}`);
     P.game.push(gameUuid.get(gid)); P.player.push(maps.player.get(String(r.PLAYER_ID))); P.team.push(teamId(r.TEAM_ID)); P.min.push(r.MIN);
+    P.prest.push(tag.rest_days); P.pb2b.push(tag.b2b_night);
     for (const c of STAT_COLS) P[c].push(statOf(r, c));
   }
   counts.player_rows = await upsertChunks(db, () =>
-    `INSERT INTO player_game_stats (game_id, player_id, team_id, minutes, ${statList}, source, updated_at)
-     SELECT *, 'nba_stats', now() FROM unnest($1::uuid[], $2::uuid[], $3::int[], $4::numeric[], ${STAT_COLS.map((_, i) => `$${i + 5}::smallint[]`).join(', ')})
+    `INSERT INTO player_game_stats (game_id, player_id, team_id, minutes, player_rest_days, player_b2b_night, ${statList}, source, updated_at)
+     SELECT *, 'nba_stats', now() FROM unnest($1::uuid[], $2::uuid[], $3::int[], $4::numeric[], $5::smallint[], $6::smallint[], ${STAT_COLS.map((_, i) => `$${i + 7}::smallint[]`).join(', ')})
      ON CONFLICT (game_id, player_id) DO UPDATE SET team_id = EXCLUDED.team_id, minutes = EXCLUDED.minutes,
+       player_rest_days = EXCLUDED.player_rest_days, player_b2b_night = EXCLUDED.player_b2b_night,
        ${STAT_COLS.map((c) => `${c} = EXCLUDED.${c}`).join(', ')}, source = 'nba_stats', updated_at = now()`,
-    [P.game, P.player, P.team, P.min, ...STAT_COLS.map((c) => P[c])]);
+    [P.game, P.player, P.team, P.min, P.prest, P.pb2b, ...STAT_COLS.map((c) => P[c])]);
 
   // ---- checks (independent of how we loaded it)
   const problems = [];

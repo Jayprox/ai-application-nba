@@ -97,7 +97,9 @@ Query: POST /query — the one shared engine (entity, stat, scope, splits ->
   data + sample size + freshness). NBA scopes: season | last5 | last10 |
   career | game_log | leaderboard. NBA splits: venue (home/away),
   b2b_night (1/2), rest_days (0/1/2/3+), national_tv (major/nba_tv/local),
-  altitude (yes/no); plus season + season_type. Leaderboards are a /query
+  altitude (yes/no); plus season + season_type. Added in step 6: player
+  queries also get player_b2b / player_rest (the player's own rest, as on
+  NBA.com) next to the team's. Leaderboards are a /query
   scope, not a separate endpoint (PLATFORM.md §2).
 Browse: GET /teams, GET /teams/:id, GET /players (?active=true default),
   GET /players/:id, GET /games?date=, GET /games/:id (box score)
@@ -261,9 +263,23 @@ each is actually built, not as it's planned.)*
       because migration 001 hadn't run (zsh doesn't allow inline `#`
       comments interactively — command lists I give JD carry no comments).
       2019-20 neutral = 175 (172 Orlando bubble + 2 Mexico City + 1 Paris).*
-- [ ] 2026-27 schedule + national-TV / neutral-site tags (JD's Mac)
-- [ ] Core API: auth, POST /query (all scopes/splits/leaderboard), browse
-      routes; verified against NBA.com numbers
+- [x] 2026-27 schedule + national-TV / neutral-site tags (JD's Mac) —
+      `npm run db:schedule`. *Live 2026-09-27: 1,266 games (66 preseason,
+      1,200 regular), 80 known per team, 432 second-night team-games, 6
+      neutral (Macao x2, Las Vegas, Mexico City, Paris, Manchester); skipped
+      7 Cup knockout placeholders + 1 exhibition (London @ POR). Re-run
+      after the NBA adds post-Cup games / sets knockout matchups.
+      **Data foundation complete: 24 seasons, 30,919 games.***
+- [x] Core API: auth, POST /query (all scopes/splits/leaderboard), browse
+      routes; verified against NBA.com numbers — `backend/`. *Two-tier
+      auth (JWT + rotating refresh with replay revoke, `ctnba_` API keys);
+      one `POST /query` for player/team season/career/game-log/leaderboard
+      with venue, team rest/b2b, player rest/b2b, national TV, altitude,
+      last 5/10; browse routes for teams/players/games. 28 tests pass on
+      the fixture DB, checked against NBA.com: LeBron 2003-04 (79 g, 20.9;
+      home/road, Days Rest 20/40/12/7, last 5/10), Morant 2019-20 (67 g,
+      bubble games neutral, Days Rest 8/42/11/6). Migration 003 = player
+      rest columns.*
 - [ ] Frontend scaffold + the 8 screens in mockup order (stale-key
       fetch-hook pattern from day one)
 - [ ] Ingestion worker (Highlightly) — after the preseason injury re-test
@@ -314,6 +330,8 @@ Answer these. If you stumble on any, go back.
 
 | Date | What I built | Decision made | Why |
 |------|-------------|---------------|-----|
+| 2026-09-27 | Core API + player rest (migration 003) | Offer both team rest and player rest; preseason games count as "played" for rest | NBA.com's player Days Rest split uses the player's own games, and measures an opener from the last preseason game; matching it exactly is how the numbers can be verified |
+| 2026-09-27 | Schedule loader | Altitude includes Mexico City (any arena >= 4,000 ft) | Mexico City (~7,350 ft) is higher than Denver; the split is about playing at altitude |
 | 2026-09-26 | Backfill live: 23 seasons, 618K player rows | Games with no winner are "not played" and skipped | NBA.com keeps the cancelled 2013-04-16 BOS-IND game in its logs; the independent standings W-L check caught it before bad data landed |
 | 2026-09-26 | Backfill design | History starts 2003-04 (not 1996-97); neutral-site rule for pre-2024-25; best-of-2 series (migration 001) | NBA.com has no national-TV data or local tip times before 2003-04, and still covers every active career; NBA.com only flags neutral sites from 2024-25, so the 2020 bubble/international games needed a rule |
 | 2026-09-26 | Phase 4: clickable mockup of all 8 screens on real data | Landing page = Scoreboard; login = plain sign-in card; Last-N applies after splits | Building the mock on real data surfaced the Last-N/split ordering question before any query-engine code existed |

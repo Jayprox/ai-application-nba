@@ -66,6 +66,25 @@ test('rest days and back-to-back nights (Jokić, Nov 2025: 11/7, 11/8, 11/11, 11
   assert.deepEqual(t.get('d'), { rest_days: 0, b2b_night: 2 });
 });
 
+test('rest counts preseason / scrimmage anchors but tags only real games (Morant 2019-20)', () => {
+  const t = restTags(
+    [{ gameId: 'open', date: '2019-10-23' }, { gameId: 'mar', date: '2020-03-10' }, { gameId: 'bub', date: '2020-07-31' }],
+    ['2019-10-14', '2019-10-18', '2020-07-24', '2020-07-28'],
+  );
+  assert.equal(t.size, 3);
+  assert.deepEqual(t.get('open'), { rest_days: 4, b2b_night: null });
+  assert.deepEqual(t.get('bub'), { rest_days: 2, b2b_night: null });
+  assert.deepEqual(restTags([{ gameId: 'x', date: '2025-10-21' }], ['2025-10-20']).get('x'), { rest_days: 0, b2b_night: 2 });
+  assert.deepEqual(restTags([{ gameId: 'x', date: '2025-10-21' }]).get('x'), { rest_days: null, b2b_night: null });
+});
+
+test('two games on one date: no rest, never negative (Marion 2007-12-19)', () => {
+  const t = restTags([{ gameId: 'dal', date: '2007-12-19' }, { gameId: 'atl', date: '2007-12-19' }, { gameId: 'next', date: '2007-12-21' }, { gameId: 'prev', date: '2007-12-17' }]);
+  assert.deepEqual(t.get('dal'), { rest_days: 1, b2b_night: null });
+  assert.deepEqual(t.get('atl'), { rest_days: null, b2b_night: null });
+  assert.deepEqual(t.get('next'), { rest_days: 1, b2b_night: null });
+});
+
 test('series: 2003-04 Finals DET over LAL (4-1), higher seed by record', () => {
   const rows = ['0040300401', '0040300402', '0040300403', '0040300404', '0040300405'].flatMap((id, i) => [
     { gameId: id, teamNbaId: 'DET', won: i !== 1 }, { gameId: id, teamNbaId: 'LAL', won: i === 1 }]);

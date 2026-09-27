@@ -20,6 +20,9 @@ const runs = await q(`SELECT DISTINCT ON (job_type, details->>'season') job_type
 const bad = runs.filter((r) => r.status !== 'success');
 console.log(`  latest runs: ${runs.length} (${bad.length} not successful)`);
 for (const r of bad) console.log(`    ✗ ${r.job_type} ${r.season ?? ''} ${r.status}: ${r.error ?? ''}`);
+const alt = await q(`SELECT a.name, a.city, a.elevation_ft, count(g.id)::int games FROM arenas a LEFT JOIN games g ON g.arena_id = a.id
+  WHERE a.is_high_altitude GROUP BY 1, 2, 3 ORDER BY 3 DESC, 4 DESC`);
+console.log('  altitude arenas: ' + alt.map((a) => `${a.name} (${a.city}, ${a.elevation_ft} ft, ${a.games} games)`).join(' | '));
 const seedRuns = await q(`SELECT id, status, details->>'players_pruned' pruned, details->>'players_updated' updated, finished_at FROM ingestion_runs WHERE job_type = 'seed_reference' ORDER BY id`);
 console.log('  seed runs: ' + seedRuns.map((r) => `#${r.id} ${r.status} (updated ${r.updated ?? '-'}, pruned ${r.pruned ?? '-'})`).join(' | '));
 await db.end();

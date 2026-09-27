@@ -55,6 +55,7 @@ CREATE TABLE players (
   weight_lb        SMALLINT,
   current_team_id  INTEGER REFERENCES teams (id),  -- roster display only; per-game team lives on stat rows
   is_active        BOOLEAN NOT NULL DEFAULT TRUE,
+  first_season_start SMALLINT,                     -- first NBA season start year (2003 = 2003-04); migration 002
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX players_full_name_idx    ON players (lower(full_name));
@@ -200,11 +201,16 @@ CREATE TABLE player_game_stats (
   ftm SMALLINT, fta SMALLINT, oreb SMALLINT, dreb SMALLINT, reb SMALLINT,
   ast SMALLINT, stl SMALLINT, blk SMALLINT, tov SMALLINT, pf SMALLINT,
   plus_minus  SMALLINT,                             -- NULL before 1996-97
+  -- The PLAYER's own rest (vs team_games.rest_days = the team's schedule):
+  -- differs when he sat out an adjacent game. Matches NBA.com's player splits. (003)
+  player_rest_days SMALLINT CHECK (player_rest_days >= 0),
+  player_b2b_night SMALLINT CHECK (player_b2b_night IN (1, 2)),
   source      TEXT NOT NULL CHECK (source IN ('nba_stats', 'highlightly')),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (game_id, player_id),
   FOREIGN KEY (game_id, team_id) REFERENCES team_games (game_id, team_id) ON DELETE CASCADE,
   CHECK (NOT dnp OR (minutes IS NULL OR minutes = 0)),
+  CONSTRAINT player_game_stats_player_b2b_rest CHECK ((player_b2b_night = 2) <= (player_rest_days = 0)),
   CHECK (fgm <= fga AND fg3m <= fg3a AND ftm <= fta AND fg3m <= fgm),
   CHECK (reb IS NULL OR oreb IS NULL OR dreb IS NULL OR reb = oreb + dreb),
   CHECK (pts IS NULL OR fgm IS NULL OR fg3m IS NULL OR ftm IS NULL OR pts = 2 * fgm + fg3m + ftm)
@@ -258,7 +264,7 @@ CREATE TABLE schema_migrations (
   id          TEXT PRIMARY KEY,
   applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-INSERT INTO schema_migrations (id) VALUES ('001_playoff_series_best_of_2');
+INSERT INTO schema_migrations (id) VALUES ('001_playoff_series_best_of_2'), ('002_players_first_season'), ('003_player_rest');
 
 -- ---------------------------------------------------------------------------
 -- Auth: two-tier (PLATFORM.md §2)

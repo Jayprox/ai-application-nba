@@ -1,0 +1,21 @@
+{
+  "name": "chalk-that-nba-backend-api",
+  "private": true,
+  "description": "Chalk That NBA backend-api: auth + the shared POST /query engine + browse routes (Railway rootDirectory: backend).",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test --test-concurrency=1 'test/*.test.js'",
+    "create-user": "node scripts/create-user.js",
+    "create-api-key": "node scripts/create-api-key.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.13.0",
+    "redis": "^4.7.0"
+  }
+}

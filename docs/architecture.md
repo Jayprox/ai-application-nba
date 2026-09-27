@@ -284,14 +284,17 @@ that are actually real for basketball:
   real situational effects in the NBA (no NFL equivalent).
 - Days of rest (0 / 1 / 2 / 3+)
 - National TV game vs. local broadcast
-- Altitude (Denver + Utah — revised 2026-09-26 from "Denver only", see §6.1)
+- Altitude (Denver + Utah + Mexico City games — see §6.1)
 
 ### 6.1 Split definitions — decided 2026-09-26
 
 All resolved into plain columns at ingestion (PLATFORM.md §2):
 
 - **Altitude** — Denver (Ball Arena, ~5,280 ft) **and Utah** (Delta
-  Center, ~4,200 ft). Stored as `arenas.elevation_ft` for every arena plus
+  Center, ~4,200 ft) as home arenas, **plus Mexico City** (~7,350 ft)
+  for the neutral-site games played there (decided 2026-09-27: the split
+  measures playing at altitude, and Mexico City is the highest venue in
+  the data; ~1-2 games/yr). Rule = any arena >= 4,000 ft. Stored as `arenas.elevation_ft` for every arena plus
   a derived `is_high_altitude` flag, so the threshold can move later
   without re-ingesting.
 - **National TV** — tiered, not boolean: `games.national_tv_tier` =
@@ -304,9 +307,21 @@ All resolved into plain columns at ingestion (PLATFORM.md §2):
   final) stored for structure; no Cup split filter in MVP. Group + QF/SF
   games count as regular season; the final is `season_type = cup_final`
   and excluded from season stats (matches NBA.com, game-id prefix `006`).
-- **Back-to-back / rest** — per *team*, not per game (`team_games.
-  b2b_night` null/1/2, `team_games.rest_days` 0/1/2/3+), computed from
-  each team's local game dates.
+- **Back-to-back / rest** — two flavours, both offered (JD, 2026-09-27):
+  - *Team* rest (`team_games.rest_days` / `b2b_night`, filters `rest` /
+    `b2b`): days since the team's previous game. Works for team and
+    player queries.
+  - *Player* rest (`player_game_stats.player_rest_days` /
+    `player_b2b_night`, filters `player_rest` / `player_b2b`, player
+    queries only): days since the games *he* played — this is what
+    NBA.com's player "Days Rest" split uses (a player back from a 5-game
+    injury has 10+ days of rest even if his team played last night).
+  - Both count **preseason games as played** (incl. the 2020 bubble
+    scrimmages) but never store them: an opener's rest runs from the last
+    preseason game, as on NBA.com (Morant 2019-10-23 = 4 days after
+    10-18; Memphis' first bubble game = 2 days after the 07-28
+    scrimmage). With no earlier game at all, rest is null (only "All").
+  - Buckets 0 / 1 / 2 / 3+; b2b_night null/1/2. All from local game dates.
 
 ## 7. Open — for the build session to work through
 
@@ -386,6 +401,14 @@ Rules (pure functions in `scripts/lib/tagging.mjs`, 13 tests):
 - NBA.com's historical schedule sometimes uses *current* arena names
   (e.g. "Smoothie King Center" for 2003-04 New Orleans).
 
+- **Rest** — team rest from each team's games, player rest from each
+  player's games; `leaguegamelog` *Pre Season* (team + player) supplies
+  the preseason/scrimmage dates that only anchor rest (§6.1). Verified vs
+  NBA.com's Days Rest splits: LeBron 2003-04 20/40/12/7, Morant 2019-20
+  8/42/11/6. Two games on one date get null rest (Shawn Marion,
+  2007-12-19: played for PHX, and is in the MIA @ ATL game that was
+  replayed from the 3rd quarter in March but is dated 12-19).
+
 Games with no winner in NBA.com's log are skipped as "not played" (the
 cancelled BOS-IND game of 2013-04-16 is the known case).
 
@@ -395,6 +418,25 @@ every series has a winner. Spot checks: LeBron 2003-04 = 79 games, 20.9
 PPG (matches his published rookie line); Jokić 2025-26 = 65 games, 27.7.
 Tested end-to-end on real 2003-04 (CLE + Tokyo games) and 2019-20 (POR +
 MEM: bubble + best-of-2 play-in) slices; re-run = no duplicates.
+
+## 7.3 Upcoming-season schedule (as built) — `scripts/load-schedule.mjs`
+
+`npm run db:schedule` (default 2026-27; re-runnable whenever the NBA edits
+the schedule). Loads preseason + regular-season games with every tag
+that's known in advance: venue incl. neutral sites, rest days and
+back-to-back night (recomputed each run — added games change their
+neighbours), national-TV tier, Cup group stage, arena/altitude.
+- Placeholders with no teams yet (Cup quarterfinals/semis/final) are
+  skipped + reported; they load on a later run once teams are set.
+- Preseason exhibitions vs non-NBA clubs (2026-10-12 London @ POR) are
+  skipped; an unknown team in a regular-season game is an error.
+- Never overwrites status/score once a game is live/final (the worker
+  owns results).
+- Rest/b2b: preseason games are tagged among themselves; real games count
+  the team's preseason games as played (opener rest runs from the last
+  preseason game — same rule as the backfill, §6.1).
+- Check: every team has the same number of known regular-season games
+  (80 in Sept 2026; the NBA adds 2 per team after the Cup group stage).
 
 ## 8. Railway (as built)
 

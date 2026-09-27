@@ -90,7 +90,7 @@ async function fetchAll() {
     const parts = String(r.PLAYER).split(' ');
     allPlayers.push({ PERSON_ID: r.PLAYER_ID, DISPLAY_FIRST_LAST: r.PLAYER,
       DISPLAY_LAST_COMMA_FIRST: `${parts.slice(1).join(' ')}, ${parts[0]}`,
-      ROSTERSTATUS: 1, TO_YEAR: '2026', TEAM_ID: r.TeamID });
+      ROSTERSTATUS: 1, FROM_YEAR: '2026', TO_YEAR: '2026', TEAM_ID: r.TeamID });
     rosterOnly++;
   }
   if (rosterOnly) log(`${rosterOnly} rostered player(s) not yet in NBA.com's all-players list — added from rosters`);
@@ -103,6 +103,7 @@ async function fetchAll() {
       return {
         nbaId: p.PERSON_ID, fullName: p.DISPLAY_FIRST_LAST, first: first ?? null, last: last ?? null,
         active: p.ROSTERSTATUS === 1, nbaTeamId: p.ROSTERSTATUS === 1 && p.TEAM_ID ? p.TEAM_ID : null,
+        firstSeason: Number(p.FROM_YEAR) || null,
         position: r?.POSITION || null, heightIn: inches(r?.HEIGHT), weightLb: r?.WEIGHT ? Number(r.WEIGHT) : null,
         birthDate: r?.BIRTH_DATE ? isoDate(r.BIRTH_DATE) : null,
       };
@@ -188,7 +189,7 @@ async function write(db, { teams, hl, players }) {
   const { rows: existing } = await db.query(
     `SELECT source_id, canonical_id FROM entity_id_crosswalk WHERE entity_type = 'player' AND source = 'nba_stats'`);
   const known = new Map(existing.map((r) => [r.source_id, r.canonical_id]));
-  const cols = { id: [], full: [], first: [], last: [], bd: [], pos: [], ht: [], wt: [], team: [], active: [] };
+  const cols = { id: [], full: [], first: [], last: [], bd: [], pos: [], ht: [], wt: [], team: [], active: [], fs: [] };
   const newXw = { canon: [], src: [] };
   for (const p of players) {
     let id = known.get(String(p.nbaId));
@@ -196,19 +197,20 @@ async function write(db, { teams, hl, players }) {
     else { id = randomUUID(); newXw.canon.push(id); newXw.src.push(String(p.nbaId)); counts.players_new++; }
     cols.id.push(id); cols.full.push(p.fullName); cols.first.push(p.first); cols.last.push(p.last);
     cols.bd.push(p.birthDate); cols.pos.push(p.position); cols.ht.push(p.heightIn); cols.wt.push(p.weightLb);
-    cols.team.push(p.nbaTeamId ? teamIdByNba[p.nbaTeamId] ?? null : null); cols.active.push(p.active);
+    cols.team.push(p.nbaTeamId ? teamIdByNba[p.nbaTeamId] ?? null : null); cols.active.push(p.active); cols.fs.push(p.firstSeason);
   }
   await db.query(
-    `INSERT INTO players (id, full_name, first_name, last_name, birth_date, listed_position, height_in, weight_lb, current_team_id, is_active, updated_at)
-     SELECT *, now() FROM unnest($1::uuid[], $2::text[], $3::text[], $4::text[], $5::date[], $6::text[], $7::smallint[], $8::smallint[], $9::int[], $10::bool[])
+    `INSERT INTO players (id, full_name, first_name, last_name, birth_date, listed_position, height_in, weight_lb, current_team_id, is_active, first_season_start, updated_at)
+     SELECT *, now() FROM unnest($1::uuid[], $2::text[], $3::text[], $4::text[], $5::date[], $6::text[], $7::smallint[], $8::smallint[], $9::int[], $10::bool[], $11::smallint[])
      ON CONFLICT (id) DO UPDATE SET full_name = EXCLUDED.full_name, first_name = EXCLUDED.first_name,
        last_name = EXCLUDED.last_name,
        birth_date = COALESCE(EXCLUDED.birth_date, players.birth_date),
        listed_position = COALESCE(EXCLUDED.listed_position, players.listed_position),
        height_in = COALESCE(EXCLUDED.height_in, players.height_in),
        weight_lb = COALESCE(EXCLUDED.weight_lb, players.weight_lb),
-       current_team_id = EXCLUDED.current_team_id, is_active = EXCLUDED.is_active, updated_at = now()`,
-    [cols.id, cols.full, cols.first, cols.last, cols.bd, cols.pos, cols.ht, cols.wt, cols.team, cols.active]);
+       current_team_id = EXCLUDED.current_team_id, is_active = EXCLUDED.is_active,
+       first_season_start = COALESCE(EXCLUDED.first_season_start, players.first_season_start), updated_at = now()`,
+    [cols.id, cols.full, cols.first, cols.last, cols.bd, cols.pos, cols.ht, cols.wt, cols.team, cols.active, cols.fs]);
   if (newXw.canon.length) {
     const r = await db.query(
       `INSERT INTO entity_id_crosswalk (entity_type, canonical_id, source, source_id, match_method)

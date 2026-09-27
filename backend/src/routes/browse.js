@@ -26,7 +26,11 @@ export function browseRoutes(db, { currentSeason = '2026-27' } = {}) {
     const { rows: roster } = await db.query(
       `SELECT id, full_name, listed_position, height_in, weight_lb, birth_date FROM players
         WHERE current_team_id = $1 AND is_active ORDER BY full_name`, [team.id]);
-    res.json({ data: { ...team, roster } });
+    const { rows: types } = await db.query(
+      `SELECT g.season, array_agg(DISTINCT g.season_type ORDER BY g.season_type) AS types
+         FROM team_games tg JOIN games g ON g.id = tg.game_id
+        WHERE tg.team_id = $1 AND g.season_type IN ('regular', 'play_in', 'playoffs') AND g.status = 'final' GROUP BY 1`, [team.id]);
+    res.json({ data: { ...team, roster, season_types: Object.fromEntries(types.map((t) => [t.season, t.types])) } });
   }));
 
   // Seasons that have finished games, newest first, with the season types
@@ -76,12 +80,16 @@ export function browseRoutes(db, { currentSeason = '2026-27' } = {}) {
     const { rows: [p] } = await db.query(
       `SELECT p.*, t.abbreviation AS team, t.full_name AS team_name FROM players p LEFT JOIN teams t ON t.id = p.current_team_id WHERE p.id = $1`, [req.params.id]);
     if (!p) return res.status(404).json({ error: 'player not found' });
+    // Seasons he played, and which game types in each (so the UI can say
+    // "didn't play in the playoffs" instead of showing an unexplained zero).
     const { rows: seasons } = await db.query(
-      `SELECT DISTINCT g.season FROM player_game_stats s JOIN games g ON g.id = s.game_id
-        WHERE s.player_id = $1 AND g.season_type <> 'preseason' AND NOT s.dnp ORDER BY 1 DESC`, [p.id]);
+      `SELECT g.season, array_agg(DISTINCT g.season_type ORDER BY g.season_type) AS types
+         FROM player_game_stats s JOIN games g ON g.id = s.game_id
+        WHERE s.player_id = $1 AND g.season_type IN ('regular', 'play_in', 'playoffs') AND g.status = 'final' AND NOT s.dnp
+        GROUP BY 1 ORDER BY 1 DESC`, [p.id]);
     const { rows: [injury] } = await db.query(
       `SELECT status, description, reported_at, source FROM injury_reports WHERE player_id = $1 ORDER BY reported_at DESC LIMIT 1`, [p.id]);
-    res.json({ data: { ...p, seasons: seasons.map((s) => s.season), current_injury: injury ?? null } });
+    res.json({ data: { ...p, seasons: seasons.map((s) => s.season), season_types: Object.fromEntries(seasons.map((s) => [s.season, s.types])), current_injury: injury ?? null } });
   }));
 
   r.get('/games', wrap(async (req, res) => {

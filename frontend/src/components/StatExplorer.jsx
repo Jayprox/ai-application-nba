@@ -35,7 +35,7 @@ export function buildQuery(entity, id, p) {
   return body;
 }
 
-export default function StatExplorer({ entity, id, name, seasons, defaultSeason }) {
+export default function StatExplorer({ entity, id, name, seasons, seasonTypes = {}, defaultSeason }) {
   const [params, setParams] = useSearchParams();
   const get = (k, d) => params.get(k) ?? d;
   const p = {
@@ -120,7 +120,8 @@ export default function StatExplorer({ entity, id, name, seasons, defaultSeason 
             <ul className="m-0 flex list-none flex-col gap-1 p-0 text-[13px] text-muted">{meta.notes.map((n) => <li key={n}>{n}</li>)}</ul>
           )}
           {meta.sample_size === 0
-            ? <Empty>No {name} games match these filters in the {where}.{splitCount ? ' Try clearing a split.' : ''}</Empty>
+            ? <NoGames name={name} p={p} where={where} splitCount={splitCount} played={p.scope === 'career' ? null : seasonTypes[p.season]}
+                onType={(v) => set('type', v)} onClear={clear} />
             : p.scope === 'career' ? <Career entity={entity} data={data.data} />
             : p.scope === 'game_log' ? <GameLog entity={entity} rows={data.data} restby={p.restby} />
             : <Tiles entity={entity} d={data.data} />}
@@ -131,6 +132,38 @@ export default function StatExplorer({ entity, id, name, seasons, defaultSeason 
       )}
     </section>
   );
+}
+
+const TYPE_NAME = { regular: 'regular season', play_in: 'play-in', playoffs: 'playoffs' };
+const TYPE_BUTTON = { regular: 'Regular season', play_in: 'Play-In', playoffs: 'Playoffs' };
+
+/** Why there are no games, in plain words, with the one-click way out. Exported for tests. */
+export function NoGames({ name, p, where, splitCount, played, onType, onClear }) {
+  const Name = name[0].toUpperCase() + name.slice(1);                  // "the Golden State Warriors" at sentence start
+  const possessive = name.endsWith('s') ? `${name}'` : `${name}'s`;    // "Warriors'", "Curry's"
+  const link = 'cursor-pointer font-medium text-link underline hover:text-link-hover';
+  // A game type he/they simply didn't play that season (e.g. Curry, 2025-26 playoffs: GSW lost in the play-in).
+  if (!splitCount && played && p.type !== 'all' && !played.includes(p.type)) {
+    const other = played.filter((t) => TYPE_NAME[t]);
+    return (
+      <Empty>
+        <p className="m-0 mb-3">{Name} didn't play in the {p.season} {TYPE_NAME[p.type]}.
+          {other.length ? ` Games that season: ${other.map((t) => TYPE_NAME[t]).join(', ')}.` : ''}</p>
+        <div className="flex flex-wrap gap-4">
+          {other.map((t) => <button key={t} type="button" className={link} onClick={() => onType(t)}>Show {TYPE_BUTTON[t]}</button>)}
+        </div>
+      </Empty>
+    );
+  }
+  if (splitCount) {
+    return (
+      <Empty>
+        <p className="m-0 mb-3">None of {possessive} {where} games match {splitCount === 1 ? 'this split' : 'these splits'}.</p>
+        <button type="button" className={link} onClick={onClear}>Clear splits</button>
+      </Empty>
+    );
+  }
+  return <Empty>No games for {name} in the {where}.</Empty>;
 }
 
 const SplitRow = ({ label, children }) => (

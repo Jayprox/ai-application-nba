@@ -31,7 +31,7 @@ export default function PlayerDetail() {
             )}
           </div>
           {p.seasons.length
-            ? <StatExplorer entity="player" id={p.id} name={`${p.full_name}'s`} seasons={p.seasons} defaultSeason={p.seasons[0]} />
+            ? <StatExplorer entity="player" id={p.id} name={p.full_name} seasons={p.seasons} seasonTypes={p.season_types} defaultSeason={p.seasons[0]} />
             : <Empty>No games for {p.full_name} since 2003-04 (where our stats begin).</Empty>}
         </>
       )}

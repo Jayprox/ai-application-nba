@@ -53,6 +53,10 @@ test('player detail lists seasons with data', async () => {
   const r = await s.api('GET', `/players/${p.id}`);
   assert.ok(r.body.data.seasons.includes('2003-04'));
   assert.equal(r.body.data.current_injury, null);
+  assert.deepEqual(r.body.data.season_types['2003-04'], ['regular'], 'rookie LeBron: no playoffs (CLE missed them)');
+  const { rows: [mem] } = await s.db.query("SELECT id FROM teams WHERE abbreviation = 'MEM'");
+  const t = await s.api('GET', `/teams/${mem.id}`);
+  if (t.body.data.season_types['2019-20']) assert.ok(t.body.data.season_types['2019-20'].includes('play_in'));
 });
 
 test('seasons list + a team\'s season roster (trades counted for the team he played for)', async () => {

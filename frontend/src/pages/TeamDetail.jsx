@@ -31,7 +31,7 @@ export default function TeamDetail() {
           </div>
           {latest
             ? <>
-                <StatExplorer entity="team" id={Number(id)} name={t.abbreviation} seasons={list} defaultSeason={latest} />
+                <StatExplorer entity="team" id={Number(id)} name={`the ${t.full_name}`} seasons={list} seasonTypes={t.season_types} defaultSeason={latest} />
                 <Roster teamId={id} teamName={t.name} latest={latest} seasons={list} />
               </>
             : <Empty>No finished games loaded yet.</Empty>}

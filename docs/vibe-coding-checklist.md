@@ -299,7 +299,11 @@ each is actually built, not as it's planned.)*
       `db:backfill --season 2026-27` (reports differences). Migration 004.
       Worker tests: 10 unit + 3 end-to-end (local test DB). Deploys with step 9.*
   - [ ] Injuries: re-test Highlightly once preseason games start (~Oct 2)
-- [ ] Deploy + Phase 6 hardening
+- [x] Deploy — *2026-09-27: backend-api, web, ingestion-worker live on Railway from
+      `main` (all SUCCESS). Verified from the browser: web serves deep links,
+      unauthenticated API calls get 401, CORS allows only the web domain,
+      worker's first run logged (quota 7,466/7,500).*
+- [ ] Phase 6 hardening
 
 **Checkpoint after each feature:** Does it still match the system design? Any drift?
 
@@ -346,6 +350,7 @@ Answer these. If you stumble on any, go back.
 
 | Date | What I built | Decision made | Why |
 |------|-------------|---------------|-----|
+| 2026-09-27 | Deployed to Railway | Web served by a zero-dependency Node server instead of `vite preview`; build tools as regular dependencies | Nothing dev-only in production, and deep links like /players/:id work on refresh |
 | 2026-09-27 | Ingestion worker | Scores every 5 min during game windows, box scores at final + one 3h re-check; unknown players created only when nobody similar exists; NBA.com reconciles weekly | Stays well inside the Highlightly quota; a wrong player link is worse than a delayed one; NBA.com is the source we verified, so it gets the last word |
 | 2026-09-27 | Frontend slice 2 (Teams, Players, Player/Team detail, Leaders) | Player pages default to the player's own rest (NBA.com's definition) with a one-tap switch to the team's schedule; filters live in the URL | "Offer both" without doubling the filter rows; URL state makes any split view shareable and keeps Back working |
 | 2026-09-27 | Frontend slice 1 (sign-in, Scoreboard, Box Score) | Both tokens in localStorage; refresh is single-flight per tab and serialized across tabs with a Web Lock | Refresh tokens rotate and a replay revokes every session, so two tabs refreshing with the same token would sign the user out everywhere |

@@ -111,6 +111,7 @@ test('game log: newest first, carries tags; career totals agree with the season'
   assert.equal(c.status, 200);
   assert.ok(c.body.data.by_season.some((x) => x.season === '2003-04' && x.gp === 79 && x.pts === 20.9));
   assert.deepEqual(c.body.meta.notes, [], 'LeBron started in 2003-04: no partial-career note');
+  assert.equal(c.body.data.by_season[0].team, 'CLE');
 });
 
 test('career note only for players whose careers started before 2003-04', async () => {

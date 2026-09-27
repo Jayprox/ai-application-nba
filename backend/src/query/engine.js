@@ -113,8 +113,9 @@ async function playerQuery(db, v) {
 
   if (v.scope === 'career') {
     const { rows } = await db.query(
-      `SELECT g.season, count(*)::int AS gp, count(*) FILTER (WHERE tg.won)::int AS w, ${avgCols('s')}, ${pctCols('s')}
-         ${base} GROUP BY g.season ORDER BY g.season`, params);
+      `SELECT g.season, string_agg(DISTINCT tm.abbreviation, '/') AS team, count(*)::int AS gp, count(*) FILTER (WHERE tg.won)::int AS w, ${avgCols('s')}, ${pctCols('s')}
+         ${base.replace('LEFT JOIN arenas a ON a.id = g.arena_id', 'LEFT JOIN arenas a ON a.id = g.arena_id JOIN teams tm ON tm.id = s.team_id')}
+        GROUP BY g.season ORDER BY g.season`, params);
     const { rows: [tot] } = await db.query(`SELECT count(*)::int AS gp, count(*) FILTER (WHERE tg.won)::int AS w, ${avgCols('s')}, ${pctCols('s')} ${base}`, params);
     return { data: { totals: stripCounts(tot), by_season: rows.map(stripCounts) }, sample: tot.gp, record: `${tot.w}-${tot.gp - tot.w}`, notes, player };
   }

@@ -4,7 +4,11 @@ import Layout from './components/Layout.jsx';
 import Login from './pages/Login.jsx';
 import Scoreboard from './pages/Scoreboard.jsx';
 import BoxScore from './pages/BoxScore.jsx';
-import ComingSoon from './pages/ComingSoon.jsx';
+import Teams from './pages/Teams.jsx';
+import TeamDetail from './pages/TeamDetail.jsx';
+import Players from './pages/Players.jsx';
+import PlayerDetail from './pages/PlayerDetail.jsx';
+import Leaders from './pages/Leaders.jsx';
 import NotFound from './pages/NotFound.jsx';
 
 export default function App() {
@@ -16,9 +20,11 @@ export default function App() {
           <Route element={<RequireAuth><Layout /></RequireAuth>}>
             <Route index element={<Scoreboard />} />
             <Route path="games/:id" element={<BoxScore />} />
-            <Route path="teams/*" element={<ComingSoon title="Teams" />} />
-            <Route path="players/*" element={<ComingSoon title="Players" />} />
-            <Route path="leaders" element={<ComingSoon title="Leaders" />} />
+            <Route path="teams" element={<Teams />} />
+            <Route path="teams/:id" element={<TeamDetail />} />
+            <Route path="players" element={<Players />} />
+            <Route path="players/:id" element={<PlayerDetail />} />
+            <Route path="leaders" element={<Leaders />} />
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>

@@ -5,7 +5,7 @@ import { matchesSearch } from '../lib/names.js';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SEARCH_CAP = 100;
 
-export function browseRoutes(db) {
+export function browseRoutes(db, { currentSeason = '2026-27' } = {}) {
   const r = Router();
   const wrap = (fn) => (req, res, next) => fn(req, res).catch(next);
 
@@ -27,6 +27,32 @@ export function browseRoutes(db) {
       `SELECT id, full_name, listed_position, height_in, weight_lb, birth_date FROM players
         WHERE current_team_id = $1 AND is_active ORDER BY full_name`, [team.id]);
     res.json({ data: { ...team, roster } });
+  }));
+
+  // Seasons that have finished games, newest first, with the season types
+  // played in each: drives every season picker (and the "latest season" default).
+  r.get('/seasons', wrap(async (_req, res) => {
+    const { rows } = await db.query(
+      `SELECT season, array_agg(DISTINCT season_type ORDER BY season_type) AS types, count(*)::int AS final_games
+         FROM games WHERE status = 'final' AND season_type <> 'preseason' GROUP BY season ORDER BY season DESC`);
+    res.json({ data: rows, meta: { current_season: currentSeason, latest_with_games: rows[0]?.season ?? null } });
+  }));
+
+  // Everyone who played for a team in a season (trades included), per-game averages.
+  r.get('/teams/:id/players', wrap(async (req, res) => {
+    if (!/^\d+$/.test(req.params.id)) return res.status(404).json({ error: 'team not found' });
+    const season = String(req.query.season ?? '');
+    if (!/^\d{4}-\d{2}$/.test(season)) return res.status(400).json({ error: 'season=YYYY-YY is required' });
+    const types = { regular: ['regular'], play_in: ['play_in'], playoffs: ['playoffs'], all: ['regular', 'play_in', 'playoffs'] }[req.query.season_type ?? 'regular'];
+    if (!types) return res.status(400).json({ error: 'season_type must be regular, play_in, playoffs or all' });
+    const { rows } = await db.query(
+      `SELECT p.id AS player_id, p.full_name, count(*)::int AS gp,
+              round(avg(s.minutes)::numeric, 1)::float8 AS minutes, round(avg(s.pts)::numeric, 1)::float8 AS pts,
+              round(avg(s.reb)::numeric, 1)::float8 AS reb, round(avg(s.ast)::numeric, 1)::float8 AS ast
+         FROM player_game_stats s JOIN games g ON g.id = s.game_id JOIN players p ON p.id = s.player_id
+        WHERE s.team_id = $1 AND g.season = $2 AND g.season_type = ANY($3::text[]) AND g.status = 'final' AND NOT s.dnp
+        GROUP BY p.id, p.full_name ORDER BY pts DESC NULLS LAST, gp DESC, p.full_name`, [Number(req.params.id), season, types]);
+    res.json({ data: rows, meta: { season, season_type: req.query.season_type ?? 'regular', count: rows.length } });
   }));
 
   // Name search is accent/suffix/punctuation tolerant ("jokic", "cook", "pj").

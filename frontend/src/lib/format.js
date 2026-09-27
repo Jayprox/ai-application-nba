@@ -48,3 +48,23 @@ export const tvLabel = (tier, nets) => (tier === 'local' || !nets?.length ? 'Loc
 export const mins = (m) => (m == null ? '' : String(Math.round(Number(m))));
 export const pm = (v) => (v == null ? '' : v > 0 ? `+${v}` : String(v));
 export const made = (m, a) => (m == null || a == null ? '' : `${m}-${a}`);
+
+/** Per-game average: 27.7, or an em dash when there's no value. */
+export const avg = (v) => (v == null ? '—' : Number(v).toFixed(1));
+/** Shooting percentage the NBA way: .561 */
+export const pct = (v) => (v == null ? '—' : v >= 1 ? '1.000' : `.${String(Math.round(v * 1000)).padStart(3, '0')}`);
+/** Signed average: +4.2 / -1.0 */
+export const signedAvg = (v) => (v == null ? '—' : `${v > 0 ? '+' : ''}${Number(v).toFixed(1)}`);
+
+/** "just now", "12 min ago", "3 h ago", "2 days ago" */
+export function ago(iso, now = Date.now()) {
+  if (!iso) return null;
+  const s = Math.max(0, (now - new Date(iso).getTime()) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  const d = Math.floor(s / 86400);
+  return `${d} day${d === 1 ? '' : 's'} ago`;
+}
+
+export const SEASON_TYPE_LOWER = { regular: 'regular season', play_in: 'play-in', playoffs: 'playoffs', all: 'all game types' };

@@ -280,7 +280,7 @@ each is actually built, not as it's planned.)*
       home/road, Days Rest 20/40/12/7, last 5/10), Morant 2019-20 (67 g,
       bubble games neutral, Days Rest 8/42/11/6). Migration 003 = player
       rest columns.*
-- [ ] Frontend scaffold + the 8 screens in mockup order (stale-key
+- [x] Frontend scaffold + the 8 screens in mockup order (stale-key
       fetch-hook pattern from day one) — *JD: slice first, usable on phones.*
   - [x] Slice 1: scaffold (React + Vite + Tailwind v4 + React Router 7,
         `frontend/`), sign-in, Scoreboard (prev/next skip to the nearest
@@ -288,8 +288,12 @@ each is actually built, not as it's planned.)*
         stale-key hook + cross-tab-safe token refresh, both unit-tested
         (11 tests). Backend: `/games` returns prev/next game days; DATE
         columns come back as 'YYYY-MM-DD'; `npm run dev` reads the root .env.
-  - [ ] Slice 2: Teams, Team detail, Players (Active toggle), Player
-        detail (scopes + both rest filters), Leaders
+  - [x] Slice 2: Teams, Team detail (explorer + season roster), Players
+        (search, team filter, Active toggle), Player detail (5 scopes, season
+        type, 5 splits, "rest measured by: his games / team's schedule"),
+        Leaders (6 stats, 70% qualifier). One shared StatExplorer drives both
+        detail pages; every control lives in the URL. Backend: GET /seasons,
+        GET /teams/:id/players, team per season in career. 16 frontend tests.
 - [ ] Ingestion worker (Highlightly) — after the preseason injury re-test
 - [ ] Deploy + Phase 6 hardening
 
@@ -338,6 +342,7 @@ Answer these. If you stumble on any, go back.
 
 | Date | What I built | Decision made | Why |
 |------|-------------|---------------|-----|
+| 2026-09-27 | Frontend slice 2 (Teams, Players, Player/Team detail, Leaders) | Player pages default to the player's own rest (NBA.com's definition) with a one-tap switch to the team's schedule; filters live in the URL | "Offer both" without doubling the filter rows; URL state makes any split view shareable and keeps Back working |
 | 2026-09-27 | Frontend slice 1 (sign-in, Scoreboard, Box Score) | Both tokens in localStorage; refresh is single-flight per tab and serialized across tabs with a Web Lock | Refresh tokens rotate and a replay revokes every session, so two tabs refreshing with the same token would sign the user out everywhere |
 | 2026-09-27 | Core API + player rest (migration 003) | Offer both team rest and player rest; preseason games count as "played" for rest | NBA.com's player Days Rest split uses the player's own games, and measures an opener from the last preseason game; matching it exactly is how the numbers can be verified |
 | 2026-09-27 | Schedule loader | Altitude includes Mexico City (any arena >= 4,000 ft) | Mexico City (~7,350 ft) is higher than Denver; the split is about playing at altitude |

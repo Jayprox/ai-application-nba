@@ -54,3 +54,20 @@ test('player detail lists seasons with data', async () => {
   assert.ok(r.body.data.seasons.includes('2003-04'));
   assert.equal(r.body.data.current_injury, null);
 });
+
+test('seasons list + a team\'s season roster (trades counted for the team he played for)', async () => {
+  const r = await s.api('GET', '/seasons');
+  assert.equal(r.status, 200);
+  assert.ok(r.body.data.length >= 2);
+  assert.ok(r.body.data[0].season > r.body.data.at(-1).season, 'newest first');
+  assert.equal(r.body.meta.latest_with_games, r.body.data[0].season);
+  assert.ok(r.body.data.every((x) => !x.types.includes('preseason')));
+  const { rows: [cle] } = await s.db.query("SELECT id FROM teams WHERE abbreviation = 'CLE'");
+  const roster = await s.api('GET', `/teams/${cle.id}/players?season=2003-04`);
+  assert.equal(roster.status, 200);
+  const lbj = roster.body.data.find((p) => p.full_name === 'LeBron James');
+  assert.equal(lbj.gp, 79);
+  assert.equal(lbj.pts, 20.9);
+  assert.equal((await s.api('GET', `/teams/${cle.id}/players`)).status, 400);
+  assert.equal((await s.api('GET', `/teams/${cle.id}/players?season=2003-04&season_type=x`)).status, 400);
+});

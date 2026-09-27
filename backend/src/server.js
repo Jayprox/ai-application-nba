@@ -24,7 +24,7 @@ export function createApp({ db, cache, corsOrigins = (process.env.CORS_ORIGIN ??
   app.use(authRoutes(db));                         // /login /refresh /logout (public)
   app.use(authenticate(db));                       // everything below needs JWT or API key
   app.use(queryRoutes(db, cache, { currentSeason }));
-  app.use(browseRoutes(db));
+  app.use(browseRoutes(db, { currentSeason }));
 
   app.use((_req, res) => res.status(404).json({ error: 'not found' }));
   app.use((err, _req, res, _next) => {             // never leak stack traces

@@ -94,7 +94,8 @@ CREATE TABLE playoff_series (
                        CHECK (round IN ('play_in', 'first_round', 'conf_semis', 'conf_finals', 'finals')),
   conference           TEXT CHECK (conference IN ('East', 'West')),
   bracket_slot         TEXT NOT NULL,
-  best_of              SMALLINT NOT NULL CHECK (best_of IN (1, 7)),
+  -- best-of-2: the 2019-20 bubble play-in (8th seed needed 1 win, 9th needed 2).
+  best_of              SMALLINT NOT NULL CONSTRAINT playoff_series_best_of_check CHECK (best_of IN (1, 2, 7)),
   higher_seed          SMALLINT CHECK (higher_seed BETWEEN 1 AND 10),
   lower_seed           SMALLINT CHECK (lower_seed BETWEEN 1 AND 10),
   higher_seed_team_id  INTEGER REFERENCES teams (id),  -- null until the matchup is set
@@ -102,7 +103,8 @@ CREATE TABLE playoff_series (
   winner_team_id       INTEGER REFERENCES teams (id),  -- a fact, not a derived count
   UNIQUE (season, bracket_slot),
   CHECK ((round = 'finals') = (conference IS NULL)),
-  CHECK ((round = 'play_in') = (best_of = 1)),
+  CONSTRAINT playoff_series_playin_length CHECK (round <> 'play_in' OR best_of IN (1, 2)),
+  CONSTRAINT playoff_series_playoff_length CHECK (round = 'play_in' OR best_of = 7),
   CHECK (winner_team_id IS NULL OR winner_team_id IN (higher_seed_team_id, lower_seed_team_id))
 );
 
@@ -247,6 +249,16 @@ CREATE TABLE ingestion_runs (
   error            TEXT
 );
 CREATE INDEX ingestion_runs_latest_idx ON ingestion_runs (job_type, finished_at DESC) WHERE status = 'success';
+
+-- ---------------------------------------------------------------------------
+-- Migrations applied (scripts/db-migrate.mjs). A fresh install from this file
+-- already contains every migration below, so they're recorded as applied.
+-- ---------------------------------------------------------------------------
+CREATE TABLE schema_migrations (
+  id          TEXT PRIMARY KEY,
+  applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO schema_migrations (id) VALUES ('001_playoff_series_best_of_2');
 
 -- ---------------------------------------------------------------------------
 -- Auth: two-tier (PLATFORM.md §2)

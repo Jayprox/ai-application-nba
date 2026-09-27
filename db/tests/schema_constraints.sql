@@ -79,7 +79,13 @@ VALUES ('2025-26', 'cup_final', 'final', '2025-12-16', 903, 904, TRUE, 'major', 
 INSERT INTO injury_reports (player_id, team_id, status, description, reported_at, source)
 VALUES ('00000000-0000-0000-0000-000000000002', 901, 'out', 'Left ankle sprain', now(), 'test');
 
-DO $$ BEGIN RAISE NOTICE 'PASS  happy path: real game, DNP row, crosswalk, play-in, playoffs, cup final, injury'; END $$;
+-- 2019-20 bubble play-in: best-of-2, 8th (POR) vs 9th (MEM)
+INSERT INTO teams (id, abbreviation, city, name, full_name, conference, division) VALUES
+  (905, 'POR', 'Portland', 'Trail Blazers', 'Portland Trail Blazers', 'West', 'Northwest');
+INSERT INTO playoff_series (season, round, conference, bracket_slot, best_of, higher_seed, lower_seed, higher_seed_team_id, lower_seed_team_id, winner_team_id)
+VALUES ('2019-20', 'play_in', 'West', 'W-8v9', 2, 8, 9, 905, 902, 905);
+
+DO $$ BEGIN RAISE NOTICE 'PASS  happy path: real game, DNP row, crosswalk, play-in, best-of-2 bubble play-in, playoffs, cup final, injury'; END $$;
 
 -- Split query shape sanity: 2nd night of a back-to-back, away, altitude join works
 DO $$
@@ -119,6 +125,10 @@ SELECT pg_temp.expect_fail('unknown national_tv_tier',
   $q$INSERT INTO games (season, season_type, game_date_local, home_team_id, away_team_id, national_tv_tier) VALUES ('2025-26','regular','2026-01-01',901,902,'regional')$q$);
 SELECT pg_temp.expect_fail('play-in series with best_of 7',
   $q$INSERT INTO playoff_series (season, round, conference, bracket_slot, best_of) VALUES ('2025-26','play_in','East','E-9v10',7)$q$);
+SELECT pg_temp.expect_fail('playoff series that is not best-of-7',
+  $q$INSERT INTO playoff_series (season, round, conference, bracket_slot, best_of) VALUES ('2025-26','first_round','East','E-R1-4v5',2)$q$);
+SELECT pg_temp.expect_fail('series of an impossible length',
+  $q$INSERT INTO playoff_series (season, round, conference, bracket_slot, best_of) VALUES ('2025-26','play_in','East','E-7v8x',3)$q$);
 SELECT pg_temp.expect_fail('finals series with a conference',
   $q$INSERT INTO playoff_series (season, round, conference, bracket_slot, best_of) VALUES ('2025-26','finals','East','FINALS',7)$q$);
 SELECT pg_temp.expect_fail('series winner not in the series',

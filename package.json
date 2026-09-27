@@ -1,0 +1,21 @@
+{
+  "name": "chalk-that-nba-scripts",
+  "private": true,
+  "description": "Repo-root one-off scripts (schema apply, backfills). Services (backend/, frontend/, worker/) each get their own package.json.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "db:apply": "node scripts/db-apply-schema.mjs",
+    "db:test": "node scripts/db-apply-schema.mjs --test-only",
+    "test": "node --test 'scripts/lib/*.test.mjs'",
+    "db:seed": "node scripts/seed.mjs",
+    "db:migrate": "node scripts/db-migrate.mjs",
+    "db:backfill": "node scripts/backfill.mjs",
+    "db:status": "node scripts/db-status.mjs"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  }
+}

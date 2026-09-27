@@ -228,14 +228,46 @@ DECISIONS FROM THE MOCKUP (defaults as built, JD approved the screens):
 *(To be worked out together once Phases 1–4 are settled. Check items off as
 each is actually built, not as it's planned.)*
 
-- [ ] Schema / DB setup
-- [ ] Seed data
-- [ ] Core API routes
-- [ ] Historical data backfill
-- [ ] Frontend scaffold
-- [ ] Features (list TBD)
-- [ ] Ingestion worker automation
-- [ ] Deploy
+*(Order agreed with JD 2026-09-26.)*
+
+- [x] Railway project — `chalk-that-nba`: Postgres + Redis, empty
+      backend-api / web / ingestion-worker, both public domains generated
+      and cross-wired (CORS_ORIGIN, VITE_API_URL) before any build.
+      Details: architecture.md §8.
+- [x] Schema live on Railway Postgres + constraint tests run against it
+      *(Done 2026-09-26: `npm run db:apply` (scripts/db-apply-schema.mjs)
+      from JD's Mac -> 13 tables on Railway Postgres 18.6, all 23
+      constraint tests PASS. Needed a TCP proxy on Postgres (none by
+      default) plus a DATABASE_PUBLIC_URL variable Railway hadn't created
+      because the proxy came after the DB — script now rejects
+      `*.railway.internal` hosts with a clear message.)*
+- [x] Seed: arenas (elevation), 30 teams, team + player crosswalks
+      (NBA.com + Highlightly) — `npm run db:seed`. *Live 2026-09-26: 30
+      teams (60 team crosswalk rows), altitude DEN+UTA; re-run for the
+      2003-04 scope pruned 471 pre-2003 players -> 2,519 players, 610
+      active (2026-27 list).*
+- [x] Historical backfill 2003-04 -> 2025-26 (scope revised from 1996-97),
+      all season types, split tags derived at load, logged to
+      ingestion_runs — `npm run db:backfill` (runs on JD's Mac).
+      *Live 2026-09-26: 23/23 seasons, 29,653 games, 618,623 player rows,
+      382 series (15/season through 2019-20 + the bubble play-in, 21/season
+      from 2020-21), 0 failed runs (`npm run db:status`). Spot checks exact:
+      LeBron 2003-04 79 GP / 20.9 PPG, Jokić 2025-26 65 GP / 27.7 PPG.
+      First pass caught two real issues, both fixed: (1) the cancelled
+      BOS-IND game of 2013-04-16 (Boston Marathon bombing) is still in
+      NBA.com's log with no winner and 0 points -> counted as a loss for
+      both until the standings W-L check rolled 2012-13 back; games with no
+      winner are now skipped + reported. (2) 2019-20 hit the best-of-2 rule
+      because migration 001 hadn't run (zsh doesn't allow inline `#`
+      comments interactively — command lists I give JD carry no comments).
+      2019-20 neutral = 175 (172 Orlando bubble + 2 Mexico City + 1 Paris).*
+- [ ] 2026-27 schedule + national-TV / neutral-site tags (JD's Mac)
+- [ ] Core API: auth, POST /query (all scopes/splits/leaderboard), browse
+      routes; verified against NBA.com numbers
+- [ ] Frontend scaffold + the 8 screens in mockup order (stale-key
+      fetch-hook pattern from day one)
+- [ ] Ingestion worker (Highlightly) — after the preseason injury re-test
+- [ ] Deploy + Phase 6 hardening
 
 **Checkpoint after each feature:** Does it still match the system design? Any drift?
 
@@ -282,6 +314,8 @@ Answer these. If you stumble on any, go back.
 
 | Date | What I built | Decision made | Why |
 |------|-------------|---------------|-----|
+| 2026-09-26 | Backfill live: 23 seasons, 618K player rows | Games with no winner are "not played" and skipped | NBA.com keeps the cancelled 2013-04-16 BOS-IND game in its logs; the independent standings W-L check caught it before bad data landed |
+| 2026-09-26 | Backfill design | History starts 2003-04 (not 1996-97); neutral-site rule for pre-2024-25; best-of-2 series (migration 001) | NBA.com has no national-TV data or local tip times before 2003-04, and still covers every active career; NBA.com only flags neutral sites from 2024-25, so the 2020 bubble/international games needed a rule |
 | 2026-09-26 | Phase 4: clickable mockup of all 8 screens on real data | Landing page = Scoreboard; login = plain sign-in card; Last-N applies after splits | Building the mock on real data surfaced the Last-N/split ordering question before any query-engine code existed |
 | 2026-09-26 | Phase 3 scope | Added Scoreboard + Box Score screens; leaderboard qualifier = 70% of team games; season-type selector (Regular default); Active toggle on player search (default on) | NBA fans think in games/nights; a qualifier keeps 1-game outliers off leaderboards; mixing playoff and regular stats silently would be wrong numbers |
 | 2026-09-26 | `db/schema.sql` + `db/tests/schema_constraints.sql` | Split tags live on a per-team `team_games` row, not on `games`; stat-consistency CHECKs enforced at write time | Rest/back-to-back differ between the two teams in one game; the CHECKs passed against 52K real NBA.com rows, so any violation later is an ingestion bug worth failing loudly on |

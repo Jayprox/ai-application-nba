@@ -155,6 +155,30 @@ Consequence: two vendor id spaces from day one (NBA.com + Highlightly)
 for teams, players, and games — exactly what the crosswalk table in
 PLATFORM.md §2 exists for.
 
+### 3.3 Player-name matching (decided 2026-09-26)
+
+Chalk That NFL once hid James Cook because he's "James Cook III". Measured
+on NBA.com's 2,989 players since 1996-97: 90 suffixes (33 active; even
+NBA.com writes both "Jr." and "Jr"), 21 accented names (Highlightly drops
+accents: "Nikola Jokic"), 63 with periods/apostrophes, 39 hyphenated.
+Stripping all of that makes **20 pairs of different people collide**
+(Tim Hardaway / Tim Hardaway Jr., Gary Payton / Gary Payton II, two
+different Mike James), so a normalized name is never an identity.
+
+`scripts/lib/names.mjs` (tests: `npm test`, 11 cases from real names):
+- `nameKey()` — accents, case, punctuation, hyphens, suffix removed.
+  Used to *find candidates* and for UI search (`matchesSearch`: "cook",
+  "jokic", "pj", "lu don" all work).
+- `matchPlayer()` — decides within a pool of players on *that team around
+  that date*: unique key match -> matched; several -> exact suffix
+  decides, else `manual_review`; none -> first initial + last name
+  (Nic/Nicolas Claxton), else `manual_review`. Never guesses.
+- Highlightly player ids are matched lazily at ingestion (option (a)), not
+  bulk-matched up front. Dry-run: all 24 Highlightly names in MEM @ HOU
+  2026-04-12 matched their NBA.com players.
+- Per PLATFORM.md's no-shared-code rule, the worker and backend keep their
+  own copies of this module *and its test file*.
+
 ## 4. Schema
 
 **One unified `player_game_stats` table** — not split by position/role the
@@ -301,3 +325,95 @@ All resolved into plain columns at ingestion (PLATFORM.md §2):
   checklist.md` (copied into this repo) phase by phase, same as NFL was
   built from it.
 - Railway project setup, per PLATFORM.md §4's topology.
+
+## 7.1 Seed (as built) — `scripts/seed.mjs`
+
+Reference data from real sources, one transaction, logged to
+`ingestion_runs`, re-runnable (upserts on stable keys):
+- Teams/conference/division: NBA.com standings. Canonical abbreviation =
+  NBA.com tricode. Highlightly team ids matched **by nickname** (its
+  abbreviations differ: GS, NO, NY, SA, UTAH, WSH).
+- Home arena = the team's most common non-neutral regular-season arena in
+  NBA.com's schedule (Spurs play 3 home games in Austin; home stays Frost
+  Bank Center — the Austin games carry their own arena on the game row).
+  TBD placeholder games (teamId 0) are ignored.
+- Elevation: Open-Meteo geocoding (city elevation, state-matched, most
+  populous). New Orleans has no elevation there -> stored NULL with a
+  warning. `is_high_altitude` = elevation >= 4,000 ft; the seed fails
+  unless that set is exactly DEN (5,279) + UTA (4,262).
+- Players: every NBA.com player whose last season is 1996-97 or later,
+  plus anyone on a 2026-27 roster not yet in that list (e.g. 2026
+  draftees). Position/height/weight/birth date from rosters (current
+  players only; blanks allowed for fresh signings).
+
+## 7.2 Historical backfill (as built) — `scripts/backfill.mjs`
+
+**Scope changed 2026-09-26: history starts at 2003-04, not 1996-97** (JD's
+call). Every active player's full career is still covered — LeBron's
+2003-04 rookie year is the earliest active start. It removes two problems
+outright: NBA.com has no national-TV data before 2003-04 (0 games in
+1996-97, 2 in 2002-03 vs ~230-330/yr after) and no local tip times before
+2003-04. Retired players who started earlier (Kobe, Duncan, Dirk) show
+partial careers — the UI labels "stats begin 2003-04". Older seasons can
+be added later; the backfill is per-season. Seed now keeps players whose
+last season is 2003-04+ (NBA.com's 2026-27 list: 2,519) and prunes the
+rest (only if they have no stats).
+
+Sources per season: `scheduleleaguev2` (arena, local tip time, playoff/Cup
+labels, national TV — every season back to 1996-97), `leaguegamelog`
+team + player for Regular Season / Playoffs / PlayIn (2019-20+) / IST
+(2023-24+, only the 006 Cup final — the rest repeat Regular Season),
+`leaguestandingsv3` (seeds + the W-L check). One transaction per season;
+upserts keyed through the crosswalk; logged to `ingestion_runs`.
+
+Rules (pure functions in `scripts/lib/tagging.mjs`, 13 tests):
+- **Neutral site** — NBA.com only flags these from 2024-25. Rule: NBA.com
+  flag, OR outside the US/Canada, OR 2019-20 Orlando bubble (from
+  2020-07-30), OR Las Vegas. Alternate home venues stay home games
+  (Clippers-Anaheim, Hornets-OKC 2005-07, Spurs-Austin, Raptors-Tampa
+  2020-21). A generic "not the usual arena" rule was rejected: arenas get
+  renamed mid-season (Cleveland, Phoenix 2024-25).
+- **Altitude** — elevation by *city*, so renamed arenas keep it (Pepsi
+  Center, EnergySolutions/Vivint arenas all flagged).
+- **Series** — from game ids (004YY00RSG / 005…); seeds from standings;
+  Finals higher seed = better record. Play-in slots `E-7v8`, `E-9v10`,
+  `E-8seed`; 2019-20 bubble play-in `W-8v9` is **best-of-2** (schema
+  migration `001`).
+- **Franchises** — relocated/renamed teams (SEA, NJN, NOH) map to the
+  franchise's permanent NBA.com team id, as NBA.com does (Seattle's
+  games belong to the Thunder franchise). Historical team names aren't
+  modeled yet.
+- NBA.com's historical schedule sometimes uses *current* arena names
+  (e.g. "Smoothie King Center" for 2003-04 New Orleans).
+
+Games with no winner in NBA.com's log are skipped as "not played" (the
+cancelled BOS-IND game of 2013-04-16 is the known case).
+
+Checks per season (independent of the load): every team's regular-season
+W-L equals NBA.com's standings; player rows loaded = rows in the logs;
+every series has a winner. Spot checks: LeBron 2003-04 = 79 games, 20.9
+PPG (matches his published rookie line); Jokić 2025-26 = 65 games, 27.7.
+Tested end-to-end on real 2003-04 (CLE + Tokyo games) and 2019-20 (POR +
+MEM: bubble + best-of-2 play-in) slices; re-run = no duplicates.
+
+## 8. Railway (as built)
+
+Created 2026-09-26, per PLATFORM.md §4. Project `chalk-that-nba`,
+environment `production`, region europe-west4 (workspace default — same
+as chalk-that-nfl).
+
+| Service | Source | Domain | Variables |
+|---|---|---|---|
+| Postgres (18) | Railway template | private only | managed |
+| Redis (8.2) | Railway template | private only | managed |
+| backend-api | empty (connect repo later, rootDirectory `backend`) | backend-api-production-f05a.up.railway.app → :8080 | DATABASE_URL, REDIS_URL (refs), CORS_ORIGIN = web domain, NODE_ENV; **JWT_SECRET set by JD** |
+| web | empty (rootDirectory `frontend`) | web-production-081bcf.up.railway.app → :8080 | VITE_API_URL = backend domain (set before first build — PLATFORM.md §4 gotcha), NODE_ENV |
+| ingestion-worker | empty (rootDirectory `worker`) | none (by design) | DATABASE_URL, REDIS_URL (refs), NODE_ENV; HIGHLIGHTLY_API_KEY to be set by JD |
+
+Backfill scripts run on JD's Mac against Postgres's public connection
+string (`DATABASE_PUBLIC_URL`), since NBA.com blocks Railway IPs.
+Postgres public endpoint: TCP proxy `iriguchi.proxy.rlwy.net:37012` ->
+5432 (added 2026-09-26). `DATABASE_PUBLIC_URL` on the Postgres service was
+added by hand with Railway's standard reference definition — the template
+only creates it when a proxy exists at creation time.
+

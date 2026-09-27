@@ -25,4 +25,16 @@ const alt = await q(`SELECT a.name, a.city, a.elevation_ft, count(g.id)::int gam
 console.log('  altitude arenas: ' + alt.map((a) => `${a.name} (${a.city}, ${a.elevation_ft} ft, ${a.games} games)`).join(' | '));
 const seedRuns = await q(`SELECT id, status, details->>'players_pruned' pruned, details->>'players_updated' updated, finished_at FROM ingestion_runs WHERE job_type = 'seed_reference' ORDER BY id`);
 console.log('  seed runs: ' + seedRuns.map((r) => `#${r.id} ${r.status} (updated ${r.updated ?? '-'}, pruned ${r.pruned ?? '-'})`).join(' | '));
+// Ingestion worker (Highlightly): last run, quota, players waiting for a human.
+const [w] = await q(`SELECT count(*)::int runs, max(finished_at) FILTER (WHERE status = 'success') last_ok,
+  count(*) FILTER (WHERE status = 'failed' AND started_at > now() - interval '1 day')::int failed_24h,
+  (SELECT details->'quota' FROM ingestion_runs WHERE job_type = 'sync_scores_box' AND details ? 'quota' ORDER BY id DESC LIMIT 1) quota
+  FROM ingestion_runs WHERE job_type = 'sync_scores_box'`);
+const review = await q(`SELECT source_id, match_method FROM entity_id_crosswalk WHERE entity_type = 'player' AND match_status = 'manual_review' ORDER BY id`);
+const [created] = await q(`SELECT count(*)::int n FROM entity_id_crosswalk x WHERE x.entity_type = 'player' AND x.match_method = 'created_by_worker'
+  AND NOT EXISTS (SELECT 1 FROM entity_id_crosswalk y WHERE y.entity_type = 'player' AND y.source = 'nba_stats' AND y.canonical_id = x.canonical_id)`);
+console.log(`  worker: ${w.runs ? `${w.runs} runs, last success ${w.last_ok ? new Date(w.last_ok).toISOString() : 'never'}, ${w.failed_24h} failed in 24h` : 'no runs yet'}` +
+  (w.quota?.remaining != null ? `, Highlightly quota ${w.quota.remaining}/${w.quota.limit}` : '') +
+  ` · ${created.n} worker-created player(s) not on NBA.com yet · ${review.length} held for review`);
+for (const r of review.slice(0, 10)) console.log(`    ? highlightly player ${r.source_id}: ${r.match_method}`);
 await db.end();

@@ -19,6 +19,7 @@ import pg from 'pg';
 import { randomUUID } from 'node:crypto';
 import { loadEnv, publicDbUrl } from './lib/env.mjs';
 import { rows, nbaStandings, nbaAllPlayers, nbaRoster, nbaSchedule, highlightlyMatches, geocode } from './lib/sources.mjs';
+import { linkToWorkerCreated, workerCreatedPlayers } from './lib/worker-players.mjs';
 
 const STANDINGS_SEASON = '2025-26';          // conferences/divisions
 const ROSTER_SEASONS = ['2026-27', '2025-26']; // first one with data wins
@@ -190,11 +191,17 @@ async function write(db, { teams, hl, players }) {
     `SELECT source_id, canonical_id FROM entity_id_crosswalk WHERE entity_type = 'player' AND source = 'nba_stats'`);
   const known = new Map(existing.map((r) => [r.source_id, r.canonical_id]));
   const cols = { id: [], full: [], first: [], last: [], bd: [], pos: [], ht: [], wt: [], team: [], active: [], fs: [] };
-  const newXw = { canon: [], src: [] };
+  const newXw = { canon: [], src: [], method: [] };
+  // Newcomers the ingestion worker already created from Highlightly get linked, not duplicated.
+  const linked = linkToWorkerCreated(
+    players.filter((p) => !known.has(String(p.nbaId))).map((p) => ({ nbaId: p.nbaId, name: p.fullName, teamId: p.nbaTeamId ? teamIdByNba[p.nbaTeamId] ?? null : null })),
+    await workerCreatedPlayers(db));
+  counts.players_linked = linked.size;
   for (const p of players) {
     let id = known.get(String(p.nbaId));
     if (id) counts.players_updated++;
-    else { id = randomUUID(); newXw.canon.push(id); newXw.src.push(String(p.nbaId)); counts.players_new++; }
+    else if (linked.has(String(p.nbaId))) { id = linked.get(String(p.nbaId)); newXw.canon.push(id); newXw.src.push(String(p.nbaId)); newXw.method.push('name+team (worker-created)'); }
+    else { id = randomUUID(); newXw.canon.push(id); newXw.src.push(String(p.nbaId)); newXw.method.push('exact_id'); counts.players_new++; }
     cols.id.push(id); cols.full.push(p.fullName); cols.first.push(p.first); cols.last.push(p.last);
     cols.bd.push(p.birthDate); cols.pos.push(p.position); cols.ht.push(p.heightIn); cols.wt.push(p.weightLb);
     cols.team.push(p.nbaTeamId ? teamIdByNba[p.nbaTeamId] ?? null : null); cols.active.push(p.active); cols.fs.push(p.firstSeason);
@@ -214,8 +221,8 @@ async function write(db, { teams, hl, players }) {
   if (newXw.canon.length) {
     const r = await db.query(
       `INSERT INTO entity_id_crosswalk (entity_type, canonical_id, source, source_id, match_method)
-       SELECT 'player', c, 'nba_stats', s, 'exact_id' FROM unnest($1::text[], $2::text[]) AS t(c, s)`,
-      [newXw.canon, newXw.src]);
+       SELECT 'player', c, 'nba_stats', s, m FROM unnest($1::text[], $2::text[], $3::text[]) AS t(c, s, m)`,
+      [newXw.canon, newXw.src, newXw.method]);
     counts.player_crosswalk_new = r.rowCount;
   }
 
@@ -251,8 +258,11 @@ async function verify(db) {
   if (c.hl_teams !== 30) problems.push(`expected 30 Highlightly team ids, have ${c.hl_teams}`);
   const alt = (await q(`SELECT t.abbreviation FROM teams t JOIN arenas a ON a.id = t.home_arena_id WHERE a.is_high_altitude ORDER BY 1`)).map((r) => r.abbreviation).join(',');
   if (alt !== 'DEN,UTA') problems.push(`high-altitude arenas are [${alt}], expected [DEN,UTA] (§6.1)`);
+  // Players the ingestion worker created that NBA.com doesn't list yet are expected (reported, not a problem).
   const [orph] = await q(`SELECT count(*)::int n FROM players p WHERE NOT EXISTS
-    (SELECT 1 FROM entity_id_crosswalk x WHERE x.entity_type='player' AND x.source='nba_stats' AND x.canonical_id = p.id::text)`);
+    (SELECT 1 FROM entity_id_crosswalk x WHERE x.entity_type='player' AND x.source='nba_stats' AND x.canonical_id = p.id::text)
+    AND NOT EXISTS (SELECT 1 FROM entity_id_crosswalk x WHERE x.entity_type='player' AND x.source='highlightly'
+                     AND x.match_method = 'created_by_worker' AND x.canonical_id = p.id::text)`);
   if (orph.n) problems.push(`${orph.n} players have no NBA.com crosswalk row`);
   const spot = await q(`SELECT p.full_name, t.abbreviation, p.listed_position FROM players p LEFT JOIN teams t ON t.id = p.current_team_id
     WHERE p.full_name IN ('Nikola Jokić','Jaren Jackson Jr.','Terrence Shannon Jr','LeBron James') ORDER BY 1`);

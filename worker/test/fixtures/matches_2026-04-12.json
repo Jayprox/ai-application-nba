@@ -1,0 +1,598 @@
+{
+  "data": [
+    {
+      "id": 1439038,
+      "league": "NBA",
+      "season": 2026,
+      "state": {
+        "clock": 720,
+        "score": {
+          "awayTeam": [
+            26,
+            19,
+            26,
+            30
+          ],
+          "homeTeam": [
+            32,
+            34,
+            34,
+            32
+          ]
+        },
+        "period": 4,
+        "description": "Finished"
+      },
+      "homeTeam": {
+        "id": 28,
+        "displayName": "Houston Rockets",
+        "name": "Rockets",
+        "logo": "https://highlightly.net/nba/images/teams/28.png",
+        "abbreviation": "HOU"
+      },
+      "awayTeam": {
+        "id": 42,
+        "displayName": "Memphis Grizzlies",
+        "name": "Grizzlies",
+        "logo": "https://highlightly.net/nba/images/teams/42.png",
+        "abbreviation": "MEM"
+      },
+      "date": "2026-04-13T00:30:00.000Z"
+    },
+    {
+      "id": 1439039,
+      "league": "NBA",
+      "season": 2026,
+      "state": {
+        "clock": 720,
+        "score": {
+          "awayTeam": [
+            24,
+            35,
+            31,
+            36
+          ],
+          "homeTeam": [
+            34,
+            39,
+            24,
+            35
+          ]
+        },
+        "period": 4,
+        "description": "Finished"
+      },
+      "homeTeam": {
+        "id": 41,
+        "displayName": "Minnesota Timberwolves",
+        "name": "Timberwolves",
+        "logo": "https://highlightly.net/nba/images/teams/41.png",
+        "abbreviation": "MIN"
+      },
+      "awayTeam": {
+        "id": 64,
+        "displayName": "New Orleans Pelicans",
+        "name": "Pelicans",
+        "logo": "https://highlightly.net/nba/images/teams/64.png",
+        "abbreviation": "NO"
+      },
+      "date": "2026-04-13T00:30:00.000Z"
+    },
+    {
+      "id": 1439043,
+      "league": "NBA",
+      "season": 2026,
+      "state": {
+        "clock": 720,
+        "score": {
+          "awayTeam": [
+            26,
+            22,
+            33,
+            29
+          ],
+          "homeTeam": [
+            25,
+            27,
+            31,
+            32
+          ]
+        },
+        "period": 4,
+        "description": "Finished"
+      },
+      "homeTeam": {
+        "id": 30,
+        "displayName": "LA Clippers",
+        "name": "Clippers",
+        "logo": "https://highlightly.net/nba/images/teams/30.png",
+        "abbreviation": "LAC"
+      },
+      "awayTeam": {
+        "id": 43,
+        "displayName": "Golden State Warriors",
+        "name": "Warriors",
+        "logo": "https://highlightly.net/nba/images/teams/43.png",
+        "abbreviation": "GS"
+      },
+      "date": "2026-04-13T00:30:00.000Z"
+    },
+    {
+      "id": 1439042,
+      "league": "NBA",
+      "season": 2026,
+      "state": {
+        "clock": 720,
+        "score": {
+          "awayTeam": [
+            22,
+            23,
+            29,
+            33
+          ],
+          "homeTeam": [
+            32,
+            30,
+            33,
+            36
+          ]
+        },
+        "period": 4,
+        "description": "Finished"
+      },
+      "homeTeam": {
+        "id": 4,
+        "displayName": "Los Angeles Lakers",
+        "name": "Lakers",
+        "logo": "https://highlightly.net/nba/images/teams/4.png",
+        "abbreviation": "LAL"
+      },
+      "awayTeam": {
+        "id": 45,
+        "displayName": "Utah Jazz",
+        "name": "Jazz",
+        "logo": "https://highlightly.net/nba/images/teams/45.png",
+        "abbreviation": "UTAH"
+      },
+      "date": "2026-04-13T00:30:00.000Z"
+    },
+    {
+      "id": 1439044,
+      "league": "NBA",
+      "season": 2026,
+      "state": {
+        "clock": 720,
+        "score": {
+          "awayTeam": [
+            33,
+            24,
+            27,
+            26
+          ],
+          "homeTeam": [
+            33,
+            44,
+            19,
+            26
+          ]
+        },
+        "period": 4,
+        "description": "Finished"
+      },
+      "homeTeam": {
+        "id": 31,
+        "displayName": "Portland Trail Blazers",
+        "name": "Trail Blazers",
+        "logo": "https://highlightly.net/nba/images/teams/31.png",
+        "abbreviation": "POR"
+      },
+      "awayTeam": {
+        "id": 32,
+        "displayName": "Sacramento Kings",
+        "name": "Kings",
+        "logo": "https://highlightly.net/nba/images/teams/32.png",
+        "abbreviation": "SAC"
+      },
+      "date": "2026-04-13T00:30:00.000Z"
+    },
+    {
+      "id": 1439041,
+      "league": "NBA",
+      "season": 2026,
+      "state": {
+        "clock": 720,
+        "score": {
+          "awayTeam": [
+            37,
+            33,
+            31,
+            27
+          ],
+          "homeTeam": [
+            34,
+            22,
+            35,
+            27
+          ]
+        },
+        "period": 4,
+        "description": "Finished"
+      },
+      "homeTeam": {
+        "id": 37,
+        "displayName": "San Antonio Spurs",
+        "name": "Spurs",
+        "logo": "https://highlightly.net/nba/images/teams/37.png",
+        "abbreviation": "SA"
+      },
+      "awayTeam": {
+        "id": 3,
+        "displayName": "Denver Nuggets",
+        "name": "Nuggets",
+        "logo": "https://highlightly.net/nba/images/teams/3.png",
+        "abbreviation": "DEN"
+      },
+      "date": "2026-04-13T00:30:00.000Z"
+    },
+    {
+      "id": 1439037,
+      "league": "NBA",
+      "season": 2026,
+      "state": {
+        "clock": 720,
+        "score": {
+          "awayTeam": [
+            34,
+            22,
+            32,
+            40
+          ],
+          "homeTeam": [
+            45,
+            35,
+            39,
+            30
+          ]
+        },
+        "period": 4,
+        "description": "Finished"
+      },
+      "homeTeam": {
+        "id": 40,
+        "displayName": "Dallas Mavericks",
+        "name": "Mavericks",
+        "logo": "https://highlightly.net/nba/images/teams/40.png",
+        "abbreviation": "DAL"
+      },
+      "awayTeam": {
+        "id": 27,
+        "displayName": "Chicago Bulls",
+        "name": "Bulls",
+        "logo": "https://highlightly.net/nba/images/teams/27.png",
+        "abbreviation": "CHI"
+      },
+      "date": "2026-04-13T00:30:00.000Z"
+    },
+    {
+      "id": 1439040,
+      "league": "NBA",
+      "season": 2026,
+      "state": {
+        "clock": 720,
+        "score": {
+          "awayTeam": [
+            37,
+            33,
+            34,
+            31
+          ],
+          "homeTeam": [
+            19,
+            33,
+            25,
+            26
+          ]
+        },
+        "period": 4,
+        "description": "Finished"
+      },
+      "homeTeam": {
+        "id": 38,
+        "displayName": "Oklahoma City Thunder",
+        "name": "Thunder",
+        "logo": "https://highlightly.net/nba/images/teams/38.png",
+        "abbreviation": "OKC"
+      },
+      "awayTeam": {
+        "id": 46,
+        "displayName": "Phoenix Suns",
+        "name": "Suns",
+        "logo": "https://highlightly.net/nba/images/teams/46.png",
+        "abbreviation": "PHX"
+      },
+      "date": "2026-04-13T00:30:00.000Z"
+    },
+    {
+      "id": 1370764,
+      "league": "NBA",
+      "season": 2026,
+      "state": {
+        "clock": 720,
+        "score": {
+          "awayTeam": [
+            29,
+            32,
+            20,
+            27
+          ],
+          "homeTeam": [
+            20,
+            32,
+            42,
+            19
+          ]
+        },
+        "period": 4,
+        "description": "Finished"
+      },
+      "homeTeam": {
+        "id": 2,
+        "displayName": "Boston Celtics",
+        "name": "Celtics",
+        "logo": "https://highlightly.net/nba/images/teams/2.png",
+        "abbreviation": "BOS"
+      },
+      "awayTeam": {
+        "id": 24,
+        "displayName": "Orlando Magic",
+        "name": "Magic",
+        "logo": "https://highlightly.net/nba/images/teams/24.png",
+        "abbreviation": "ORL"
+      },
+      "date": "2026-04-12T22:00:00.000Z"
+    },
+    {
+      "id": 1370768,
+      "league": "NBA",
+      "season": 2026,
+      "state": {
+        "clock": 720,
+        "score": {
+          "awayTeam": [
+            30,
+            27,
+            30,
+            23
+          ],
+          "homeTeam": [
+            20,
+            24,
+            29,
+            23
+          ]
+        },
+        "period": 4,
+        "description": "Finished"
+      },
+      "homeTeam": {
+        "id": 26,
+        "displayName": "New York Knicks",
+        "name": "Knicks",
+        "logo": "https://highlightly.net/nba/images/teams/26.png",
+        "abbreviation": "NY"
+      },
+      "awayTeam": {
+        "id": 33,
+        "displayName": "Charlotte Hornets",
+        "name": "Hornets",
+        "logo": "https://highlightly.net/nba/images/teams/33.png",
+        "abbreviation": "CHA"
+      },
+      "date": "2026-04-12T22:00:00.000Z"
+    },
+    {
+      "id": 1370770,
+      "league": "NBA",
+      "season": 2026,
+      "state": {
+        "clock": 720,
+        "score": {
+          "awayTeam": [
+            27,
+            34,
+            23,
+            17
+          ],
+          "homeTeam": [
+            32,
+            38,
+            30,
+            36
+          ]
+        },
+        "period": 4,
+        "description": "Finished"
+      },
+      "homeTeam": {
+        "id": 34,
+        "displayName": "Toronto Raptors",
+        "name": "Raptors",
+        "logo": "https://highlightly.net/nba/images/teams/34.png",
+        "abbreviation": "TOR"
+      },
+      "awayTeam": {
+        "id": 49,
+        "displayName": "Brooklyn Nets",
+        "name": "Nets",
+        "logo": "https://highlightly.net/nba/images/teams/49.png",
+        "abbreviation": "BKN"
+      },
+      "date": "2026-04-12T22:00:00.000Z"
+    },
+    {
+      "id": 1370767,
+      "league": "NBA",
+      "season": 2026,
+      "state": {
+        "clock": 720,
+        "score": {
+          "awayTeam": [
+            24,
+            37,
+            23,
+            33
+          ],
+          "homeTeam": [
+            33,
+            37,
+            29,
+            44
+          ]
+        },
+        "period": 4,
+        "description": "Finished"
+      },
+      "homeTeam": {
+        "id": 1,
+        "displayName": "Miami Heat",
+        "name": "Heat",
+        "logo": "https://highlightly.net/nba/images/teams/1.png",
+        "abbreviation": "MIA"
+      },
+      "awayTeam": {
+        "id": 23,
+        "displayName": "Atlanta Hawks",
+        "name": "Hawks",
+        "logo": "https://highlightly.net/nba/images/teams/23.png",
+        "abbreviation": "ATL"
+      },
+      "date": "2026-04-12T22:00:00.000Z"
+    },
+    {
+      "id": 1370766,
+      "league": "NBA",
+      "season": 2026,
+      "state": {
+        "clock": 720,
+        "score": {
+          "awayTeam": [
+            41,
+            40,
+            27,
+            25
+          ],
+          "homeTeam": [
+            27,
+            36,
+            26,
+            32
+          ]
+        },
+        "period": 4,
+        "description": "Finished"
+      },
+      "homeTeam": {
+        "id": 36,
+        "displayName": "Indiana Pacers",
+        "name": "Pacers",
+        "logo": "https://highlightly.net/nba/images/teams/36.png",
+        "abbreviation": "IND"
+      },
+      "awayTeam": {
+        "id": 25,
+        "displayName": "Detroit Pistons",
+        "name": "Pistons",
+        "logo": "https://highlightly.net/nba/images/teams/25.png",
+        "abbreviation": "DET"
+      },
+      "date": "2026-04-12T22:00:00.000Z"
+    },
+    {
+      "id": 1370765,
+      "league": "NBA",
+      "season": 2026,
+      "state": {
+        "clock": 720,
+        "score": {
+          "awayTeam": [
+            21,
+            34,
+            40,
+            22
+          ],
+          "homeTeam": [
+            43,
+            22,
+            34,
+            31
+          ]
+        },
+        "period": 4,
+        "description": "Finished"
+      },
+      "homeTeam": {
+        "id": 35,
+        "displayName": "Cleveland Cavaliers",
+        "name": "Cavaliers",
+        "logo": "https://highlightly.net/nba/images/teams/35.png",
+        "abbreviation": "CLE"
+      },
+      "awayTeam": {
+        "id": 50,
+        "displayName": "Washington Wizards",
+        "name": "Wizards",
+        "logo": "https://highlightly.net/nba/images/teams/50.png",
+        "abbreviation": "WSH"
+      },
+      "date": "2026-04-12T22:00:00.000Z"
+    },
+    {
+      "id": 1370769,
+      "league": "NBA",
+      "season": 2026,
+      "state": {
+        "clock": 720,
+        "score": {
+          "awayTeam": [
+            26,
+            36,
+            16,
+            28
+          ],
+          "homeTeam": [
+            29,
+            29,
+            38,
+            30
+          ]
+        },
+        "period": 4,
+        "description": "Finished"
+      },
+      "homeTeam": {
+        "id": 71,
+        "displayName": "Philadelphia 76ers",
+        "name": "76ers",
+        "logo": "https://highlightly.net/nba/images/teams/71.png",
+        "abbreviation": "PHI"
+      },
+      "awayTeam": {
+        "id": 39,
+        "displayName": "Milwaukee Bucks",
+        "name": "Bucks",
+        "logo": "https://highlightly.net/nba/images/teams/39.png",
+        "abbreviation": "MIL"
+      },
+      "date": "2026-04-12T22:00:00.000Z"
+    }
+  ],
+  "plan": {
+    "tier": "PRO",
+    "message": "All data available with current plan."
+  },
+  "pagination": {
+    "totalCount": 15,
+    "offset": 0,
+    "limit": 100
+  }
+}

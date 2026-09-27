@@ -1,0 +1,218 @@
+{
+  "home": {
+    "team": {
+      "id": 28,
+      "logo": "https://highlightly.net/nba/images/teams/28.png",
+      "name": "Rockets",
+      "league": "NBA",
+      "displayName": "Houston Rockets",
+      "abbreviation": "HOU"
+    },
+    "lineup": [
+      {
+        "jersey": 8,
+        "player": "Jae'Sean Tate",
+        "position": "Power forward",
+        "isStarter": true,
+        "positionAbbreviation": "PF",
+        "id": 47052722
+      },
+      {
+        "jersey": 17,
+        "player": "Tari Eason",
+        "position": "Small forward",
+        "isStarter": true,
+        "positionAbbreviation": "SF",
+        "id": 66498947
+      },
+      {
+        "jersey": 30,
+        "player": "Clint Capela",
+        "position": "Center",
+        "isStarter": true,
+        "positionAbbreviation": "C",
+        "id": 46539002
+      },
+      {
+        "jersey": 20,
+        "player": "Josh Okogie",
+        "position": "Point guard",
+        "isStarter": true,
+        "positionAbbreviation": "PG",
+        "id": 60986012
+      },
+      {
+        "jersey": 15,
+        "player": "Reed Sheppard",
+        "position": "Shooting guard",
+        "isStarter": true,
+        "positionAbbreviation": "SG",
+        "id": 70670147
+      },
+      {
+        "jersey": 32,
+        "player": "Jeff Green",
+        "position": "Forward",
+        "isStarter": null,
+        "positionAbbreviation": "F",
+        "id": 49202
+      },
+      {
+        "jersey": 2,
+        "player": "Dorian Finney-Smith",
+        "position": "Forward",
+        "isStarter": null,
+        "positionAbbreviation": "F",
+        "id": 38673842
+      },
+      {
+        "jersey": 27,
+        "player": "Isaiah Crawford",
+        "position": "Center",
+        "isStarter": null,
+        "positionAbbreviation": "C",
+        "id": 68893922
+      },
+      {
+        "jersey": null,
+        "player": "Aaron Holiday",
+        "position": "Forward",
+        "isStarter": null,
+        "positionAbbreviation": "F",
+        "id": 58834517
+      },
+      {
+        "jersey": 4,
+        "player": "JD Davison",
+        "position": "Guard",
+        "isStarter": null,
+        "positionAbbreviation": "G",
+        "id": 68642342
+      },
+      {
+        "jersey": 13,
+        "player": "Tristen Newton",
+        "position": "Center",
+        "isStarter": null,
+        "positionAbbreviation": "C",
+        "id": 68895542
+      },
+      {
+        "jersey": 1,
+        "player": "Amen Thompson",
+        "position": "Guard",
+        "isStarter": null,
+        "positionAbbreviation": "G",
+        "id": 70272167
+      }
+    ]
+  },
+  "away": {
+    "team": {
+      "id": 42,
+      "logo": "https://highlightly.net/nba/images/teams/42.png",
+      "name": "Grizzlies",
+      "league": "NBA",
+      "displayName": "Memphis Grizzlies",
+      "abbreviation": "MEM"
+    },
+    "lineup": [
+      {
+        "jersey": 67,
+        "player": "Taj Gibson",
+        "position": "Center",
+        "isStarter": true,
+        "positionAbbreviation": "C",
+        "id": 60857
+      },
+      {
+        "jersey": null,
+        "player": "Dariq Whitehead",
+        "position": "Shooting guard",
+        "isStarter": true,
+        "positionAbbreviation": "SG",
+        "id": 66492092
+      },
+      {
+        "jersey": 5,
+        "player": "Toby Okani",
+        "position": "Small forward",
+        "isStarter": true,
+        "positionAbbreviation": "SF",
+        "id": 70514162
+      },
+      {
+        "jersey": 21,
+        "player": "Jahmai Mashack",
+        "position": "Point guard",
+        "isStarter": true,
+        "positionAbbreviation": "PG",
+        "id": 70260077
+      },
+      {
+        "jersey": 21,
+        "player": "Rayan Rupert",
+        "position": "Power forward",
+        "isStarter": true,
+        "positionAbbreviation": "PF",
+        "id": 76497347
+      },
+      {
+        "jersey": 55,
+        "player": "Lucas Williamson",
+        "position": "Center",
+        "isStarter": null,
+        "positionAbbreviation": "C",
+        "id": 64188272
+      },
+      {
+        "jersey": 10,
+        "player": "Javon Small",
+        "position": "Forward",
+        "isStarter": null,
+        "positionAbbreviation": "F",
+        "id": 71727257
+      },
+      {
+        "jersey": 18,
+        "player": "Olivier-Maxence Prosper",
+        "position": "Forward",
+        "isStarter": null,
+        "positionAbbreviation": "F",
+        "id": 68932067
+      },
+      {
+        "jersey": 23,
+        "player": "Cedric Coward",
+        "position": "Forward",
+        "isStarter": null,
+        "positionAbbreviation": "F",
+        "id": 73546472
+      },
+      {
+        "jersey": 45,
+        "player": "GG Jackson",
+        "position": "Forward",
+        "isStarter": null,
+        "positionAbbreviation": "F",
+        "id": 76584317
+      },
+      {
+        "jersey": 24,
+        "player": "Cam Spencer",
+        "position": "Guard",
+        "isStarter": null,
+        "positionAbbreviation": "G",
+        "id": 66497312
+      },
+      {
+        "jersey": 72,
+        "player": "Adama Bal",
+        "position": "Guard",
+        "isStarter": null,
+        "positionAbbreviation": "G",
+        "id": 73446542
+      }
+    ]
+  }
+}

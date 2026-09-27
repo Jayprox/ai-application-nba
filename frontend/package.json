@@ -3,10 +3,13 @@
   "private": true,
   "description": "Chalk That NBA web client (Railway rootDirectory: frontend). Talks only to backend-api.",
   "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "start": "vite preview --host 0.0.0.0 --port ${PORT:-8080}",
+    "start": "node server.js",
     "test": "vitest run"
   },
   "dependencies": {

@@ -1,0 +1,129 @@
+{
+  "data": [
+    {
+      "id": 1545655,
+      "league": "NBA",
+      "season": 2027,
+      "state": {
+        "clock": 0,
+        "score": {
+          "awayTeam": [],
+          "homeTeam": []
+        },
+        "period": 0,
+        "description": "Scheduled"
+      },
+      "homeTeam": {
+        "id": 43,
+        "displayName": "Golden State Warriors",
+        "name": "Warriors",
+        "logo": "https://highlightly.net/nba/images/teams/43.png",
+        "abbreviation": "GS"
+      },
+      "awayTeam": {
+        "id": 4,
+        "displayName": "Los Angeles Lakers",
+        "name": "Lakers",
+        "logo": "https://highlightly.net/nba/images/teams/4.png",
+        "abbreviation": "LAL"
+      },
+      "date": "2026-10-07T02:00:00.000Z"
+    },
+    {
+      "id": 1545654,
+      "league": "NBA",
+      "season": 2027,
+      "state": {
+        "clock": 0,
+        "score": {
+          "awayTeam": [],
+          "homeTeam": []
+        },
+        "period": 0,
+        "description": "Scheduled"
+      },
+      "homeTeam": {
+        "id": 45,
+        "displayName": "Utah Jazz",
+        "name": "Jazz",
+        "logo": "https://highlightly.net/nba/images/teams/45.png",
+        "abbreviation": "UTAH"
+      },
+      "awayTeam": {
+        "id": 3,
+        "displayName": "Denver Nuggets",
+        "name": "Nuggets",
+        "logo": "https://highlightly.net/nba/images/teams/3.png",
+        "abbreviation": "DEN"
+      },
+      "date": "2026-10-07T01:00:00.000Z"
+    },
+    {
+      "id": 1545653,
+      "league": "NBA",
+      "season": 2027,
+      "state": {
+        "clock": 0,
+        "score": {
+          "awayTeam": [],
+          "homeTeam": []
+        },
+        "period": 0,
+        "description": "Scheduled"
+      },
+      "homeTeam": {
+        "id": 38,
+        "displayName": "Oklahoma City Thunder",
+        "name": "Thunder",
+        "logo": "https://highlightly.net/nba/images/teams/38.png",
+        "abbreviation": "OKC"
+      },
+      "awayTeam": {
+        "id": 64,
+        "displayName": "New Orleans Pelicans",
+        "name": "Pelicans",
+        "logo": "https://highlightly.net/nba/images/teams/64.png",
+        "abbreviation": "NO"
+      },
+      "date": "2026-10-07T00:00:00.000Z"
+    },
+    {
+      "id": 1545652,
+      "league": "NBA",
+      "season": 2027,
+      "state": {
+        "clock": 0,
+        "score": {
+          "awayTeam": [],
+          "homeTeam": []
+        },
+        "period": 0,
+        "description": "Scheduled"
+      },
+      "homeTeam": {
+        "id": 33,
+        "displayName": "Charlotte Hornets",
+        "name": "Hornets",
+        "logo": "https://highlightly.net/nba/images/teams/33.png",
+        "abbreviation": "CHA"
+      },
+      "awayTeam": {
+        "id": 49,
+        "displayName": "Brooklyn Nets",
+        "name": "Nets",
+        "logo": "https://highlightly.net/nba/images/teams/49.png",
+        "abbreviation": "BKN"
+      },
+      "date": "2026-10-06T23:00:00.000Z"
+    }
+  ],
+  "plan": {
+    "tier": "PRO",
+    "message": "All data available with current plan."
+  },
+  "pagination": {
+    "totalCount": 4,
+    "offset": 0,
+    "limit": 100
+  }
+}

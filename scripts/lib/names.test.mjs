@@ -75,3 +75,8 @@ test('search: users can type without accents or suffixes', () => {
   assert.ok(matchesSearch('Jaren Jackson Jr.', 'jaren jackson jr'));
   assert.ok(!matchesSearch('Nikola Jokić', 'murray'));
 });
+
+test('letters that do not decompose: Đ -> Dj (Nikola Đurišić = Nikola Djurisic)', () => {
+  assert.equal(nameKey('Nikola Đurišić'), nameKey('Nikola Djurisic'));
+  assert.equal(nameKey('Marcin Gortat'), 'marcin gortat');
+});

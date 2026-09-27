@@ -135,6 +135,8 @@ CREATE TABLE games (
                          CHECK (status IN ('scheduled', 'live', 'final', 'postponed', 'cancelled')),
   home_score             SMALLINT,
   away_score             SMALLINT,
+  box_score_synced_at    TIMESTAMPTZ,                          -- ingestion worker (migration 004)
+  box_score_checks       SMALLINT NOT NULL DEFAULT 0,          -- 1 = loaded at final, 2 = re-checked
   updated_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
   CHECK (home_team_id <> away_team_id),
   -- cup_final <-> cup_stage 'final', both directions
@@ -264,7 +266,7 @@ CREATE TABLE schema_migrations (
   id          TEXT PRIMARY KEY,
   applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-INSERT INTO schema_migrations (id) VALUES ('001_playoff_series_best_of_2'), ('002_players_first_season'), ('003_player_rest');
+INSERT INTO schema_migrations (id) VALUES ('001_playoff_series_best_of_2'), ('002_players_first_season'), ('003_player_rest'), ('004_box_score_sync');
 
 -- ---------------------------------------------------------------------------
 -- Auth: two-tier (PLATFORM.md §2)

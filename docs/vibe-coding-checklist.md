@@ -294,7 +294,11 @@ each is actually built, not as it's planned.)*
         Leaders (6 stats, 70% qualifier). One shared StatExplorer drives both
         detail pages; every control lives in the URL. Backend: GET /seasons,
         GET /teams/:id/players, team per season in career. 16 frontend tests.
-- [ ] Ingestion worker (Highlightly) — after the preseason injury re-test
+- [x] Ingestion worker (Highlightly) — `worker/`, architecture §7.4. *Live-ish
+      cadence, create-if-clearly-new players, weekly NBA.com reconcile via
+      `db:backfill --season 2026-27` (reports differences). Migration 004.
+      Worker tests: 10 unit + 3 end-to-end (local test DB). Deploys with step 9.*
+  - [ ] Injuries: re-test Highlightly once preseason games start (~Oct 2)
 - [ ] Deploy + Phase 6 hardening
 
 **Checkpoint after each feature:** Does it still match the system design? Any drift?
@@ -342,6 +346,7 @@ Answer these. If you stumble on any, go back.
 
 | Date | What I built | Decision made | Why |
 |------|-------------|---------------|-----|
+| 2026-09-27 | Ingestion worker | Scores every 5 min during game windows, box scores at final + one 3h re-check; unknown players created only when nobody similar exists; NBA.com reconciles weekly | Stays well inside the Highlightly quota; a wrong player link is worse than a delayed one; NBA.com is the source we verified, so it gets the last word |
 | 2026-09-27 | Frontend slice 2 (Teams, Players, Player/Team detail, Leaders) | Player pages default to the player's own rest (NBA.com's definition) with a one-tap switch to the team's schedule; filters live in the URL | "Offer both" without doubling the filter rows; URL state makes any split view shareable and keeps Back working |
 | 2026-09-27 | Frontend slice 1 (sign-in, Scoreboard, Box Score) | Both tokens in localStorage; refresh is single-flight per tab and serialized across tabs with a Web Lock | Refresh tokens rotate and a replay revokes every session, so two tabs refreshing with the same token would sign the user out everywhere |
 | 2026-09-27 | Core API + player rest (migration 003) | Offer both team rest and player rest; preseason games count as "played" for rest | NBA.com's player Days Rest split uses the player's own games, and measures an opener from the last preseason game; matching it exactly is how the numbers can be verified |

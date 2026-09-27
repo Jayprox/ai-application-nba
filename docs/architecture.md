@@ -438,9 +438,52 @@ neighbours), national-TV tier, Cup group stage, arena/altitude.
 - Check: every team has the same number of known regular-season games
   (80 in Sept 2026; the NBA adds 2 per team after the Cup group stage).
 
+## 7.4 Ingestion worker (as built) — `worker/`
+
+Railway service `ingestion-worker` (rootDirectory `worker`, no public
+domain, env: `DATABASE_URL` private URL, `HIGHLIGHTLY_API_KEY`,
+`CURRENT_SEASON`). Pulls current-season scores + box scores from
+Highlightly (§3.2). Decisions (JD, 2026-09-27):
+
+- **Cadence "live-ish"** (`src/planner.js`, unit-tested): a game in its
+  window (tip-off -10 min .. +8 h, not final) -> poll that ET date every
+  5 min (30 min when fewer than 500 requests remain); box score when a game
+  goes final + one re-check >= 3 h later for stat corrections
+  (`games.box_score_checks` 0/1/2, migration 004); daily sweep after 6 am
+  ET: yesterday + today + past games still not final. Estimated < 4,500
+  requests/month even if the 7,500 quota is monthly; every run logs the
+  remaining quota to `ingestion_runs.details` (watch it in `db:status`).
+- **Only updates games the NBA.com schedule created** (`db:schedule`),
+  matched by teams + tip-off within 8 h, then remembered in the crosswalk.
+  Unmatched matches (e.g. Cup knockouts before `db:schedule` is re-run) are
+  reported, never invented.
+- **Unknown players: create if clearly new.** Order: crosswalk id -> name
+  on that team (names.js, suffix-aware) -> unique exact name among active
+  players (trades) -> nobody similar anywhere -> create
+  (`created_by_worker`). Any near-match or ambiguity -> crosswalk
+  `manual_review`, stats held back. Seed/backfill later LINK NBA.com's id
+  to worker-created players instead of duplicating them.
+- Player rest (§6.1) recomputed for affected players after each box score;
+  DNPs stored (`dnp = true`); starters from `/lineups`.
+- **Never overwrites NBA.com rows** (`source = 'nba_stats'`).
+- **Weekly reconcile from JD's Mac:** `npm run db:backfill -- --season
+  2026-27` overwrites with NBA.com, reports rows that differed, deletes
+  Highlightly rows NBA.com doesn't have (a wrong link), and marks those
+  games done for the worker.
+- Manual one-off: `cd worker && npm run sync -- --date YYYY-MM-DD`.
+- Held player: resolve by pointing the crosswalk row at the right player
+  (`UPDATE entity_id_crosswalk SET canonical_id = '<player id>',
+  match_status = 'matched', match_method = 'manual' WHERE source =
+  'highlightly' AND source_id = '<highlightly id>'`); the next weekly
+  reconcile fills his stats from NBA.com.
+- Injuries: still open (§3.2) — re-test Highlightly in preseason.
+- Tests: `worker/test` — mapping + planner always; the end-to-end sync
+  suite (real MEM @ HOU dry-run files) needs `WORKER_TEST_DATABASE_URL`
+  pointing at a local *test* database (it drops the schema).
+
 ## 8. Railway (as built)
 
-Created 2026-09-26, per PLATFORM.md §4. Project `chalk-that-nba`,
+Created 2026-09-26, per PLATFORM.md §4. Deploy configured 2026-09-27 (step 9). Project `chalk-that-nba`,
 environment `production`, region europe-west4 (workspace default — same
 as chalk-that-nfl).
 
@@ -448,9 +491,9 @@ as chalk-that-nfl).
 |---|---|---|---|
 | Postgres (18) | Railway template | private only | managed |
 | Redis (8.2) | Railway template | private only | managed |
-| backend-api | empty (connect repo later, rootDirectory `backend`) | backend-api-production-f05a.up.railway.app → :8080 | DATABASE_URL, REDIS_URL (refs), CORS_ORIGIN = web domain, NODE_ENV; **JWT_SECRET set by JD** |
-| web | empty (rootDirectory `frontend`) | web-production-081bcf.up.railway.app → :8080 | VITE_API_URL = backend domain (set before first build — PLATFORM.md §4 gotcha), NODE_ENV |
-| ingestion-worker | empty (rootDirectory `worker`) | none (by design) | DATABASE_URL, REDIS_URL (refs), NODE_ENV; HIGHLIGHTLY_API_KEY to be set by JD |
+| backend-api | GitHub `Jayprox/ai-application-nba` @ `main`, rootDirectory `/backend`, `npm start`, healthcheck `/health` | backend-api-production-f05a.up.railway.app → :8080 | DATABASE_URL, REDIS_URL (refs), CORS_ORIGIN = https://web-production-081bcf.up.railway.app, PORT 8080, CURRENT_SEASON, NODE_ENV; **JWT_SECRET set by JD** |
+| web | same repo, rootDirectory `/frontend`, `npm run build` then `npm start` (`server.js`: static dist/ + SPA fallback, zero deps), healthcheck `/health` | web-production-081bcf.up.railway.app → :8080 | VITE_API_URL = https://backend-api-production-f05a.up.railway.app (set before first build — PLATFORM.md §4 gotcha), PORT 8080, NODE_ENV |
+| ingestion-worker | same repo, rootDirectory `/worker`, `npm start`, restart ALWAYS | none (by design) | DATABASE_URL (ref), CURRENT_SEASON, NODE_ENV; **HIGHLIGHTLY_API_KEY set by JD** |
 
 Backfill scripts run on JD's Mac against Postgres's public connection
 string (`DATABASE_PUBLIC_URL`), since NBA.com blocks Railway IPs.

@@ -19,7 +19,10 @@ const SUFFIX_RE = /\s+(jr|sr|ii|iii|iv|v)\.?$/i;
 
 /** Strip accents: "Jokić" -> "Jokic", "Porziņģis" -> "Porzingis". */
 export function stripAccents(s) {
-  return s.normalize('NFD').replace(/[̀-ͯ]/g, '');
+  // Letters that don't decompose into base + accent: Đ is written "Dj" in
+  // English (Đurišić -> Djurisic, as Highlightly and NBA.com rosters do).
+  const special = { 'Đ': 'Dj', 'đ': 'dj', 'Ł': 'L', 'ł': 'l', 'Ø': 'O', 'ø': 'o', 'ß': 'ss', 'Æ': 'Ae', 'æ': 'ae' };
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[ĐđŁłØøßÆæ]/g, (c) => special[c]);
 }
 
 /** "Jaren Jackson Jr." -> "jr", "Trey Murphy III" -> "iii", else null. */

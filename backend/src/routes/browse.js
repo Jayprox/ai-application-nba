@@ -76,7 +76,8 @@ export function browseRoutes(db, { currentSeason = '2026-27' } = {}) {
       `SELECT p.*, t.abbreviation AS team, t.full_name AS team_name FROM players p LEFT JOIN teams t ON t.id = p.current_team_id WHERE p.id = $1`, [req.params.id]);
     if (!p) return res.status(404).json({ error: 'player not found' });
     const { rows: seasons } = await db.query(
-      `SELECT DISTINCT g.season FROM player_game_stats s JOIN games g ON g.id = s.game_id WHERE s.player_id = $1 ORDER BY 1 DESC`, [p.id]);
+      `SELECT DISTINCT g.season FROM player_game_stats s JOIN games g ON g.id = s.game_id
+        WHERE s.player_id = $1 AND g.season_type <> 'preseason' AND NOT s.dnp ORDER BY 1 DESC`, [p.id]);
     const { rows: [injury] } = await db.query(
       `SELECT status, description, reported_at, source FROM injury_reports WHERE player_id = $1 ORDER BY reported_at DESC LIMIT 1`, [p.id]);
     res.json({ data: { ...p, seasons: seasons.map((s) => s.season), current_injury: injury ?? null } });

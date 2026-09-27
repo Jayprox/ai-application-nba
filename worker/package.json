@@ -1,0 +1,15 @@
+{
+  "name": "chalk-that-nba-ingestion-worker",
+  "private": true,
+  "description": "Chalk That NBA ingestion worker (Railway rootDirectory: worker, no public domain): Highlightly scores + box scores into Postgres.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/index.js",
+    "sync": "node scripts/sync.js",
+    "test": "node --test --test-concurrency=1 'test/*.test.js'"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
+  }
+}

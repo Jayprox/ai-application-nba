@@ -14,9 +14,11 @@ import { randomUUID } from 'node:crypto';
 import { loadEnv, publicDbUrl } from './lib/env.mjs';
 import { rows, nbaStandings, nbaScheduleSeason, nbaGameLog } from './lib/sources.mjs';
 import { upsertArena } from './lib/arenas.mjs';
+import { linkToWorkerCreated, workerCreatedPlayers } from './lib/worker-players.mjs';
 import { seasonTypeFromGameId, isNeutralSite, nationalTvTier, nationalBroadcasterList, cupStage, localGameDate, restTags, buildSeries } from './lib/tagging.mjs';
 
-const FIRST = 2003, LAST = 2025;               // 2003-04 .. 2025-26
+const FIRST = 2003, LAST = 2025;               // 2003-04 .. 2025-26 = the default run
+const CURRENT = 2026;                           // 2026-27: only with --season (weekly reconcile)
 const label = (y) => `${y}-${String((y + 1) % 100).padStart(2, '0')}`;
 const log = (...a) => console.log('[backfill]', ...a);
 
@@ -30,7 +32,7 @@ function seasonsFromArgs(argv) {
     else if (argv[i] === '--to') to = argv[++i];
   }
   let out = picked.length ? picked : all.filter((s) => (!from || s >= from) && (!to || s <= to));
-  for (const s of out) if (!all.includes(s)) throw new Error(`season ${s} is outside ${label(FIRST)}..${label(LAST)}`);
+  for (const s of out) if (!all.includes(s) && s !== label(CURRENT)) throw new Error(`season ${s} is outside ${label(FIRST)}..${label(CURRENT)}`);
   return out;
 }
 
@@ -197,10 +199,22 @@ async function loadSeason(db, season, maps, data) {
 
   // ---- players seen in logs but not seeded (shouldn't happen often)
   const missing = new Map();
-  for (const r of player) if (!maps.player.has(String(r.PLAYER_ID))) missing.set(String(r.PLAYER_ID), r.PLAYER_NAME);
+  for (const r of player) if (!maps.player.has(String(r.PLAYER_ID))) missing.set(String(r.PLAYER_ID), { name: r.PLAYER_NAME, teamId: teamId(r.TEAM_ID) });
+  // Mid-season signings the ingestion worker already created from Highlightly:
+  // link them to NBA.com's id instead of creating a second copy.
+  if (missing.size) {
+    const linked = linkToWorkerCreated([...missing].map(([nbaId, m]) => ({ nbaId, ...m })), await workerCreatedPlayers(db));
+    for (const [nba, canonical] of linked) {
+      await db.query(`INSERT INTO entity_id_crosswalk (entity_type, canonical_id, source, source_id, match_method)
+        VALUES ('player', $1, 'nba_stats', $2, 'name+team (worker-created)')`, [canonical, nba]);
+      maps.player.set(nba, canonical);
+      missing.delete(nba);
+    }
+    counts.players_linked = linked.size;
+  }
   if (missing.size) {
     const ids = [], names = [], src = [];
-    for (const [nba, name] of missing) { const u = randomUUID(); ids.push(u); names.push(name); src.push(nba); maps.player.set(nba, u); }
+    for (const [nba, m] of missing) { const u = randomUUID(); ids.push(u); names.push(m.name); src.push(nba); maps.player.set(nba, u); }
     await db.query(`INSERT INTO players (id, full_name, is_active) SELECT id, n, false FROM unnest($1::uuid[], $2::text[]) AS t(id, n)`, [ids, names]);
     await db.query(`INSERT INTO entity_id_crosswalk (entity_type, canonical_id, source, source_id, match_method)
       SELECT 'player', c, 'nba_stats', s, 'exact_id (created by backfill)' FROM unnest($1::text[], $2::text[]) AS t(c, s)`, [ids, src]);
@@ -224,13 +238,36 @@ async function loadSeason(db, season, maps, data) {
     P.prest.push(tag.rest_days); P.pb2b.push(tag.b2b_night);
     for (const c of STAT_COLS) P[c].push(statOf(r, c));
   }
+  // ---- reconcile: compare what the ingestion worker wrote (Highlightly) with NBA.com
+  const loadedIds = [...games.keys()].map((id) => gameUuid.get(id));
+  const nbaRow = new Map(P.game.map((g, i) => [`${g}|${P.player[i]}`, i]));
+  const { rows: hlRows } = await db.query(
+    `SELECT s.game_id, s.player_id, p.full_name, g.game_date_local::text AS date, s.minutes, ${STAT_COLS.map((c) => `s.${c}`).join(', ')}
+       FROM player_game_stats s JOIN players p ON p.id = s.player_id JOIN games g ON g.id = s.game_id
+      WHERE s.game_id = ANY($1::uuid[]) AND s.source = 'highlightly' AND NOT s.dnp`, [loadedIds]);
+  const rec = { checked: hlRows.length, differed: [], removed: [] };
+  for (const h of hlRows) {
+    const i = nbaRow.get(`${h.game_id}|${h.player_id}`);
+    if (i === undefined) { rec.removed.push(`${h.date} ${h.full_name}`); continue; }
+    const diff = ['pts', 'reb', 'ast', 'fg3m', 'stl', 'blk', 'tov', 'plus_minus'].filter((c) => (h[c] ?? null) !== (P[c][i] ?? null));
+    if (Math.abs(Number(h.minutes ?? 0) - Number(P.min[i] ?? 0)) > 1) diff.push('minutes');
+    if (diff.length) rec.differed.push(`${h.date} ${h.full_name}: ${diff.map((c) => `${c} ${c === 'minutes' ? h.minutes : h[c]}→${c === 'minutes' ? P.min[i] : P[c][i]}`).join(', ')}`);
+  }
+  counts.reconcile = rec;
+
   counts.player_rows = await upsertChunks(db, () =>
     `INSERT INTO player_game_stats (game_id, player_id, team_id, minutes, player_rest_days, player_b2b_night, ${statList}, source, updated_at)
      SELECT *, 'nba_stats', now() FROM unnest($1::uuid[], $2::uuid[], $3::int[], $4::numeric[], $5::smallint[], $6::smallint[], ${STAT_COLS.map((_, i) => `$${i + 7}::smallint[]`).join(', ')})
      ON CONFLICT (game_id, player_id) DO UPDATE SET team_id = EXCLUDED.team_id, minutes = EXCLUDED.minutes,
        player_rest_days = EXCLUDED.player_rest_days, player_b2b_night = EXCLUDED.player_b2b_night,
-       ${STAT_COLS.map((c) => `${c} = EXCLUDED.${c}`).join(', ')}, source = 'nba_stats', updated_at = now()`,
+       ${STAT_COLS.map((c) => `${c} = EXCLUDED.${c}`).join(', ')}, dnp = false, source = 'nba_stats', updated_at = now()`,
     [P.game, P.player, P.team, P.min, P.prest, P.pb2b, ...STAT_COLS.map((c) => P[c])]);
+
+  if (rec.removed.length) {
+    // A Highlightly row NBA.com doesn't have = the worker linked the wrong player (or a phantom). NBA.com wins.
+    await db.query(`DELETE FROM player_game_stats WHERE game_id = ANY($1::uuid[]) AND source = 'highlightly' AND NOT dnp`, [loadedIds]);
+  }
+  await db.query('UPDATE games SET box_score_checks = 2 WHERE id = ANY($1::uuid[])', [loadedIds]);
 
   // ---- checks (independent of how we loaded it)
   const problems = [];
@@ -238,13 +275,15 @@ async function loadSeason(db, season, maps, data) {
     `SELECT x.source_id nba, count(*) FILTER (WHERE tg.won)::int w, count(*) FILTER (WHERE NOT tg.won)::int l
        FROM team_games tg JOIN games g ON g.id = tg.game_id
        JOIN entity_id_crosswalk x ON x.entity_type = 'team' AND x.source = 'nba_stats' AND x.canonical_id = tg.team_id::text
-      WHERE g.season = $1 AND g.season_type = 'regular' GROUP BY 1`, [season]);
+      WHERE g.season = $1 AND g.season_type = 'regular' AND g.id = ANY($2::uuid[]) GROUP BY 1`, [season, loadedIds]);
   const wlMap = new Map(wl.map((r) => [r.nba, r]));
   for (const s of standings) {
     const got = wlMap.get(String(s.TeamID));
     if (!got || got.w !== Number(s.WINS) || got.l !== Number(s.LOSSES)) problems.push(`${s.TeamCity} ${s.TeamName}: standings ${s.WINS}-${s.LOSSES}, loaded ${got ? `${got.w}-${got.l}` : 'nothing'}`);
   }
-  const { rows: [pc] } = await db.query(`SELECT count(*)::int n FROM player_game_stats p JOIN games g ON g.id = p.game_id WHERE g.season = $1`, [season]);
+  // (the worker's DNP rows aren't in NBA.com's logs: count played rows in the games we just loaded)
+  const { rows: [pc] } = await db.query(`SELECT count(*)::int n FROM player_game_stats p
+    WHERE p.game_id = ANY($1::uuid[]) AND NOT p.dnp`, [loadedIds]);
   if (pc.n !== P.game.length) problems.push(`player rows: loaded ${pc.n}, logs had ${P.game.length}`);
   if (problems.length) throw new Error('checks failed:\n    - ' + problems.slice(0, 10).join('\n    - '));
 
@@ -282,6 +321,12 @@ for (const season of seasons) {
       [run.id, c.games + c.team_rows + c.player_rows + c.series, { season, ...c, byType: r.byType, tiers: r.tiers, neutral: r.neutral, notPlayed: r.notPlayed }]);
     log(`${season} ✓ ${c.games} games ${JSON.stringify(r.byType)} · ${c.player_rows} player rows · ${c.series} series · TV ${JSON.stringify(r.tiers)} · ${((Date.now() - t0) / 1000).toFixed(0)}s`);
     if (c.players_created) log(`  ${c.players_created} player(s) not in the seed were created from game logs`);
+    if (c.players_linked) log(`  ${c.players_linked} player(s) the worker created were linked to their NBA.com id`);
+    if (c.reconcile.checked) {
+      const rc = c.reconcile;
+      log(`  reconcile vs Highlightly: ${rc.checked} rows checked · ${rc.differed.length} differed · ${rc.removed.length} removed (not in NBA.com's box)`);
+      for (const d of [...rc.differed, ...rc.removed.map((x) => `${x}: removed`)].slice(0, 15)) log(`    ${d}`);
+    }
     if (r.notPlayed.length) log(`  not played (skipped): ${r.notPlayed.join(' | ')}`);
     if (r.neutral.length) log(`  neutral (${r.neutral.length}): ${r.neutral.length > 6 ? r.neutral.slice(0, 3).join(' | ') + ` | … +${r.neutral.length - 3} more` : r.neutral.join(' | ')}`);
   } catch (e) {

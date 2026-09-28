@@ -83,7 +83,7 @@ const COLS = [['Min', (p) => mins(p.minutes)], ['Pts', (p) => p.pts], ['Reb', (p
 
 function TeamTable({ t }) {
   // Alignment is set per cell (never two text-* classes on one element).
-  const th = 'border-b-2 border-ink px-3 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-muted';
+  const th = 'border-b-2 border-strong px-3 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-muted';
   const td = 'num border-b border-rule px-3 py-2 text-sm';
   const first = 'sticky left-0 z-10 bg-card text-left';
   const right = 'text-right';
@@ -108,8 +108,8 @@ function TeamTable({ t }) {
               </tr>
             ))}
             <tr className="font-semibold">
-              <th scope="row" className={`${td} ${first} border-t-2 border-t-ink font-semibold`}>Totals</th>
-              {COLS.map(([h, f]) => <td key={h} className={`${td} ${right} border-t-2 border-t-ink`}>{h === '+/-' ? '' : f(t)}</td>)}
+              <th scope="row" className={`${td} ${first} border-t-2 border-t-strong font-semibold`}>Totals</th>
+              {COLS.map(([h, f]) => <td key={h} className={`${td} ${right} border-t-2 border-t-strong`}>{h === '+/-' ? '' : f(t)}</td>)}
             </tr>
           </tbody>
         </table>

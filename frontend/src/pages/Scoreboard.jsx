@@ -18,7 +18,7 @@ export default function Scoreboard() {
   const games = data?.data ?? [];
   const meta = data?.meta;
   const first = games[0];
-  const btn = 'flex h-11 w-11 cursor-pointer items-center justify-center rounded-lg border border-field bg-card text-ink hover:border-ink disabled:cursor-not-allowed disabled:opacity-40';
+  const btn = 'flex h-11 w-11 cursor-pointer items-center justify-center rounded-lg border border-field bg-card text-ink hover:border-muted disabled:cursor-not-allowed disabled:opacity-40';
 
   return (
     <>
@@ -81,7 +81,7 @@ function GameCard({ g, date }) {
   );
   return (
     <Link to={`/games/${g.id}`} state={{ from: date }}
-      className={`flex h-full flex-col gap-2.5 rounded-[10px] bg-card px-[18px] py-4 text-ink no-underline hover:border-link hover:text-ink ${final ? 'border-2 border-ink' : 'border border-line'}`}>
+      className={`flex h-full flex-col gap-2.5 rounded-[10px] bg-card px-[18px] py-4 text-ink no-underline hover:border-link hover:text-ink ${final ? 'border-2 border-strong' : 'border border-line'}`}>
       <div className="eyebrow flex justify-between">
         <span className={g.status === 'live' ? 'text-live' : ''}>{status}</span>
         <span className="text-link">{final ? 'Box score →' : 'Preview →'}</span>

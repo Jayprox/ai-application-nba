@@ -65,10 +65,10 @@ function Table({ season }) {
 }
 
 function Conference({ name, rows, format, season }) {
-  const th = 'border-b-2 border-ink px-2.5 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-muted whitespace-nowrap';
+  const th = 'border-b-2 border-strong px-2.5 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-muted whitespace-nowrap';
   const td = 'num border-b border-rule px-2.5 py-2 text-sm whitespace-nowrap';
   const lastPlayoff = format.playoff_seeds, lastPlayIn = format.play_in_seeds.at(-1) ?? format.playoff_seeds;
-  const cut = (rank) => (rank === lastPlayoff || rank === lastPlayIn ? 'border-b-2 border-b-ink/60' : '');
+  const cut = (rank) => (rank === lastPlayoff || rank === lastPlayIn ? 'border-b-2 border-b-strong' : '');
   return (
     <section className="flex flex-col gap-2">
       <h2 className="m-0 font-display text-[28px] font-bold">{name}ern Conference</h2>

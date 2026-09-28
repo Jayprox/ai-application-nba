@@ -60,7 +60,7 @@ export default function Players() {
                   <li key={p.id} className="grid grid-cols-[1fr_auto] items-center gap-x-4 border-b border-rule px-4 py-3 last:border-b-0 sm:grid-cols-[1fr_200px_110px] sm:px-5">
                     <Link to={`/players/${p.id}`} className="text-base font-semibold">{p.full_name}</Link>
                     <span className="col-start-1 row-start-2 text-sm text-muted empty:hidden sm:col-start-2 sm:row-start-1 sm:empty:block">{[p.team, p.listed_position].filter(Boolean).join(' · ')}</span>
-                    <span className={`row-span-2 justify-self-end rounded-full px-2.5 py-1 text-[13px] font-semibold sm:row-span-1 ${p.is_active ? 'bg-[#DDEBDF] text-[#1C5B2E]' : 'bg-rule text-[#3F434C]'}`}>{p.is_active ? 'Active' : 'Retired'}</span>
+                    <span className={`row-span-2 justify-self-end rounded-full px-2.5 py-1 text-[13px] font-semibold sm:row-span-1 ${p.is_active ? 'bg-positive-bg text-positive' : 'bg-card-2 text-muted'}`}>{p.is_active ? 'Active' : 'Retired'}</span>
                   </li>
                 ))}
               </ul>

@@ -76,7 +76,7 @@ function Roster({ teamId, teamName, latest, seasons }) {
   const type = SEASON_TYPE_OPTIONS.some(([v]) => v === params.get('type')) ? params.get('type') : 'regular';
   const { data, error, loading, retry } = useFetch(`roster:${teamId}:${season}:${type}`,
     (signal) => api(`/teams/${teamId}/players?season=${season}&season_type=${type}`, { signal }));
-  const th = 'border-b-2 border-ink px-3 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-muted';
+  const th = 'border-b-2 border-strong px-3 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-muted';
   const td = 'num border-b border-rule px-3 py-2 text-sm';
   return (
     <section className="flex flex-col gap-2">

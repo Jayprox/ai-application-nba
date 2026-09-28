@@ -31,7 +31,7 @@ export default function Props() {
   const order = new Map(games.map((g, i) => [g.id, i]));
   const rows = sortRows((data?.data ?? []).filter((r) => game === 'all' || r.game_id === game), sort, order);
   const go = (d) => d && setParams((prev) => { const n = new URLSearchParams(prev); n.set('date', d); n.delete('game'); return n; });
-  const btn = 'flex h-11 w-11 cursor-pointer items-center justify-center rounded-lg border border-field bg-card text-ink hover:border-ink disabled:cursor-not-allowed disabled:opacity-40';
+  const btn = 'flex h-11 w-11 cursor-pointer items-center justify-center rounded-lg border border-field bg-card text-ink hover:border-muted disabled:cursor-not-allowed disabled:opacity-40';
   const closed = rows.filter((r) => r.snapshot === 'close').length;
 
   return (
@@ -113,7 +113,7 @@ function NoLines({ meta, games, go }) {
   );
 }
 
-const th = 'border-b-2 border-ink px-3 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-muted whitespace-nowrap';
+const th = 'border-b-2 border-strong px-3 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-muted whitespace-nowrap';
 const td = 'num border-b border-rule px-3 py-2.5 text-sm whitespace-nowrap align-top';
 
 const seasonOf = (r) => (r.season.games ? r.season : r.last_season);

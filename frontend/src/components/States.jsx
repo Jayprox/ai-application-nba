@@ -13,7 +13,7 @@ export function ErrorBox({ error, onRetry }) {
   return (
     <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-[10px] border border-accent/40 bg-card p-5 text-[15px]">
       <span>{msg}</span>
-      {onRetry && <button type="button" onClick={onRetry} className="h-10 cursor-pointer rounded-lg border border-field bg-card px-4 font-medium hover:border-ink">Try again</button>}
+      {onRetry && <button type="button" onClick={onRetry} className="h-10 cursor-pointer rounded-lg border border-field bg-card px-4 font-medium hover:border-muted">Try again</button>}
     </div>
   );
 }

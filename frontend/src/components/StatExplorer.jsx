@@ -109,7 +109,7 @@ export default function StatExplorer({ entity, id, name, seasons, seasonTypes = 
             {' '}Splits apply first, then Last 5 / Last 10.
           </span>
           <button type="button" onClick={clear} disabled={!splitCount}
-            className="h-9 cursor-pointer rounded-lg border border-field bg-card px-3 text-sm font-medium text-ink hover:border-ink disabled:cursor-default disabled:opacity-40">
+            className="h-9 cursor-pointer rounded-lg border border-field bg-card px-3 text-sm font-medium text-ink hover:border-muted disabled:cursor-default disabled:opacity-40">
             Clear splits{splitCount ? ` (${splitCount})` : ''}
           </button>
         </div>
@@ -248,7 +248,7 @@ function Tiles({ entity, d }) {
 }
 
 // ---- tables -----------------------------------------------------------------
-const th = 'border-b-2 border-ink px-3 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-muted whitespace-nowrap';
+const th = 'border-b-2 border-strong px-3 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-muted whitespace-nowrap';
 const td = 'num border-b border-rule px-3 py-2 text-sm whitespace-nowrap';
 const L = 'text-left', R = 'text-right';
 const sticky = 'sticky left-0 z-10 bg-card';
@@ -328,7 +328,7 @@ function Career({ entity, data }) {
     return (
       <Table minWidth={760} head={head}>
         {rows.map((r) => <tr key={r.season}><td className={`${td} ${L} ${sticky}`}>{r.season}</td>{cells(r).map((c, i) => <td key={i} className={`${td} ${R}`}>{c}</td>)}</tr>)}
-        <tr className="font-semibold"><td className={`${td} ${L} ${sticky} border-t-2 border-t-ink`}>All seasons</td>{cells(tot).map((c, i) => <td key={i} className={`${td} ${R} border-t-2 border-t-ink`}>{c}</td>)}</tr>
+        <tr className="font-semibold"><td className={`${td} ${L} ${sticky} border-t-2 border-t-strong`}>All seasons</td>{cells(tot).map((c, i) => <td key={i} className={`${td} ${R} border-t-2 border-t-strong`}>{c}</td>)}</tr>
       </Table>
     );
   }
@@ -343,8 +343,8 @@ function Career({ entity, data }) {
         </tr>
       ))}
       <tr className="font-semibold">
-        <td className={`${td} ${L} ${sticky} border-t-2 border-t-ink`}>Career</td><td className={`${td} border-t-2 border-t-ink`} />
-        {cells(tot).map((c, i) => <td key={i} className={`${td} ${R} border-t-2 border-t-ink`}>{c}</td>)}
+        <td className={`${td} ${L} ${sticky} border-t-2 border-t-strong`}>Career</td><td className={`${td} border-t-2 border-t-strong`} />
+        {cells(tot).map((c, i) => <td key={i} className={`${td} ${R} border-t-2 border-t-strong`}>{c}</td>)}
       </tr>
     </Table>
   );

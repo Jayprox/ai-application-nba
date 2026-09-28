@@ -25,7 +25,7 @@ export default function Teams() {
           <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
             {confs.map((c) => (
               <section key={c.name} className="flex flex-col gap-4">
-                <h2 className="m-0 border-b-[3px] border-ink pb-1.5 font-display text-[30px] font-bold">{c.name}</h2>
+                <h2 className="m-0 border-b-[3px] border-strong pb-1.5 font-display text-[30px] font-bold">{c.name}</h2>
                 {c.divs.map((d) => (
                   <div key={d.name} className="flex flex-col gap-1.5">
                     <h3 className="eyebrow m-0 tracking-[0.08em]">{d.name}</h3>

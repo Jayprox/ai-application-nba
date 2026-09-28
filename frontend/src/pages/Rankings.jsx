@@ -19,7 +19,7 @@ const Z_LABEL = { pts: 'PTS', reb: 'REB', ast: 'AST', stl: 'STL', blk: 'BLK', fg
 const MATCHUP_STATS = [['pts', 'Points'], ['reb', 'Rebounds'], ['ast', 'Assists'], ['fg3m', '3PM']];
 const TEAM_SORTS = [['net_rtg', 'Net rating'], ['off_rtg', 'Offense'], ['def_rtg', 'Defense'], ['pace', 'Pace']];
 
-const th = 'border-b-2 border-ink px-3 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-muted whitespace-nowrap';
+const th = 'border-b-2 border-strong px-3 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-muted whitespace-nowrap';
 const td = 'num border-b border-rule px-3 py-2 text-sm whitespace-nowrap';
 const sticky = 'sticky left-0 z-10 bg-card';
 const Rank = ({ n, of }) => (n == null ? null : <span className="ml-1 text-xs text-muted" title={`${ordinal(n)} of ${of}`}>{ordinal(n)}</span>);
@@ -214,9 +214,9 @@ export function MatchupTable({ rows, sort = 'pts', n, avgRow, label, season, fir
           ))}
           {avgRow && firstCol === 'team' && (
             <tr>
-              <th scope="row" className={`${td} ${sticky} border-t-2 border-t-ink text-left font-semibold`}>League avg</th>
-              <td className={`${td} border-t-2 border-t-ink`} />
-              {MATCHUP_STATS.map(([k]) => <td key={k} className={`${td} border-t-2 border-t-ink text-right font-semibold`}>{avg(avgRow[k])}</td>)}
+              <th scope="row" className={`${td} ${sticky} border-t-2 border-t-strong text-left font-semibold`}>League avg</th>
+              <td className={`${td} border-t-2 border-t-strong`} />
+              {MATCHUP_STATS.map(([k]) => <td key={k} className={`${td} border-t-2 border-t-strong text-right font-semibold`}>{avg(avgRow[k])}</td>)}
             </tr>
           )}
         </tbody>

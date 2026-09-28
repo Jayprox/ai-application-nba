@@ -13,8 +13,8 @@ export default class ErrorBoundary extends Component {
         <strong>Something went wrong showing this page.</strong>
         <span className="text-muted">The rest of the app still works. Try reloading, or go back.</span>
         <div className="flex gap-3">
-          <button type="button" onClick={() => window.location.reload()} className="h-10 cursor-pointer rounded-lg border border-field bg-card px-4 font-medium hover:border-ink">Reload</button>
-          <button type="button" onClick={() => window.history.back()} className="h-10 cursor-pointer rounded-lg border border-field bg-card px-4 font-medium hover:border-ink">Go back</button>
+          <button type="button" onClick={() => window.location.reload()} className="h-10 cursor-pointer rounded-lg border border-field bg-card px-4 font-medium hover:border-muted">Reload</button>
+          <button type="button" onClick={() => window.history.back()} className="h-10 cursor-pointer rounded-lg border border-field bg-card px-4 font-medium hover:border-muted">Go back</button>
         </div>
       </div>
     );

@@ -1,30 +1,41 @@
 @import "tailwindcss";
 
-/* Design tokens from the approved Phase 4 mockups. */
+/* Design tokens — dark, matching the Chalk That family (Chalk That NFL's
+   palette + Oswald/Inter), 2026-09-27. Token names kept from the Phase 4
+   mockups so components didn't change meaning: paper = page, card =
+   surface, ink = primary text, muted = secondary text, line/rule = borders,
+   strong = heavy table rules. */
 @theme {
-  --color-paper: #F3F1EC;
-  --color-card: #FFFFFF;
-  --color-ink: #15171C;
-  --color-muted: #5A5F6B;
-  --color-line: #DAD6CE;
-  --color-rule: #E6E2DA;
-  --color-field: #A9A49A;
-  --color-link: #1F4FB8;
-  --color-link-hover: #163A8A;
-  --color-accent: #B8420E;
-  --color-accent-hover: #9A370B;
-  --color-nav-accent: #F08A4B;
-  --color-nav-text: #C9CCD3;
-  --color-nav-hover: #2A2D35;
-  --color-alt-bg: #FBE3D4;
-  --color-alt-ink: #7A2A06;
-  --color-live: #C0262D;
-  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Barlow Condensed", ui-sans-serif, system-ui, sans-serif;
+  --color-paper: #0B0F14;
+  --color-card: #121820;
+  --color-card-2: #1A222C;
+  --color-ink: #F5F7FA;
+  --color-muted: #9AA7B4;
+  --color-faint: #62717D;
+  --color-line: #2A3540;
+  --color-rule: #1A222C;
+  --color-strong: #3E4B58;
+  --color-field: #3A4652;
+  --color-link: #4D9FEC;
+  --color-link-hover: #7AB8F2;
+  --color-accent: #F4762B;
+  --color-accent-hover: #FF8A45;
+  --color-on-accent: #0B0F14;
+  --color-nav-accent: #62717D;
+  --color-nav-text: #9AA7B4;
+  --color-nav-hover: #1A222C;
+  --color-alt-bg: #3A2415;
+  --color-alt-ink: #FFB27A;
+  --color-live: #F2545B;
+  --color-positive: #34D399;
+  --color-positive-bg: #0F2E24;
+  --color-caution: #E8B64A;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Oswald", "Arial Narrow", ui-sans-serif, sans-serif;
 }
 
 @layer base {
-  html { background: var(--color-paper); color: var(--color-ink); }
+  html { background: var(--color-paper); color: var(--color-ink); color-scheme: dark; }   /* dark native date/select controls */
   body { font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
   a { color: var(--color-link); }
   a:hover { color: var(--color-link-hover); }

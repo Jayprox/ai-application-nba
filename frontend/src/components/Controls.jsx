@@ -9,7 +9,7 @@ export function Pills({ label, value, options, onChange, size = 'md' }) {
         const on = v === value;
         return (
           <button key={String(v)} type="button" aria-pressed={on} onClick={() => onChange(v)}
-            className={`${pad} cursor-pointer rounded-full border font-medium ${on ? 'border-ink bg-ink text-white' : 'border-field bg-card text-ink hover:border-ink'}`}>
+            className={`${pad} cursor-pointer rounded-full border font-medium ${on ? 'border-accent bg-accent text-on-accent' : 'border-field bg-card text-ink hover:border-muted'}`}>
             {text}
           </button>
         );

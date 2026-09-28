@@ -49,7 +49,7 @@ export default function Ask() {
             <div className="flex flex-wrap gap-2">
               {data.clarify.options.map((o) => (
                 <button key={o.id} type="button" onClick={() => rerun({ ...data.plan, [data.clarify.field]: o.name })}
-                  className="h-10 cursor-pointer rounded-full border border-field bg-card px-4 text-[15px] font-medium hover:border-ink">{o.name}</button>
+                  className="h-10 cursor-pointer rounded-full border border-field bg-card px-4 text-[15px] font-medium hover:border-muted">{o.name}</button>
               ))}
             </div>
           )}
@@ -87,8 +87,8 @@ export function AskBox({ initial = '', big = false }) {
       <label htmlFor={big ? 'ask-big' : 'ask'} className="sr-only">Ask a stats question</label>
       <input id={big ? 'ask-big' : 'ask'} type="search" value={text} onChange={(e) => setText(e.target.value)} maxLength={300}
         placeholder={big ? 'Ask anything: "Jokić on back-to-backs", "best defense vs centers"…' : 'Ask a stats question…'}
-        className={`min-w-0 flex-1 rounded-lg border px-3 ${big ? 'h-12 border-field bg-card text-[16px]' : 'h-9 border-transparent bg-nav-hover text-[14px] text-white placeholder:text-nav-text'}`} />
-      {big && <button type="submit" className="h-12 cursor-pointer rounded-lg bg-ink px-5 text-[15px] font-semibold text-white">Ask</button>}
+        className={`min-w-0 flex-1 rounded-lg border px-3 ${big ? 'h-12 border-field bg-card text-[16px]' : 'h-9 border-line bg-paper text-[14px] text-ink placeholder:text-faint'}`} />
+      {big && <button type="submit" className="h-12 cursor-pointer rounded-lg bg-accent px-5 text-[15px] font-semibold text-on-accent hover:bg-accent-hover">Ask</button>}
     </form>
   );
 }
@@ -105,7 +105,7 @@ function Examples() {
 }
 
 // ---- result views -------------------------------------------------------------------------------
-const th = 'border-b-2 border-ink px-3 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-muted whitespace-nowrap';
+const th = 'border-b-2 border-strong px-3 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-muted whitespace-nowrap';
 const td = 'num border-b border-rule px-3 py-2 text-sm whitespace-nowrap';
 const Tile = ({ k, v }) => (
   <div className="flex flex-col gap-0.5 rounded-[10px] border border-line bg-card px-4 py-3">

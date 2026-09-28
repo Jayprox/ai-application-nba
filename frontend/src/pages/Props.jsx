@@ -6,6 +6,7 @@ import { api } from '../lib/api.js';
 import { useFetch } from '../lib/useFetch.js';
 import { avg, isYmd, longDate, tinyDate, tipTime } from '../lib/format.js';
 import { hits, MARKETS, movement, price, ratePct, RESULT, sortRows } from '../lib/props.js';
+import { matchupText } from '../lib/rankings.js';
 import { Select, Tabs } from '../components/Controls.jsx';
 import { Empty, ErrorBox, Loading } from '../components/States.jsx';
 
@@ -117,6 +118,16 @@ const td = 'num border-b border-rule px-3 py-2.5 text-sm whitespace-nowrap align
 
 const seasonOf = (r) => (r.season.games ? r.season : r.last_season);
 const matchup = (r) => (r.team ? `${r.team} ${r.venue === 'home' ? 'vs' : '@'} ${r.opponent}` : '');
+/** "vs BOS: 27th of 30 vs guards · weak" under the player. */
+const MatchupNote = ({ m }) => {
+  const t = matchupText(m);
+  if (!t) return null;
+  return (
+    <div className="text-xs text-muted" title={`${m.opponent} allows ${m.allowed} per game to ${m.position_label.toLowerCase()} in this stat (${m.vs_avg > 0 ? '+' : ''}${m.vs_avg} vs league average), ${m.games} games`}>
+      {t}{m.label ? <span className={`ml-1 rounded-full px-1.5 text-[11px] font-semibold ${m.label === 'weak' ? 'bg-alt-bg text-alt-ink' : 'border border-line text-ink'}`}>{m.label} D</span> : null}
+    </div>
+  );
+};
 const Result = ({ r }) => (r.result
   ? <><div className="font-semibold">{RESULT[r.result]}</div>{r.actual != null && <div className="text-xs text-muted">{r.actual}</div>}</>
   : <span className="text-muted">{r.snapshot === 'close' ? 'Closing' : 'Opening'}</span>);
@@ -134,6 +145,7 @@ function Cards({ rows }) {
               <div className="min-w-0">
                 <Link to={`/players/${r.player_id}`} className="font-semibold">{r.name}</Link>
                 <div className="text-xs text-muted">{matchup(r)}</div>
+                <MatchupNote m={r.matchup} />
               </div>
               <div className="num shrink-0 text-right">
                 <div className="font-display text-2xl font-bold leading-none">{r.line}</div>
@@ -178,6 +190,7 @@ function Board({ rows }) {
                 <th scope="row" className={`${td} sticky left-0 z-10 bg-card text-left font-normal`}>
                   <Link to={`/players/${r.player_id}`} className="font-semibold">{r.name}</Link>
                   <div className="text-xs text-muted">{matchup(r)}</div>
+                  <MatchupNote m={r.matchup} />
                 </th>
                 <td className={`${td} text-right`}>
                   <div className="font-display text-xl font-bold leading-none">{r.line}</div>

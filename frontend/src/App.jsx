@@ -10,6 +10,7 @@ import Players from './pages/Players.jsx';
 import PlayerDetail from './pages/PlayerDetail.jsx';
 import Leaders from './pages/Leaders.jsx';
 import Props from './pages/Props.jsx';
+import Rankings from './pages/Rankings.jsx';
 import Standings from './pages/Standings.jsx';
 import NotFound from './pages/NotFound.jsx';
 
@@ -29,6 +30,7 @@ export default function App() {
             <Route path="leaders" element={<Leaders />} />
             <Route path="standings" element={<Standings />} />
             <Route path="props" element={<Props />} />
+            <Route path="rankings" element={<Rankings />} />
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>

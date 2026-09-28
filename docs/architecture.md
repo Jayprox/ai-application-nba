@@ -272,7 +272,7 @@ Explicit decision (2026-09-26): all of Part 2 above (props AND the
 rankings/insight layer) fast-follows together, same sequencing NFL actually
 used — not split differently between props and rankings.
 **Superseded 2026-09-27 (JD):** player props ship first, on their own
-(§7.6); the rankings / matchup-insight layer follows later.
+(§7.6); the rankings / matchup-insight layer followed the same day (§7.7).
 
 ## 6. Situational splits (MVP)
 
@@ -575,6 +575,35 @@ Built:
   pages that grades his next lines under whatever filters are on screen.
 - Hit rates are counts, labelled as such. Nothing is predicted and there
   are no picks (PLATFORM.md: no predictive math).
+
+## 7.7 Rankings + matchup insights (as built, 2026-09-27)
+
+Decisions (JD):
+- **Positions: G / F / C** from NBA.com's listing (it has no PG/SG/SF/PF);
+  a hybrid counts toward its first-listed position (G-F = G, F-C = F). The
+  listing is the player's current one, applied to every season (noted in
+  the UI).
+- **Player score: equal-weight z-scores** within the position group over
+  PTS, REB, AST, STL, BLK, 3PM, TS% and TOV (fewer is better); population
+  SD; score = the mean z. Same 70% qualifier as leaderboards. Every z is
+  shown next to its stat, so the score is fully explainable.
+- **Matchups: what each defense allows per game** to guards / forwards /
+  centers (all 12 prop markets incl. combos), ranked 1-30 (1 = allows the
+  fewest) and shown against the league average; the 5 best "strong", the 5
+  worst "weak" (labels only with 10+ teams). Season or last 10 games.
+- **Team units**: off / def / net rating and pace per 100 estimated
+  possessions (same formula as the team tiles), ranked 1-30.
+- **Where**: a Rankings page (Players / Teams / Matchups tabs), a matchup
+  note on each Props board row (opponent's rank vs his position in that
+  market, regular season before that date, once the opponent has 5 games),
+  and "Defense by position" on team pages.
+
+API: `GET /rankings/players?season=&season_type=&position=&scope=`,
+`/rankings/teams`, `/rankings/matchups[?team_id=]`. Tests: the math by hand
+(z-scores, ranks with ties, per-game allowed, labels) plus consistency
+with the rest of the API on real data (a player's stats = POST /query,
+team ratings = POST /query, every point allowed is accounted for by
+position + unlisted).
 
 ## 8. Railway (as built)
 

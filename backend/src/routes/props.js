@@ -4,6 +4,9 @@
 //   GET /players/:id/props                  his next game's lines + his record vs past lines
 import { Router } from 'express';
 import { grade, MARKET_LABEL, marketValue, MARKETS } from '../query/markets.js';
+import { matchups, POSITION_LABEL, posGroup } from '../query/rankings.js';
+
+const MATCHUP_MIN_GAMES = 5;   // an opponent's rank vs a position means little before this
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -23,6 +26,15 @@ export function hitRate(rows, market, line) {
   }
   if (out.games) out.avg = Math.round((sum / out.games) * 10) / 10;
   return out;
+}
+
+/** The opponent's rank vs this position in this market, or null (too few games / no position). */
+export function matchupNote(mu, pos, oppId, market) {
+  if (!mu || !pos || oppId == null) return null;
+  const row = mu[pos]?.find((x) => x.team_id === oppId);
+  if (!row || row.games < MATCHUP_MIN_GAMES) return null;
+  return { position: pos, position_label: POSITION_LABEL[pos], rank: row.rank[market], of: mu[pos].length, allowed: row.allowed[market],
+    vs_avg: row.vs_avg[market], label: row.label[market], games: row.games, opponent: row.abbr };
 }
 
 export function propsRoutes(db) {
@@ -52,7 +64,7 @@ export function propsRoutes(db) {
         WHERE g.game_date_local = $1 AND g.season_type = ANY($2::text[]) ORDER BY g.tipoff_utc, h.abbreviation`, [date, TYPES]);
     const byGame = new Map(games.map((g) => [g.id, g]));
     const { rows: lines } = await db.query(
-      `SELECT l.game_id, l.player_id, p.full_name AS name, p.current_team_id, l.line::float8 AS line, l.over_price, l.under_price, l.snapshot, l.fetched_at,
+      `SELECT l.game_id, l.player_id, p.full_name AS name, p.current_team_id, p.listed_position, l.line::float8 AS line, l.over_price, l.under_price, l.snapshot, l.fetched_at,
               o.line::float8 AS open_line, s.team_id AS played_for, s.dnp, ${STAT_COLS.split(', ').map((c) => `s.${c}`).join(', ')}
          FROM (SELECT DISTINCT ON (game_id, player_id) * FROM prop_lines
                 WHERE market = $2 AND book = 'draftkings' AND game_id = ANY($1::uuid[])
@@ -74,6 +86,8 @@ export function propsRoutes(db) {
       for (const x of rows) { if (!history.has(x.player_id)) history.set(x.player_id, []); history.get(x.player_id).push(x); }
     }
 
+    // Opponent vs his position, regular season to date (games before this date only).
+    const mu = lines.length && season ? await matchups(db, { season, seasonType: 'regular', before: date }) : null;
     const data = lines.map((l) => {
       const g = byGame.get(l.game_id);
       const past = history.get(l.player_id) ?? [];
@@ -91,6 +105,7 @@ export function propsRoutes(db) {
         last10: hitRate(past.slice(0, 10), market, l.line),
         season: hitRate(thisSeason, market, l.line),
         ...(thisSeason.length < 10 ? { last_season: hitRate(past.filter((x) => x.season !== season), market, l.line) } : {}),
+        matchup: matchupNote(mu, posGroup(l.listed_position), teamId == null ? null : home ? g.away_id : g.home_id, market),
       };
     });
     res.json({
@@ -103,6 +118,7 @@ export function propsRoutes(db) {
         notes: [
           'Lines: DraftKings via The Odds API — the closing line (~30 min before tip) once pulled, the opening line (morning) until then.',
           'Hit rates count his real games before this date at this exact line; a push is an exact whole-number line; DNPs are not counted.',
+          `Matchup: where the opponent ranks (1 = allows the fewest) in what it gives up per game to the player's position (G / F / C) in this stat, regular season before this date; shown once it has played ${MATCHUP_MIN_GAMES} games.`,
         ],
       },
     });

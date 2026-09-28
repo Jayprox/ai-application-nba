@@ -25,6 +25,7 @@ The second app on the Chalk That platform, after [Chalk That NFL](https://github
 - **Rest two ways:** measured from the player's own games (NBA.com's definition, so a player back from injury is rested) or from the team's schedule.
 - **Scopes:** season average, last 5, last 10, career, game log. Splits apply before the window, so *Last 10 + Away* means his last 10 road games.
 - **Leaderboards** with a stated qualifier: played in 70% of team games.
+- **Rankings:** players by position (G/F/C) on an equal-weight z-score of eight stats, with every piece shown; team offense/defense/net ratings and pace ranked 1-30; and what each defense allows to guards, forwards and centers, which also appears next to every prop line and on team pages.
 - **Player props:** DraftKings lines (The Odds API), pulled the morning of each game and again just before tip. A Props board shows each line with how often the player went over it in his last 10 and this season, and the result once the game ends. Player pages grade his next lines under any split: *over 25.5 in 7 of his last 10 road games*. Counts, not picks.
 - **Standings and playoff bracket** for every season: records computed live from games, ranked by NBA.com's official standings (tiebreakers included).
 - **Efficiency stats:** TS%, eFG%, free-throw rate and per-36 numbers for players; offensive/defensive rating for teams.
@@ -88,7 +89,7 @@ Full decisions and trade-offs: [`docs/architecture.md`](docs/architecture.md). B
 | Data | Postgres 18: 14 tables, CHECK constraints that reject impossible stat lines at write time |
 | Ingestion | Standalone Node worker: Highlightly (scores, box scores) and The Odds API (props), planner-driven polling |
 | Hosting | Railway: `backend-api`, `web`, `ingestion-worker`, Postgres, Redis |
-| Tests | `node:test` (backend, worker, scripts) and Vitest + Testing Library (frontend): 122 tests |
+| Tests | `node:test` (backend, worker, scripts) and Vitest + Testing Library (frontend): 133 tests |
 
 ## Repo layout
 
@@ -154,7 +155,7 @@ cd frontend && npm test
 ```
 
 - **Repo root:** names, tagging and rest rules.
-- **backend:** 46 tests, including the NBA.com number checks and prop grading.
+- **backend:** 55 tests, including the NBA.com number checks and prop grading.
 - **worker:** mapping, polling planner and the props planner. Add `WORKER_TEST_DATABASE_URL` pointing at a local test database to also run the end-to-end sync.
 - **frontend:** fetch-hook race conditions, token refresh, filter-to-query mapping.
 

@@ -28,7 +28,7 @@ const SPLITS = {
 };
 export const STATS = ['pts', 'reb', 'ast', 'stl', 'blk', 'tov', 'fg3m', 'fgm', 'fga', 'fg3a', 'ftm', 'fta', 'oreb', 'dreb', 'pf', 'plus_minus', 'minutes'];
 const LEADERBOARD_STATS = ['pts', 'reb', 'ast', 'stl', 'blk', 'fg3m', 'tov', 'minutes', 'plus_minus'];
-const QUALIFIER = 0.7; // played in >= 70% of games (Chalk That's rule, not the NBA's)
+export const QUALIFIER = 0.7; // played in >= 70% of games (Chalk That's rule, not the NBA's)
 export const FIRST_SEASON = '2003-04';
 
 export function validate(q) {

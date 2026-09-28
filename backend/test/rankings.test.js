@@ -109,7 +109,7 @@ test('GET /rankings/players: stats equal POST /query for the same player; qualif
   if (!season) return t.skip('no games loaded');
   let checked = 0;
   for (const pos of ['G', 'F', 'C']) {
-    const r = await s.api('GET', `/rankings/players?season=${season}&position=${pos}`);
+    const r = await s.api('GET', `/rankings/players?season=${season}&position=${pos}&limit=200`);   // all of them: z-scores average 0 over the whole group
     assert.equal(r.status, 200);
     const lb = (await s.query({ scope: 'leaderboard', season, stat: 'pts' })).body.meta.qualifier;
     assert.equal(r.body.meta.qualifier.min_games, lb.min_games);
@@ -119,6 +119,7 @@ test('GET /rankings/players: stats equal POST /query for the same player; qualif
       assert.deepEqual([row.pts, row.reb, row.ast, row.ts_pct], [q.data.pts, q.data.reb, q.data.ast, q.data.ts_pct]);
       checked++;
     }
+    assert.equal(r.body.data.length, r.body.meta.count);
     if (r.body.data.length > 1) {
       const mean = r.body.data.reduce((a, x) => a + x.score, 0) / r.body.data.length;
       assert.ok(Math.abs(mean) < 0.02, 'z-scores average ~0 within the group');

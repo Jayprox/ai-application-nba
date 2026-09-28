@@ -2,6 +2,7 @@
 // calls, well under $0.10). From the Mac, with ANTHROPIC_API_KEY in the
 // repo-root .env:   npm run ask:eval
 // Each case lists only the plan fields that MUST match; extra fields are fine.
+// A RegExp matches against the value as a string ('' when omitted = the default season).
 import { readFileSync } from 'node:fs';
 import { createLlm } from '../src/ask/llm.js';
 import { normalizePlan, PLAN_TOOL, systemPrompt } from '../src/ask/planner.js';
@@ -19,7 +20,7 @@ const CASES = [
   ['Brunson on the road on no rest', { kind: 'player_stats', venue: 'away', rest: '0' }],
   ['LeBron career playoff averages', { kind: 'player_stats', scope: 'career', season_type: 'playoffs' }],
   ['Curry 3 point percentage 2015-16', { kind: 'player_stats', season: '2015-16', stat: 'fg3_pct' }],
-  ['Tatum game log last season', { kind: 'player_stats', scope: 'game_log', season: '2024-25' }],
+  ['Tatum game log two seasons ago', { kind: 'player_stats', scope: 'game_log', season: '2024-25' }],
   ['Edwards on national TV', { kind: 'player_stats', national_tv: 'major' }],
   ['how do the Warriors play at altitude', { kind: 'team_stats', altitude: true }],
   ['Celtics record at home', { kind: 'team_stats', venue: 'home' }],
@@ -27,7 +28,7 @@ const CASES = [
   ['Thunder in the NBA Cup', { kind: 'team_stats', season_type: 'cup' }],
   ['who leads the league in steals', { kind: 'leaders', stat: 'stl' }],
   ['top 10 scorers 2015-16', { kind: 'leaders', stat: 'pts', season: '2015-16', limit: 10 }],
-  ['most threes per game last season', { kind: 'leaders', stat: 'fg3m', season: '2024-25' }],
+  ['most threes per game last season', { kind: 'leaders', stat: 'fg3m', season: /^(2025-26|)$/ }],
   ['best centers in the league', { kind: 'player_rankings', position: 'C' }],
   ['top 5 point guards over the last 10 games', { kind: 'player_rankings', position: 'G', scope: 'last10' }],
   ['best defense in the NBA', { kind: 'team_rankings', stat: 'def_rtg' }],
@@ -46,7 +47,7 @@ const CASES = [
   ['Lakers score on 2026-01-15', { kind: 'game', date: '2026-01-15' }],
   ['who won Knicks Spurs in the Finals', { kind: 'series' }],
   ['who won the 2016 Finals', { kind: 'series', season: '2015-16' }],
-  ['did the Warriors make the playoffs last season', { kind: 'series', season: '2024-25' }],
+  ['did the Warriors make the playoffs last season', { kind: 'series', season: /^(2025-26|)$/ }],
   ['who will win the championship', { kind: 'unsupported' }],
   ['should I bet the over on Tatum', { kind: 'unsupported' }],
   ['best NFL quarterback', { kind: 'unsupported' }],
@@ -54,7 +55,8 @@ const CASES = [
 
 const llm = createLlm();
 if (!llm.configured) { console.error('ANTHROPIC_API_KEY is not set (repo-root .env)'); process.exit(1); }
-const system = systemPrompt({ today: '2026-10-01', currentSeason: '2026-27', latestSeason: '2025-26' });
+// Preseason context (Oct 1, 2026: 2026-27 not started) — "last season" = 2025-26, the season that just ended.
+const system = systemPrompt({ today: '2026-10-01', currentSeason: '2026-27', latestSeason: '2025-26', seasonInProgress: false });
 let pass = 0, tokens = 0;
 for (const [q, want] of CASES) {
   let plan, err;

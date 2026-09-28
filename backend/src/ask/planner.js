@@ -40,11 +40,16 @@ export const PLAN_TOOL = {
   },
 };
 
-export function systemPrompt({ today, currentSeason, latestSeason }) {
+export function systemPrompt({ today, currentSeason, latestSeason, seasonInProgress = false }) {
+  const prev = (x) => `${Number(x.slice(0, 4)) - 1}-${x.slice(2, 4)}`;
+  // Offseason / preseason: the season that just ended is both "this" and "last" season to a fan.
+  const seasonRule = seasonInProgress
+    ? `- "this season" = ${currentSeason} (in progress); "last season" = ${prev(currentSeason)}.`
+    : `- ${currentSeason} hasn't started, so "this season", "last season" and "the season that just ended" all mean ${latestSeason}; "two seasons ago" = ${prev(latestSeason)}.`;
   return `You turn questions about NBA stats into ONE call of the \`plan\` tool for the Chalk That NBA app. You never answer with numbers yourself.
 
 Today is ${today}. The current season label is ${currentSeason}; the latest season with games played is ${latestSeason}. Stats go back to 2003-04.
-- "this season" = ${latestSeason} unless ${currentSeason} has games; "last season" = the season before that. Omit season for the default.
+${seasonRule} Omit season when the question means the default (${latestSeason}).
 - Seasons are written like 2025-26. "2024 playoffs" = 2023-24.
 
 Splits (player/team stats): venue home/away; b2b 1 or 2 ("second night of a back-to-back" = b2b 2, "back-to-backs" alone = b2b 2); rest 0/1/2/3+ days ("on no rest" = 0); national_tv major (ESPN/ABC/TNT/NBC/Prime) / nba_tv / local; altitude true (Denver, Utah, Mexico City).

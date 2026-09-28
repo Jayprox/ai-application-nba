@@ -84,6 +84,12 @@ test('sentences are templates over the API numbers', () => {
     { main: { data: { upcoming: { game: { away: 'BOS', home: 'NYK', date: '2026-10-21' }, lines: [{ market: 'pts', line: 26.5 }] }, record: {} } }, hits: { props: { pts: { line: 26.5, over: 6, under: 4, push: 0, games: 10 } } } }, ctx);
   assert.equal(props.sentence, 'DraftKings has Jayson Tatum at 26.5 points for BOS @ NYK (2026-10-21). He went over 26.5 in 6 of his last 10 games.');
   assert.match(summarize({ kind: 'unsupported', reason: 'predictions' }, {}, {}, ctx).sentence, /only answer NBA stats/);
+  assert.deepEqual(chips({ kind: 'unsupported' }, ctx), [], 'no filter chips on a refusal');
+  const noDk = summarize({ kind: 'props', market: 'pts', scope: 'last10', line: 27.5 }, { player: { id: 'e', name: 'Anthony Edwards' } },
+    { main: { data: { upcoming: null, record: {} } }, hits: { props: { pts: { line: 27.5, over: 4, under: 6, push: 0, games: 10 } } } }, ctx);
+  assert.equal(noDk.sentence, 'Anthony Edwards went over 27.5 points in 4 of his last 10 games.');
+  const lead = summarize({ kind: 'leaders', stat: 'stl' }, {}, { main: { data: [{ full_name: 'Dyson Daniels', team: 'ATL', value: 2, gp: 76 }], meta: {} } }, ctx);
+  assert.equal(lead.sentence, 'Dyson Daniels (ATL) led the 2025-26 regular season in steals at 2.0 per game over 76 games.');
 });
 
 // ---- end to end (fake model, real API + data) ------------------------------------------------
@@ -130,6 +136,21 @@ test('POST /ask: a game result is found in the team game log', async () => {
   assert.equal(r.status, 200);
   assert.match(r.body.sentence, /(CLE beat NYK|NYK beat CLE) \d+-\d+ on 2004-04-14/);
   assert.match(r.body.link, /^\/games\//);
+});
+
+test('series: who won, from the bracket; a team\'s last series when it lost', () => {
+  const ctx = { latestSeason: '2025-26' };
+  const b = { data: [
+    { round: 'finals', conference: null, higher_id: 20, higher_abbr: 'NYK', lower_id: 27, lower_abbr: 'SAS', higher_wins: 4, lower_wins: 1, winner_team_id: 20, best_of: 7 },
+    { round: 'conf_finals', conference: 'West', higher_id: 21, higher_abbr: 'OKC', lower_id: 27, lower_abbr: 'SAS', higher_wins: 2, lower_wins: 4, winner_team_id: 27, best_of: 7 },
+    { round: 'play_in', conference: 'West', higher_id: 24, higher_abbr: 'PHX', lower_id: 10, lower_abbr: 'GSW', higher_wins: 1, lower_wins: 0, winner_team_id: 24, best_of: 1 },
+  ] };
+  assert.equal(summarize({ kind: 'series' }, {}, { main: b }, ctx).sentence, 'NYK beat SAS 4-1 in the 2025-26 NBA Finals.');
+  assert.equal(summarize({ kind: 'series', team: 'OKC' }, { team: { id: 21, abbr: 'OKC', name: 'Oklahoma City Thunder' } }, { main: b }, ctx).sentence,
+    "SAS beat OKC 4-2 in the 2025-26 conference finals (West), the Oklahoma City Thunder's last series that postseason.");
+  assert.equal(summarize({ kind: 'series', team: 'GSW' }, { team: { id: 10, abbr: 'GSW', name: 'Golden State Warriors' } }, { main: b }, ctx).sentence,
+    "PHX beat GSW in the 2025-26 play-in (West), the Golden State Warriors' last series that postseason.");
+  assert.equal(summarize({ kind: 'series', team: 'BOS' }, { team: { id: 2, abbr: 'BOS', name: 'Boston Celtics' } }, { main: b }, ctx).sentence, "The Boston Celtics didn't play in the 2025-26 postseason.");
 });
 
 test('POST /ask without a configured model: 503 with a clear message (plans still work)', async () => {

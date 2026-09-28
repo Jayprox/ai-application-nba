@@ -3,7 +3,7 @@
 // or writes numbers — the API computes them, the summary is a template.
 import { MARKETS } from '../query/markets.js';
 
-export const KINDS = ['player_stats', 'team_stats', 'leaders', 'player_rankings', 'team_rankings', 'matchups', 'props', 'standings', 'game', 'unsupported'];
+export const KINDS = ['player_stats', 'team_stats', 'leaders', 'player_rankings', 'team_rankings', 'matchups', 'props', 'standings', 'game', 'series', 'unsupported'];
 export const LEADER_STATS = ['pts', 'reb', 'ast', 'stl', 'blk', 'fg3m', 'tov', 'minutes', 'plus_minus'];
 const STAT_FOCUS = ['pts', 'reb', 'ast', 'stl', 'blk', 'tov', 'fg3m', 'minutes', 'plus_minus', 'fg_pct', 'fg3_pct', 'ft_pct', 'ts_pct', 'efg_pct', 'off_rtg', 'def_rtg'];
 const TEAM_SORTS = ['net_rtg', 'off_rtg', 'def_rtg', 'pace'];
@@ -14,7 +14,7 @@ export const PLAN_TOOL = {
   input_schema: {
     type: 'object',
     properties: {
-      kind: { type: 'string', enum: KINDS, description: 'player_stats: a player\'s averages/game log under filters. team_stats: same for a team. leaders: league leaders in a stat. player_rankings: best players by position (composite score). team_rankings: best/worst teams by rating or pace. matchups: which defenses allow the most/fewest to a position. props: a player vs a points/rebounds/etc line (DraftKings or a given number). standings: records / seeds. game: a specific game result (team vs opponent, or on a date). unsupported: anything else (not NBA stats, predictions, betting advice, injuries, news).' },
+      kind: { type: 'string', enum: KINDS, description: 'player_stats: a player\'s averages/game log under filters. team_stats: same for a team. leaders: league leaders in a stat. player_rankings: best players by position (composite score). team_rankings: best/worst teams by rating or pace. matchups: which defenses allow the most/fewest to a position. props: a player vs a points/rebounds/etc line (DraftKings or a given number). standings: records / seeds. game: a specific game result (team vs opponent, or on a date). series: a playoff or play-in series result, incl. who won the Finals / a round (team, optional opponent, season). unsupported: anything else (not NBA stats, predictions, betting advice, injuries, news).' },
       player: { type: 'string', description: 'Player name as asked, e.g. "Jokic", "SGA", "LeBron".' },
       team: { type: 'string', description: 'Team as asked, e.g. "Knicks", "BOS", "Golden State".' },
       opponent: { type: 'string', description: 'Opponent team (for game questions).' },
@@ -61,6 +61,7 @@ Kinds:
 - props: "how often has Tatum gone over 26.5 points in his last 10", "Brunson points line tonight" (player, market, optional line, scope default last10).
 - standings: "Knicks record", "who is first in the West", "standings 2019-20".
 - game: "who won Celtics Heat", "Lakers score last night" (team, optional opponent, optional date).
+- series: "who won the Finals", "Knicks Spurs Finals", "did the Warriors make the playoffs in 2025-26", "who won the 2016 Finals" (season 2015-16; team/opponent optional).
 - unsupported: predictions ("who will win"), betting advice ("should I bet"), injuries, trades, news, other sports, non-NBA. Set reason.
 
 Examples:
@@ -103,6 +104,7 @@ export function normalizePlan(raw = {}) {
   // Kind-level requirements: a plan that can't run becomes a clear "what's missing".
   if (['player_stats', 'props'].includes(kind) && !p.player) return { kind: 'unsupported', reason: 'which player?' };
   if (['team_stats', 'game'].includes(kind) && !p.team) return { kind: 'unsupported', reason: 'which team?' };
+  if (kind === 'series' && !p.team && p.opponent) { p.team = p.opponent; delete p.opponent; }
   if (kind === 'props' && !p.market) p.market = p.stat && MARKETS.includes(p.stat) ? p.stat : 'pts';
   if (kind === 'leaders' && !p.stat) p.stat = 'pts';
   if (kind === 'matchups' && !p.stat) p.stat = 'pts';

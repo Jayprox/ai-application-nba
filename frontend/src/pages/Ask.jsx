@@ -168,6 +168,12 @@ function View({ v, season }) {
     case 'game':
       return v.games.length ? <Table head={[['Date'], ['Game'], ['Result', 'r']]}
         rows={v.games.map((g) => [<Link key="d" to={`/games/${g.game_id}`}>{tinyDate(g.date)}</Link>, `${g.team} ${g.venue === 'away' ? '@' : 'vs'} ${g.opponent}`, `${g.won ? 'W' : 'L'} ${g.pts}-${g.opp_pts}`])} /> : null;
+    case 'series': {
+      const R = { play_in: 'Play-In', first_round: 'First round', conf_semis: 'Conf. semis', conf_finals: 'Conf. finals', finals: 'Finals' };
+      return v.rows.length ? <Table head={[['Round'], ['Series'], ['Result', 'r']]}
+        rows={v.rows.map((x) => [R[x.round] + (x.conference && x.round !== 'finals' ? ` (${x.conference})` : ''), `${x.higher_abbr} vs ${x.lower_abbr}`,
+          x.winner_team_id == null ? `${x.higher_wins}-${x.lower_wins}` : `${x.winner_team_id === x.higher_id ? x.higher_abbr : x.lower_abbr} ${Math.max(x.higher_wins, x.lower_wins)}-${Math.min(x.higher_wins, x.lower_wins)}`])} /> : null;
+    }
     case 'unsupported':
       return <Examples />;
     default:

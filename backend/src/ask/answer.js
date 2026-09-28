@@ -10,7 +10,7 @@ const POS = { G: 'guards', F: 'forwards', C: 'centers' };
 const TYPE = { regular: 'regular season', playoffs: 'playoffs', play_in: 'play-in', all: 'all games', cup: 'NBA Cup' };
 const PCT = new Set(['fg_pct', 'fg3_pct', 'ft_pct', 'ts_pct', 'efg_pct']);
 const fmt = (k, v) => (v == null ? '—' : PCT.has(k) ? (v >= 1 ? '1.000' : `.${String(Math.round(v * 1000)).padStart(3, '0')}`) : Number(v).toFixed(1));
-const num = (v) => (v == null ? '—' : Number.isInteger(v) ? String(v) : Number(v).toFixed(1));
+const num = (v) => (v == null ? '—' : Number(v).toFixed(1));   // per-game values: always one decimal (2.0, not 2)
 const ord = (n) => { const v = n % 100; return `${n}${v >= 11 && v <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' })[n % 10] ?? 'th'}`; };
 const signed = (v) => (v == null ? '' : `${v > 0 ? '+' : ''}${Number(v).toFixed(1)}`);
 const rankTypes = (t) => (['regular', 'playoffs', 'all'].includes(t) ? t : 'regular');
@@ -52,6 +52,7 @@ export function firstRequest(plan, ids, ctx) {
     case 'props': return { method: 'GET', path: `/players/${ids.player.id}/props` };
     case 'standings': return { method: 'GET', path: `/standings?season=${season}` };
     case 'game': return { method: 'POST', path: '/query', body: { entity: 'team', id: ids.team.id, scope: 'game_log', season, season_type: 'all' } };
+    case 'series': return { method: 'GET', path: `/bracket?season=${season}` };
     default: return null;
   }
 }
@@ -59,6 +60,7 @@ export function firstRequest(plan, ids, ctx) {
 /** Filter chips (removable in the UI: removing one re-runs the plan without it). */
 export function chips(plan, ctx) {
   const c = [];
+  if (plan.kind === 'unsupported') return c;
   const season = seasonFor(plan, ctx);
   if (plan.scope !== 'career' && !['game'].includes(plan.kind)) c.push({ key: 'season', label: plan.season ? season : `${season} (latest)`, removable: Boolean(plan.season) });
   if (plan.season_type && plan.season_type !== 'regular') c.push({ key: 'season_type', label: TYPE[plan.season_type] });
@@ -103,6 +105,7 @@ export function appLink(plan, ids, ctx) {
     case 'team_rankings': return `/rankings${qs({ view: 'teams', season, sort: plan.stat, scope: plan.scope === 'last10' ? 'last10' : undefined })}`;
     case 'matchups': return `/rankings${qs({ view: 'matchups', season, pos: plan.position, sort: ['pts', 'reb', 'ast', 'fg3m'].includes(plan.stat) ? plan.stat : undefined, scope: plan.scope === 'last10' ? 'last10' : undefined })}`;
     case 'standings': return `/standings${qs({ season })}`;
+    case 'series': return `/standings${qs({ season, view: 'bracket' })}`;
     default: return null;
   }
 }
@@ -192,7 +195,7 @@ export function summarize(plan, ids, r, ctx) {
       const h = r.hits?.props?.[plan.market];
       if (h?.games) {
         const scope = plan.scope === 'last5' || plan.scope === 'last10' ? `his last ${h.games} games` : `${h.games} ${where} games`;
-        parts.push(`He went over ${h.line} in ${h.over} of ${scope}${h.push ? ` (${h.push} push${h.push === 1 ? '' : 'es'})` : ''}${f ? ` ${f}` : ''}.`);
+        parts.push(`${dk ? 'He' : ids.player.name} went over ${h.line} ${dk ? '' : `${label} `}in ${h.over} of ${scope}${h.push ? ` (${h.push} push${h.push === 1 ? '' : 'es'})` : ''}${f ? ` ${f}` : ''}.`);
       } else if (h) parts.push(`No games match to check ${h.line} against.`);
       if (!parts.length) parts.push(`No DraftKings ${label} line for ${ids.player.name} yet. Ask with a number, e.g. "over ${plan.market === 'pts' ? '24.5' : '6.5'} ${label}".`);
       const rec = r.main.data.record?.[plan.market];
@@ -218,6 +221,26 @@ export function summarize(plan, ids, r, ctx) {
       const site = g.venue === 'home' ? `at ${us}` : g.venue === 'away' ? `at ${them}` : 'at a neutral site';
       return { sentence: `${w} beat ${l} ${ws}-${ls} on ${g.date} (${site}).`,
         view: { type: 'game', games: games.slice(0, 5).map((x) => ({ ...x, team: us })) }, link: `/games/${g.game_id}` };
+    }
+    case 'series': {
+      const ROUND = { play_in: 'play-in', first_round: 'first round', conf_semis: 'conference semifinals', conf_finals: 'conference finals', finals: 'NBA Finals' };
+      const ORDER = ['finals', 'conf_finals', 'conf_semis', 'first_round', 'play_in'];
+      const all = [...r.main.data].sort((a, b) => ORDER.indexOf(a.round) - ORDER.indexOf(b.round));
+      const has = (x, t) => t && (x.higher_id === t.id || x.lower_id === t.id);
+      const list = all.filter((x) => (!ids.team || has(x, ids.team)) && (!ids.opponent || has(x, ids.opponent)));
+      const x = list[0];
+      if (!all.length) return { sentence: `No postseason games for ${season} yet.`, view: { type: 'series', rows: [] } };
+      if (!x) return { sentence: ids.team ? `The ${ids.team.name} didn't play in the ${season} postseason${ids.opponent ? ` against the ${ids.opponent.name}` : ''}.` : `No ${season} series found.`, view: { type: 'series', rows: [] } };
+      const done = x.winner_team_id != null;
+      const [w, l, ww, lw] = x.winner_team_id === x.lower_id ? [x.lower_abbr, x.higher_abbr, x.lower_wins, x.higher_wins] : [x.higher_abbr, x.lower_abbr, x.higher_wins, x.lower_wins];
+      const where = `the ${season} ${ROUND[x.round]}${x.conference && x.round !== 'finals' ? ` (${x.conference})` : ''}`;
+      const sentence = !done ? `${x.higher_abbr} and ${x.lower_abbr} are ${x.higher_wins}-${x.lower_wins} in ${where}.`
+        : x.round === 'play_in' && x.best_of === 1 ? `${w} beat ${l} in ${where}.`
+          : `${w} beat ${l} ${ww}-${lw} in ${where}.`;
+      const poss = (n) => (n.endsWith('s') ? `${n}'` : `${n}'s`);
+      const lastSeries = ids.team && !ids.opponent && done && w !== ids.team.abbr;   // their deepest round, and they lost it
+      return { sentence: lastSeries ? `${sentence.slice(0, -1)}, the ${poss(ids.team.name)} last series that postseason.` : sentence,
+        view: { type: 'series', rows: list.slice(0, 5) } };
     }
     default: return { sentence: plan.reason ? `I can only answer NBA stats questions from the data here (${plan.reason}).` : 'I can only answer NBA stats questions from the data here.', view: { type: 'unsupported' } };
   }

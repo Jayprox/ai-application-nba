@@ -3,7 +3,7 @@
 The point to land: **every number is real, verified against NBA.com, and
 nothing is predicted.** Even the AI search only picks the query.
 
-1. **Search (30 s).** Type *"Jokić on the second night of back-to-backs"*.
+1. **Ask (30 s).** Open Ask in the nav and type *"Jokić on the second night of back-to-backs"*.
    One sentence with the numbers, the filters it used as chips, "Open the
    full view". Remove the back-to-back chip: the number changes, with no AI
    call. Then *"how is LA doing"*: it asks Lakers or Clippers instead of

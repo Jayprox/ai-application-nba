@@ -5,7 +5,7 @@ theme) and save them here with exactly these names (replace the old ones):
 
 | File | Open this (after signing in) |
 |---|---|
-| `ask.png` | Search box: `Jokić on the second night of back-to-backs` |
+| `ask.png` | Ask page (nav → Ask): `Jokić on the second night of back-to-backs` |
 | `player-detail.png` | Nikola Jokić, 2025-26, Last 10 + Away (Players → Jokić → Last 10 tab, Venue: Away) |
 | `matchups.png` | Rankings → Matchups → Centers (`/rankings?view=matchups&pos=C`) |
 | `scoreboard.png` | Scoreboard on 2026-04-12 (`/?date=2026-04-12`) |

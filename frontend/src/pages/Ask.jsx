@@ -8,6 +8,7 @@ import { useFetch } from '../lib/useFetch.js';
 import { avg, pct, signedAvg, tinyDate } from '../lib/format.js';
 import { MARKET_SHORT, price } from '../lib/props.js';
 import { Empty, ErrorBox, Loading } from '../components/States.jsx';
+import { PageTitle } from '../components/Controls.jsx';
 
 export const EXAMPLES = [
   'Jokić on the second night of back-to-backs',
@@ -38,7 +39,8 @@ export default function Ask() {
 
   return (
     <>
-      <AskBox initial={q} big />
+      <PageTitle eyebrow="Plain English · verified numbers">Ask</PageTitle>
+      <AskBox key={q} initial={q} big />
       {!body && <Examples />}
       {loading && <Loading label="Looking it up…" />}
       {error && <ErrorBox error={error} onRetry={retry} />}

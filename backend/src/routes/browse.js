@@ -126,7 +126,9 @@ export function browseRoutes(db, { currentSeason = '2026-27' } = {}) {
     const { rows: players } = await db.query(
       `SELECT s.*, p.full_name FROM player_game_stats s JOIN players p ON p.id = s.player_id WHERE s.game_id = $1
         ORDER BY s.team_id, s.dnp, s.started DESC NULLS LAST, s.minutes DESC NULLS LAST`, [g.id]);
-    res.json({ data: { game: g, teams: teams.map((t) => ({ ...t, players: players.filter((p) => p.team_id === t.team_id) })) } });
+    // minutes is NUMERIC(5,2), which pg returns as a string: send a number, like every other endpoint (typed clients: iOS).
+    const num = (p) => ({ ...p, minutes: p.minutes == null ? null : Number(p.minutes) });
+    res.json({ data: { game: g, teams: teams.map((t) => ({ ...t, players: players.filter((p) => p.team_id === t.team_id).map(num) })) } });
   }));
 
   return r;

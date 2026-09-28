@@ -17,7 +17,8 @@ describe('format', () => {
     expect(restLabel(null, null)).toBe('no prior game this season');
   });
   it('game context', () => {
-    expect(gameContext({ season_type: 'playoffs', series_round: 4, series_game_number: 7 })).toBe('NBA Finals · Game 7');
+    expect(gameContext({ season_type: 'playoffs', series_round: 'finals', series_game_number: 7 })).toBe('NBA Finals · Game 7');
+    expect(gameContext({ season_type: 'playoffs', series_round: 'first_round', series_game_number: 2 })).toBe('First round · Game 2');
     expect(gameContext({ season_type: 'regular', cup_stage: 'group', is_neutral_site: true, arena_city: 'Mexico City' })).toBe('NBA Cup group · in Mexico City');
     expect(gameContext({ season_type: 'regular' })).toBe('');
   });

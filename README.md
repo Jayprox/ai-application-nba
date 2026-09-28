@@ -109,7 +109,7 @@ frontend/   web app: 10 screens, shared StatExplorer, fetch hook        (Railway
 worker/     ingestion-worker: Highlightly scores + box scores          (Railway root: /worker)
 scripts/    run from a Mac: schema, seed, backfill, schedule, status
 db/         schema.sql, migrations/, constraint tests
-docs/       architecture.md, vibe-coding-checklist.md
+docs/       architecture.md, api.md, ios-kickoff.md, vibe-coding-checklist.md, demo-script.md
 PLATFORM.md the cross-sport Chalk That playbook
 ```
 
@@ -181,6 +181,8 @@ curl -X POST https://backend-api-production-f05a.up.railway.app/query \
 ```
 
 Returns the averages plus `meta`: sample size, W-L in those games, the filters applied, notes (e.g. "neutral-site games are excluded from home/away") and data freshness.
+
+The full contract (every endpoint, field, enum and error) is in [`docs/api.md`](docs/api.md). A native iOS app is next, as a second client of the same API: see [`docs/ios-kickoff.md`](docs/ios-kickoff.md).
 
 ## Known limitations
 

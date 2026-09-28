@@ -154,7 +154,7 @@ The Odds API — free 500 credits/mo; paid from $30/mo. Fast-follow only.
     ~~composite position rankings, matchup-insight splits, team-unit
     offense/defense rankings~~ *(done 2026-09-27: Rankings page, Props matchup notes, team defense by position)*
   - ~~NBA Cup split filter~~ — *done 2026-09-27: "NBA Cup" season type.*
-  - Swift iOS app (same API, later)
+  - Swift iOS app (same API): **next**. Kickoff: `docs/ios-kickoff.md`; contract: `docs/api.md`.
   - ~~Natural-language search bar~~ *(done 2026-09-27: Haiku picks the query, the API supplies every number)*
   - ~~Standings page, playoff bracket view~~ — *done 2026-09-27.*
   - ~~Usage rate~~ *(done 2026-09-28: box-score estimate, player pages + Usage leaderboard + Ask)*;
@@ -424,6 +424,7 @@ Answer these. If you stumble on any, go back.
 
 | Date | What I built | Decision made | Why |
 |------|-------------|---------------|-----|
+| 2026-09-28 | Final docs for iOS: `docs/api.md` (API reference) + `docs/ios-kickoff.md` | Documented from real responses, not from memory of the code; fixed the two contract bugs this found (box-score minutes as a string, playoff-round labels) | A typed Swift client fails on a string where it expects a number, so the reference had to be checked against actual JSON; the round-label bug was invisible because its unit test used the wrong input |
 | 2026-09-28 | Usage rate | Box-score estimate per game (his plays / team plays x his share of team minutes), summed over his games; labelled "est."; Usage leaderboard also needs 15+ min/game; qualifier stays fixed, self-serve signup dropped | NBA.com's usage comes from play-by-play we don't store; the per-game sum handles trades and missed games, and matches Basketball-Reference (Morant 2019-20 25.9% exactly, LeBron 2003-04 within 0.1); a minutes floor keeps 4-minute players off the top |
 | 2026-09-27 | Natural-language search | Haiku only maps the question to a structured plan (forced tool call); names resolved by our code, ambiguity asked back; the sentence is a template over API numbers | The one thing an LLM could get wrong here is a number, so it never writes one; every answer is the same verified query a screen would run |
 | 2026-09-27 | Rankings + matchup insights | G/F/C from NBA.com's listing (first position wins); equal-weight z-scores with every z shown; defenses ranked by what they allow per position, 1 = fewest | Stays inside real data (NBA.com has no PG/SG); a score anyone can decompose is a stat, an unexplained one is a model; the matchup rank turns props from "he usually goes over" into "and tonight's defense is 27th against guards" |

@@ -326,23 +326,33 @@ All resolved into plain columns at ingestion (PLATFORM.md §2):
     scrimmage). With no earlier game at all, rest is null (only "All").
   - Buckets 0 / 1 / 2 / 3+; b2b_night null/1/2. All from local game dates.
 
-## 7. Open — for the build session to work through
+## 7. Open items (updated 2026-09-28)
 
-- ~~How NBA.com data reaches production~~ — decided, see §3.2.
-- Injury source (§3.2) — re-test Highlightly once preseason starts (~Oct 2).
-- ~~Split definitions (NBA TV, neutral sites, altitude)~~ — decided, §6.1.
+Still open:
+- **Injury source** (§3.2): re-test Highlightly on real preseason games
+  (`npm run injuries-probe`, early October). Until then the API returns
+  `current_injury: null` and no badge shows.
+- **The Odds API plan:** move to the 100K plan before opening night
+  (2026-10-21); capture a real response as a test fixture that night (§7.6).
+- **Swift iOS app:** next. Start from `docs/ios-kickoff.md`; the contract
+  is `docs/api.md`.
 
-- Actual `nba_api` + Highlightly signup and a real dry-run test against
-  live data before trusting either vendor, same as NFL required (don't
-  skip the "confirmed against real data" step just because the docs above
-  read confidently).
-- Confirm Highlightly's real NBA free-tier request limits (unclear from
-  public docs alone).
-- ~~Full schema~~ — done, §4.1 (`db/schema.sql`).
-- MVP screen/route list and build order — follow `docs/vibe-coding-
-  checklist.md` (copied into this repo) phase by phase, same as NFL was
-  built from it.
-- Railway project setup, per PLATFORM.md §4's topology.
+Resolved:
+- ~~How NBA.com data reaches production~~: decided, see §3.2.
+- ~~Split definitions (NBA TV, neutral sites, altitude)~~: decided, §6.1.
+- ~~Vendor dry-runs against live data~~: done, §3.1 (plain Node HTTP to
+  NBA.com instead of `nba_api`).
+- ~~Highlightly request limits~~: the worker's schedule stays well inside
+  the quota (§7.4).
+- ~~Full schema~~: done, §4.1 (`db/schema.sql`).
+- ~~MVP screens and build order~~: built phase by phase from
+  `docs/vibe-coding-checklist.md`.
+- ~~Railway project setup~~: done, §8.
+- ~~API reference for clients~~: `docs/api.md` (2026-09-28). Writing it
+  turned up two contract fixes: box-score `minutes` now comes back as a
+  number (it was a NUMERIC string), and the web's playoff-round labels now
+  read the API's `first_round` … `finals` values (they expected 1-4, so
+  playoff game cards said "Round finals").
 
 ## 7.1 Seed (as built) — `scripts/seed.mjs`
 

@@ -21,7 +21,8 @@ export const tipTime = (utc) => (utc ? new Date(utc).toLocaleTimeString('en-US',
 
 export const SEASON_TYPE = { preseason: 'Preseason', regular: 'Regular season', play_in: 'Play-In', playoffs: 'Playoffs', cup_final: 'NBA Cup Final' };
 
-const ROUND = { 1: 'First round', 2: 'Conf. semifinals', 3: 'Conf. finals', 4: 'NBA Finals' };
+// Keys are the API's playoff_series.round values (GET /games -> series_round).
+const ROUND = { first_round: 'First round', conf_semis: 'Conf. semifinals', conf_finals: 'Conf. finals', finals: 'NBA Finals' };
 /** One-line context for a game card: playoff round/game, Cup stage, neutral city. */
 export function gameContext(g) {
   const bits = [];

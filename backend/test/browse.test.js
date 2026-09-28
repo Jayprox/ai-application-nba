@@ -40,6 +40,7 @@ test('scoreboard by date + box score (Tokyo, 2003-10-30: neutral site)', async (
   assert.equal(box.status, 200);
   const cle = box.body.data.teams.find((t) => t.abbreviation === 'CLE');
   assert.equal(cle.players.find((p) => p.full_name === 'LeBron James').pts, 25);
+  assert.equal(typeof cle.players.find((p) => p.full_name === 'LeBron James').minutes, 'number', 'minutes is a number, not a NUMERIC string (iOS decodes strictly)');
   assert.equal(r.body.meta.prev_date < '2003-10-30' && r.body.meta.next_date > '2003-10-30', true);
   const empty = await s.api('GET', '/games?date=2003-08-01');   // offseason: no games, but a way forward
   assert.equal(empty.body.data.length, 0);

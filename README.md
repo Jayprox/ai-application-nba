@@ -6,11 +6,15 @@
 
 The second app on the Chalk That platform, after [Chalk That NFL](https://github.com/Jayprox/ai-application-nfl). Both follow the same sport-agnostic playbook in [`PLATFORM.md`](PLATFORM.md).
 
-| Scoreboard | Player detail with splits |
+| Ask in plain English | Player detail with splits |
 |---|---|
-| ![Scoreboard](docs/screenshots/scoreboard.png) | ![Player detail](docs/screenshots/player-detail.png) |
-| **Box score + split tags** | **League leaders** |
-| ![Box score](docs/screenshots/box-score.png) | ![Leaders](docs/screenshots/leaders.png) |
+| ![Search](docs/screenshots/ask.png) | ![Player detail](docs/screenshots/player-detail.png) |
+| **Defense by position (Rankings → Matchups)** | **Scoreboard** |
+| ![Matchups](docs/screenshots/matchups.png) | ![Scoreboard](docs/screenshots/scoreboard.png) |
+| **Standings + playoff bracket** | **Box score + split tags** |
+| ![Bracket](docs/screenshots/bracket.png) | ![Box score](docs/screenshots/box-score.png) |
+
+2-minute walkthrough: [`docs/demo-script.md`](docs/demo-script.md).
 
 ---
 
@@ -56,7 +60,7 @@ Matching the rest splits exactly meant learning NBA.com's own rules. A season op
 ```mermaid
 flowchart LR
   subgraph Mac["JD's Mac (NBA.com blocks cloud IPs)"]
-    S["scripts/<br/>seed · backfill · schedule<br/>weekly reconcile"]
+    S["scripts/<br/>seed · backfill · schedule · positions<br/>weekly job (launchd, Mondays)"]
   end
   subgraph Railway
     W["ingestion-worker<br/>(no public domain)"]
@@ -67,7 +71,9 @@ flowchart LR
   end
   NBA["NBA.com stats + schedule"] --> S --> P
   HL["Highlightly<br/>live scores + box scores"] --> W --> P
+  OA["The Odds API<br/>DraftKings player props"] --> W
   P --> B
+  B -->|"/ask: question → plan<br/>(never numbers)"| C["Claude Haiku 4.5"]
   R <--> B
   F -->|JWT| B
   A["AI agents"] -->|API key| B
@@ -77,6 +83,7 @@ flowchart LR
 - **Canonical IDs + a crosswalk table:** NBA.com and Highlightly ids map to one player/team/game. Adding a vendor is a data change, not a schema change.
 - **Name matching that never guesses:** handles accents, `Jr.`/`III` and nicknames, but an ambiguous name goes to manual review instead of being merged. Two different Tim Hardaways exist.
 - **Ingestion is its own service.** It only updates games the NBA.com schedule created, and NBA.com has the last word through a weekly reconcile.
+- **The model never writes a number.** Search uses Claude only to choose the query; the answer sentence is a template over the API's result, and ambiguous names are asked back, not guessed.
 - **Two-tier auth:** short-lived JWT plus rotating refresh tokens (a replayed token revokes every session) for people, API keys for agents.
 
 Full decisions and trade-offs: [`docs/architecture.md`](docs/architecture.md). Build log and phase checklist: [`docs/vibe-coding-checklist.md`](docs/vibe-coding-checklist.md).
@@ -89,6 +96,7 @@ Full decisions and trade-offs: [`docs/architecture.md`](docs/architecture.md). B
 | Frontend | React 19, Vite, Tailwind CSS v4, React Router 7 (plain JS) |
 | Data | Postgres 18: 14 tables, CHECK constraints that reject impossible stat lines at write time |
 | Ingestion | Standalone Node worker: Highlightly (scores, box scores) and The Odds API (props), planner-driven polling |
+| AI | Claude Haiku 4.5 for search only: one forced tool call turns a question into a structured query; numbers and sentences come from the API (`npm run ask:eval`: 36/36 real questions) |
 | Hosting | Railway: `backend-api`, `web`, `ingestion-worker`, Postgres, Redis |
 | Tests | `node:test` (backend, worker, scripts) and Vitest + Testing Library (frontend): 146 tests |
 

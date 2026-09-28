@@ -271,6 +271,8 @@ order):**
 Explicit decision (2026-09-26): all of Part 2 above (props AND the
 rankings/insight layer) fast-follows together, same sequencing NFL actually
 used — not split differently between props and rankings.
+**Superseded 2026-09-27 (JD):** player props ship first, on their own
+(§7.6); the rankings / matchup-insight layer follows later.
 
 ## 6. Situational splits (MVP)
 
@@ -507,6 +509,56 @@ Highlightly (§3.2). Decisions (JD, 2026-09-27):
   on all three services). Fix: install the app for this repo (GitHub
   settings), then auto-deploy can be enabled per service.
 
+## 7.6 Player props (as built, 2026-09-27)
+
+Decisions (JD, 2026-09-27):
+- **Source: The Odds API only** — no hand-typed lines. Highlightly (already
+  paid for) has game odds only (moneyline / spread / total), no player props.
+- **Book: DraftKings** (`bookmakers=draftkings`).
+- **Markets: all 12** — PTS, REB, AST, 3PM, PRA, P+R, P+A, R+A, STL, BLK,
+  STL+BLK, TOV (`player_points` ... `player_turnovers`).
+- **Two snapshots per game**: *open* (the morning of the game, from 09:00
+  ET, retried hourly until DraftKings has posted, never later than 90 min
+  before tip) and *close* (in the 35 min before tip; the line props are
+  graded against). Preseason skipped.
+- **No history backfill** (Odds API props exist from May 2023 but cost
+  ~475k credits for three seasons). Lines start with the 2026-27 regular
+  season; until then a current line is checked against his past games.
+- **Plan**: each pull costs 10 credits per market returned (<= 120/game);
+  open + close is ~55k credits in a busy month -> the 100K plan ($59/mo)
+  before opening night. Free tier (500) is enough for development.
+
+Built:
+- **Migration 006**: `prop_lines(game_id, player_id, market, snapshot,
+  book, line, over_price, under_price, book_updated_at, fetched_at)`, PK
+  (game, player, market, book, snapshot); `games.props_open_at /
+  props_close_at` are the worker's done markers.
+- **Worker** (`worker/src/odds.js`, `odds-map.js`, `props.js`,
+  `planner.planProps`): runs in the same one-minute loop when
+  `ODDS_API_KEY` is set. Our game -> Odds API event by teams + tip-off
+  (free `/events`; team names matched by nickname, since NBA.com says "LA
+  Clippers"), stored in the crosswalk. Main line per player = the pair
+  priced closest to even, both sides required. Names -> players like the
+  scores worker, but it **never creates players**: a name it can't place
+  safely goes to `manual_review` (crosswalk source `odds_api`) and its lines
+  are skipped. Quota guard: < 1,000 credits = closing lines only, < 150 =
+  nothing. Every pull is an `ingestion_runs` row (`sync_props`).
+  `npm run props -- --check | --capture <eventId> | --date D --snapshot S`
+  from the Mac.
+- **Backend**: grading is at query time (over / under / push on an exact
+  whole-number line; DNP = no action). `POST /query` takes `lines: {pts:
+  25.5, ...}` on player season / last5 / last10 / career scopes and returns
+  `props` = over/under/push over exactly the filtered games; the game log
+  carries each game's line and result. `GET /props?date=&market=` = the
+  board (closing line, else opening; movement; result; last-10 and season
+  hit rates at that exact line from his games *before* that date).
+  `GET /players/:id/props` = next game's lines + his record vs past lines.
+- **Frontend**: Props page (date nav between dates with lines, market tabs,
+  game filter, sort; cards on phones) and a "Prop check" panel on player
+  pages that grades his next lines under whatever filters are on screen.
+- Hit rates are counts, labelled as such. Nothing is predicted and there
+  are no picks (PLATFORM.md: no predictive math).
+
 ## 8. Railway (as built)
 
 Created 2026-09-26, per PLATFORM.md §4. Deploy configured 2026-09-27 (step 9). Project `chalk-that-nba`,
@@ -519,7 +571,7 @@ as chalk-that-nfl).
 | Redis (8.2) | Railway template | private only | managed |
 | backend-api | GitHub `Jayprox/ai-application-nba` @ `main`, rootDirectory `/backend`, `npm start`, healthcheck `/health` | backend-api-production-f05a.up.railway.app → :8080 | DATABASE_URL, REDIS_URL (refs), CORS_ORIGIN = https://web-production-081bcf.up.railway.app, PORT 8080, CURRENT_SEASON, NODE_ENV; **JWT_SECRET set by JD** |
 | web | same repo, rootDirectory `/frontend`, `npm run build` then `npm start` (`server.js`: static dist/ + SPA fallback, zero deps), healthcheck `/health` | web-production-081bcf.up.railway.app → :8080 | VITE_API_URL = https://backend-api-production-f05a.up.railway.app (set before first build — PLATFORM.md §4 gotcha), PORT 8080, NODE_ENV |
-| ingestion-worker | same repo, rootDirectory `/worker`, `npm start`, restart ALWAYS | none (by design) | DATABASE_URL (ref), CURRENT_SEASON, NODE_ENV; **HIGHLIGHTLY_API_KEY set by JD** |
+| ingestion-worker | same repo, rootDirectory `/worker`, `npm start`, restart ALWAYS | none (by design) | DATABASE_URL (ref), CURRENT_SEASON, NODE_ENV; **HIGHLIGHTLY_API_KEY set by JD**; **ODDS_API_KEY set by JD** (props; without it the worker skips props) |
 
 Backfill scripts run on JD's Mac against Postgres's public connection
 string (`DATABASE_PUBLIC_URL`), since NBA.com blocks Railway IPs.

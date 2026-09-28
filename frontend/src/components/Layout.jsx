@@ -2,7 +2,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import ErrorBoundary from './ErrorBoundary.jsx';
 import { useAuth } from '../lib/auth.jsx';
 
-const LINKS = [['/', 'Scoreboard'], ['/standings', 'Standings'], ['/teams', 'Teams'], ['/players', 'Players'], ['/leaders', 'Leaders']];
+const LINKS = [['/', 'Scoreboard'], ['/standings', 'Standings'], ['/teams', 'Teams'], ['/players', 'Players'], ['/leaders', 'Leaders'], ['/props', 'Props']];
 const link = ({ isActive }) =>
   `shrink-0 rounded-md px-2.5 py-2 text-[14px] font-medium no-underline hover:bg-nav-hover hover:text-white sm:px-3 sm:text-[15px] ${isActive ? 'bg-nav-hover text-white' : 'text-nav-text'}`;
 

@@ -149,7 +149,8 @@ The Odds API — free 500 credits/mo; paid from $30/mo. Fast-follow only.
     with zero games, season type not reached (e.g. team missed playoffs)
   - JWT auth wired (single test account OK), deployed on Railway
 - [x] **Backlog (explicitly out of scope for now):**
-  - Everything in Part 2's fast-follow: player props (The Odds API),
+  - Everything in Part 2's fast-follow: ~~player props (The Odds API)~~
+    *(done 2026-09-27: DraftKings, open + close, 12 markets)*,
     composite position rankings, matchup-insight splits, team-unit
     offense/defense rankings
   - ~~NBA Cup split filter~~ — *done 2026-09-27: "NBA Cup" season type.*
@@ -422,6 +423,7 @@ Answer these. If you stumble on any, go back.
 
 | Date | What I built | Decision made | Why |
 |------|-------------|---------------|-----|
+| 2026-09-27 | Player props (The Odds API, DraftKings) | Real sportsbook lines only, two snapshots (morning open, pre-tip close), graded at query time; no history backfill; unmatched names held, never guessed | Hit rates against the line people actually bet are the useful number; grading at read time means a corrected box score fixes every prop; history would cost ~$119 for little |
 | 2026-09-27 | Backlog: standings + bracket, advanced stats, NBA Cup filter, auto-deploy diagnosis | Standings computed live but ranked by NBA.com's stored official rank; advanced stats from season sums | Tiebreakers are the league's call, not ours; sums (not averages of percentages) are how NBA.com computes TS%/eFG%, and the tests prove the match |
 | 2026-09-27 | Phase 7: README, pitch, gut-check drafts | README leads with NBA.com-verified numbers | Trust is the product: showing the checks is the fastest way to earn it |
 | 2026-09-27 | Phase 6 hardening | Brute-force limit counts failures only, per account and per IP; weak passwords refused at account creation | The site is public: stop password guessing without ever slowing down normal users |

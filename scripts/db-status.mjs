@@ -32,11 +32,19 @@ const [w] = await q(`SELECT count(*)::int runs, max(finished_at) FILTER (WHERE s
   count(*) FILTER (WHERE status = 'failed' AND started_at > now() - interval '1 day')::int failed_24h,
   (SELECT details->'quota' FROM ingestion_runs WHERE job_type = 'sync_scores_box' AND details ? 'quota' ORDER BY id DESC LIMIT 1) quota
   FROM ingestion_runs WHERE job_type = 'sync_scores_box'`);
-const review = await q(`SELECT source_id, match_method FROM entity_id_crosswalk WHERE entity_type = 'player' AND match_status = 'manual_review' ORDER BY id`);
+const review = await q(`SELECT source, source_id, match_method FROM entity_id_crosswalk WHERE entity_type = 'player' AND match_status = 'manual_review' ORDER BY id`);
 const [created] = await q(`SELECT count(*)::int n FROM entity_id_crosswalk x WHERE x.entity_type = 'player' AND x.match_method = 'created_by_worker'
   AND NOT EXISTS (SELECT 1 FROM entity_id_crosswalk y WHERE y.entity_type = 'player' AND y.source = 'nba_stats' AND y.canonical_id = x.canonical_id)`);
 console.log(`  worker: ${w.runs ? `${w.runs} runs, last success ${w.last_ok ? new Date(w.last_ok).toISOString() : 'never'}, ${w.failed_24h} failed in 24h` : 'no runs yet'}` +
   (w.quota?.remaining != null ? `, Highlightly quota ${w.quota.remaining}/${w.quota.limit}` : '') +
   ` · ${created.n} worker-created player(s) not on NBA.com yet · ${review.length} held for review`);
-for (const r of review.slice(0, 10)) console.log(`    ? highlightly player ${r.source_id}: ${r.match_method}`);
+for (const r of review.slice(0, 10)) console.log(`    ? ${r.source} player ${r.source_id}: ${r.match_method}`);
+// Player props (The Odds API, DraftKings): lines stored, last pull, credits left.
+const [pp] = await q(`SELECT (SELECT count(*)::int FROM prop_lines) lines, (SELECT count(DISTINCT game_id)::int FROM prop_lines) games,
+  (SELECT max(finished_at) FROM ingestion_runs WHERE job_type = 'sync_props' AND status = 'success') last_ok,
+  (SELECT count(*)::int FROM ingestion_runs WHERE job_type = 'sync_props' AND status = 'failed' AND started_at > now() - interval '1 day') failed_24h,
+  (SELECT details->'quota'->>'remaining' FROM ingestion_runs WHERE job_type = 'sync_props' AND details ? 'quota' ORDER BY id DESC LIMIT 1) credits`).catch(() => [null]);
+console.log('  props: ' + (pp === null ? 'table missing — npm run db:migrate'
+  : `${pp.lines} DraftKings lines for ${pp.games} game(s), last pull ${pp.last_ok ? new Date(pp.last_ok).toISOString() : 'never'}, ${pp.failed_24h} failed in 24h` +
+    (pp.credits != null ? `, Odds API credits left ${pp.credits}` : '')));
 await db.end();

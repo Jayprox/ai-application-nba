@@ -8,6 +8,8 @@ import { readFileSync } from 'node:fs';
 import { createPool } from '../src/db.js';
 import { createHighlightly } from '../src/highlightly.js';
 import { loadBoxScore, syncDate } from '../src/sync.js';
+import { createOdds } from '../src/odds.js';
+import { syncProps } from '../src/props.js';
 
 const url = process.env.WORKER_TEST_DATABASE_URL;
 const safe = url && /^(localhost|127\.0\.0\.1)$/.test(new URL(url).hostname) && /test/.test(new URL(url).pathname);
@@ -94,4 +96,39 @@ test('never overwrites NBA.com (reconciled) rows', { skip }, async () => {
   const pts = await one(`SELECT plus_minus AS pts FROM player_game_stats WHERE game_id = $1 AND player_id = (SELECT id FROM players WHERE full_name = 'Reed Sheppard')`, [gameId]);
   assert.equal(pts.pts, 99);
   assert.equal((await one('SELECT box_score_checks FROM games WHERE id = $1', [gameId])).box_score_checks, 2);
+});
+
+test('props: DraftKings lines attach to our game and players; unsafe names held, never guessed', { skip }, async () => {
+  const odds = createOdds({ fixtures: new URL('./fixtures/odds', import.meta.url).pathname });
+  const now = new Date('2026-04-13T00:00:00Z');
+  const [r] = await syncProps(db, odds, [gameId], 'close', { now });
+  assert.equal(r.game, 'MEM@HOU');
+  assert.equal(r.lines, 4);                                   // Eason pts + PRA, Tate pts, Sheppard 3PM
+  assert.equal(r.players, 3);
+  assert.deepEqual(r.held.map((h) => h.split(' (')[0]).sort(), ['Cam Spencer', 'Jeff Green']);
+  const { rows } = await db.query(`SELECT p.full_name, l.market, l.line::float8 AS line, l.over_price, l.under_price, l.snapshot, l.book
+    FROM prop_lines l JOIN players p ON p.id = l.player_id WHERE l.game_id = $1 ORDER BY 1, 2`, [gameId]);
+  assert.deepEqual(rows.map((x) => `${x.full_name} ${x.market} ${x.line} ${x.over_price}/${x.under_price}`), [
+    "Jae'Sean Tate pts 6.5 -115/-105", 'Reed Sheppard fg3m 1.5 -140/110', 'Tari Eason pra 21.5 -115/-115', 'Tari Eason pts 12.5 -110/-120',
+  ]);
+  assert.ok(rows.every((x) => x.snapshot === 'close' && x.book === 'draftkings'));
+  assert.ok((await one('SELECT props_close_at FROM games WHERE id = $1', [gameId])).props_close_at);
+  assert.equal((await one(`SELECT source_id FROM entity_id_crosswalk WHERE entity_type = 'game' AND source = 'odds_api'`)).source_id, 'evt_memhou');
+  const held = await one(`SELECT count(*)::int n FROM entity_id_crosswalk WHERE source = 'odds_api' AND match_status = 'manual_review'`);
+  assert.equal(held.n, 2);
+
+  // A human resolves "Jeff Green" -> the next pull uses it; re-pulling updates rows in place.
+  const { rows: [jg] } = await db.query(`SELECT id FROM players WHERE full_name = 'Jeff Green' LIMIT 1`);
+  await db.query(`UPDATE entity_id_crosswalk SET canonical_id = $1, match_status = 'matched' WHERE source = 'odds_api' AND source_id = 'Jeff Green'`, [jg.id]);
+  const [again] = await syncProps(db, odds, [gameId], 'close', { now });
+  assert.equal(again.lines, 5);
+  assert.equal((await one('SELECT count(*)::int n FROM prop_lines WHERE game_id = $1', [gameId])).n, 5);
+});
+
+test('props: an opening pull with nothing posted is retried (no done marker)', { skip }, async () => {
+  const odds = createOdds({ fixtures: new URL('./fixtures/odds', import.meta.url).pathname });
+  odds.eventOdds = async () => ({ id: 'evt_memhou', bookmakers: [] });
+  const [r] = await syncProps(db, odds, [gameId], 'open');
+  assert.equal(r.lines, 0);
+  assert.equal((await one('SELECT props_open_at FROM games WHERE id = $1', [gameId])).props_open_at, null);
 });

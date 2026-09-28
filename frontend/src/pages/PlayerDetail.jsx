@@ -10,6 +10,8 @@ export default function PlayerDetail() {
   const { id } = useParams();
   const { data, error, loading, retry } = useFetch(`player:${id}`, (signal) => api(`/players/${id}`, { signal }));
   const p = data?.data;
+  // DraftKings lines for his next game + his record vs past lines. Optional: the page works without it.
+  const props = useFetch(`player-props:${id}`, (signal) => api(`/players/${id}/props`, { signal }));
   return (
     <>
       <Link to="/players" className="self-start text-sm font-medium">← Players</Link>
@@ -31,7 +33,7 @@ export default function PlayerDetail() {
             )}
           </div>
           {p.seasons.length
-            ? <StatExplorer entity="player" id={p.id} name={p.full_name} seasons={p.seasons} seasonTypes={p.season_types} defaultSeason={p.seasons[0]} />
+            ? <StatExplorer entity="player" id={p.id} name={p.full_name} seasons={p.seasons} seasonTypes={p.season_types} defaultSeason={p.seasons[0]} props={props.loading ? undefined : props.data?.data ?? null} />
             : <Empty>No games for {p.full_name} since 2003-04 (where our stats begin).</Empty>}
         </>
       )}

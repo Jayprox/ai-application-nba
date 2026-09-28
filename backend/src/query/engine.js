@@ -2,8 +2,12 @@
 // call exactly this; every result carries sample size + freshness.
 // No predictive calculations: filtered averages/totals computed at query time.
 //
-// Request: { entity, id, scope, season, season_type, splits, stat, limit }
+// Request: { entity, id, scope, season, season_type, splits, stat, limit, lines }
+//   lines (players, averaged scopes): { pts: 25.5, ... } -> `props`: how often he
+//   went over / under each line in exactly the games the filters select.
 // Decisions: architecture.md §5 (scopes), §6.1 (splits), §7.2 (history).
+
+import { checkLines, grade, marketSql, marketValue } from './markets.js';
 
 export class QueryError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -55,9 +59,16 @@ export function validate(q) {
     if (seasonType === 'cup') throw new QueryError(400, 'leaderboards support regular, play_in, playoffs or all');
     if (!LEADERBOARD_STATS.includes(q.stat ?? 'pts')) throw new QueryError(400, `stat must be one of ${LEADERBOARD_STATS.join(', ')}`);
   }
+  let lines = null;
+  if (q.lines !== undefined && q.lines !== null) {
+    if (entity !== 'player' || !['season', 'last5', 'last10', 'career'].includes(scope)) throw new QueryError(400, 'lines apply to player season / last5 / last10 / career queries');
+    const bad = checkLines(q.lines);
+    if (bad) throw new QueryError(400, bad);
+    lines = q.lines;
+  }
   const limit = q.limit === undefined ? 10 : Number(q.limit);
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) throw new QueryError(400, 'limit must be an integer 1-50');
-  return { entity, id: q.id, scope, season: q.season ?? null, seasonType, splits, stat: q.stat ?? 'pts', limit };
+  return { entity, id: q.id, scope, season: q.season ?? null, seasonType, splits, stat: q.stat ?? 'pts', limit, ...(lines ? { lines } : {}) };
 }
 
 /** WHERE fragments for season / season type / splits. `tg` = team_games, `g` = games, `a` = arenas. */
@@ -97,6 +108,21 @@ const pctCols = (alias) => `
   round((sum(${alias}.fg3m)::numeric / nullif(sum(${alias}.fg3a), 0)), 3)::float8 AS fg3_pct,
   round((sum(${alias}.ftm)::numeric / nullif(sum(${alias}.fta), 0)), 3)::float8 AS ft_pct`;
 
+/** over/under/push counts for each requested line, over the same rows. */
+const hitCols = (a, lines) => Object.entries(lines ?? {}).map(([m, line]) => {
+  const e = marketSql(a, m);
+  return `count(*) FILTER (WHERE ${e} > ${line})::int AS "over_${m}", count(*) FILTER (WHERE ${e} < ${line})::int AS "under_${m}",
+          count(*) FILTER (WHERE ${e} = ${line})::int AS "push_${m}"`;
+}).join(',\n');
+function propsOut(row, lines) {
+  if (!lines) return undefined;
+  return Object.fromEntries(Object.entries(lines).map(([m, line]) => {
+    const [over, under, push] = [row[`over_${m}`], row[`under_${m}`], row[`push_${m}`]];
+    delete row[`over_${m}`]; delete row[`under_${m}`]; delete row[`push_${m}`];
+    return [m, { line, over, under, push, games: over + under + push }];
+  }));
+}
+
 async function freshness(db) {
   const { rows: [r] } = await db.query(`SELECT max(finished_at) AS synced_at FROM ingestion_runs WHERE status = 'success'`);
   return { synced_at: r?.synced_at ?? null, source: 'nba_stats' };
@@ -122,10 +148,18 @@ async function playerQuery(db, v) {
     const { rows } = await db.query(
       `SELECT g.id AS game_id, g.game_date_local AS date, g.season, g.season_type, tg.venue_split AS venue,
               ot.abbreviation AS opponent, tg.won, tg.rest_days, tg.b2b_night, g.national_tv_tier, coalesce(a.is_high_altitude, false) AS altitude,
-              s.player_rest_days, s.player_b2b_night, s.started, ${STATS.map((c) => `s.${c}`).join(', ')}
+              s.player_rest_days, s.player_b2b_night, s.started, ${STATS.map((c) => `s.${c}`).join(', ')},
+              (SELECT jsonb_object_agg(pl.market, pl.line) FROM (
+                 SELECT DISTINCT ON (market) market, line::float8 AS line FROM prop_lines
+                  WHERE game_id = g.id AND player_id = s.player_id ORDER BY market, (snapshot = 'close') DESC) pl) AS lines
          ${base.replace('LEFT JOIN arenas a ON a.id = g.arena_id', 'LEFT JOIN arenas a ON a.id = g.arena_id JOIN teams ot ON ot.id = tg.opponent_team_id')}
         ORDER BY g.game_date_local DESC`, params);
-    return { data: rows.map((r) => ({ ...r, minutes: r.minutes === null ? null : Number(r.minutes) })), sample: rows.length, record: record(rows), notes, player };
+    // DraftKings line (closing, else opening) and how it graded, for games where we pulled one.
+    const data = rows.map(({ lines, ...r }) => ({
+      ...r, minutes: r.minutes === null ? null : Number(r.minutes),
+      props: lines ? Object.fromEntries(Object.entries(lines).map(([m, line]) => [m, { line, result: grade(marketValue(r, m), line) }])) : null,
+    }));
+    return { data, sample: rows.length, record: record(rows), notes, player };
   }
 
   if (v.scope === 'career') {
@@ -133,15 +167,17 @@ async function playerQuery(db, v) {
       `SELECT g.season, string_agg(DISTINCT tm.abbreviation, '/') AS team, count(*)::int AS gp, count(*) FILTER (WHERE tg.won)::int AS w, ${avgCols('s')}, ${pctCols('s')}, ${advCols('s', 'player')}
          ${base.replace('LEFT JOIN arenas a ON a.id = g.arena_id', 'LEFT JOIN arenas a ON a.id = g.arena_id JOIN teams tm ON tm.id = s.team_id')}
         GROUP BY g.season ORDER BY g.season`, params);
-    const { rows: [tot] } = await db.query(`SELECT count(*)::int AS gp, count(*) FILTER (WHERE tg.won)::int AS w, ${avgCols('s')}, ${pctCols('s')}, ${advCols('s', 'player')} ${base}`, params);
-    return { data: { totals: stripCounts(tot), by_season: rows.map(stripCounts) }, sample: tot.gp, record: `${tot.w}-${tot.gp - tot.w}`, notes, player };
+    const { rows: [tot] } = await db.query(`SELECT count(*)::int AS gp, count(*) FILTER (WHERE tg.won)::int AS w, ${avgCols('s')}, ${pctCols('s')}, ${advCols('s', 'player')}${v.lines ? `, ${hitCols('s', v.lines)}` : ''} ${base}`, params);
+    const props = propsOut(tot, v.lines);
+    return { data: { totals: stripCounts(tot), by_season: rows.map(stripCounts) }, sample: tot.gp, record: `${tot.w}-${tot.gp - tot.w}`, notes, player, props };
   }
 
   // season / last5 / last10 — splits first, then the window ("Last 10 + Home" = last 10 home games)
   const n = v.scope === 'last5' ? 5 : v.scope === 'last10' ? 10 : null;
   const inner = `SELECT s.*, tg.won ${base} ORDER BY g.game_date_local DESC${n ? ` LIMIT ${n}` : ''}`;
-  const { rows: [r] } = await db.query(`SELECT count(*)::int AS gp, count(*) FILTER (WHERE x.won)::int AS w, ${avgCols('x')}, ${pctCols('x')}, ${advCols('x', 'player')} FROM (${inner}) x`, params);
-  return { data: r.gp ? stripCounts(r) : null, sample: r.gp, record: `${r.w}-${r.gp - r.w}`, notes, player };
+  const { rows: [r] } = await db.query(`SELECT count(*)::int AS gp, count(*) FILTER (WHERE x.won)::int AS w, ${avgCols('x')}, ${pctCols('x')}, ${advCols('x', 'player')}${v.lines ? `, ${hitCols('x', v.lines)}` : ''} FROM (${inner}) x`, params);
+  const props = propsOut(r, v.lines);
+  return { data: r.gp ? stripCounts(r) : null, sample: r.gp, record: `${r.w}-${r.gp - r.w}`, notes, player, props };
 }
 
 // -------------------------------------------------------------------- team --
@@ -212,7 +248,9 @@ const record = (rows) => { const w = rows.filter((r) => r.won).length; return `$
 /** Run a validated query; cache is optional. */
 export async function runQuery(db, cache, body, { currentSeason = '2026-27' } = {}) {
   const v = validate(body);
-  const key = 'q:v1:' + JSON.stringify(v, Object.keys(v).sort()) + JSON.stringify(Object.entries(v.splits).sort());
+  // (An array replacer filters nested keys too, so nested objects are added as sorted entries.)
+  const key = 'q:v1:' + JSON.stringify(v, Object.keys(v).sort()) + JSON.stringify(Object.entries(v.splits).sort())
+    + (v.lines ? JSON.stringify(Object.entries(v.lines).sort()) : '');
   const hit = await cache.get(key);
   if (hit) return { ...hit, meta: { ...hit.meta, cached: true } };
   const r = v.scope === 'leaderboard' ? await leaderboard(db, v) : v.entity === 'team' ? await teamQuery(db, v) : await playerQuery(db, v);
@@ -220,6 +258,7 @@ export async function runQuery(db, cache, body, { currentSeason = '2026-27' } = 
     query: v,
     subject: r.player ? { type: 'player', id: r.player.id, name: r.player.full_name } : r.team ? { type: 'team', id: r.team.id, name: r.team.full_name, abbreviation: r.team.abbreviation } : { type: 'league' },
     data: r.data,
+    ...(r.props ? { props: r.props } : {}),
     meta: {
       sample_size: r.sample,
       record: r.record,

@@ -137,6 +137,8 @@ CREATE TABLE games (
   away_score             SMALLINT,
   box_score_synced_at    TIMESTAMPTZ,                          -- ingestion worker (migration 004)
   box_score_checks       SMALLINT NOT NULL DEFAULT 0,          -- 1 = loaded at final, 2 = re-checked
+  props_open_at          TIMESTAMPTZ,                          -- prop snapshots taken (migration 006)
+  props_close_at         TIMESTAMPTZ,
   updated_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
   CHECK (home_team_id <> away_team_id),
   -- cup_final <-> cup_stage 'final', both directions
@@ -278,11 +280,32 @@ CREATE TABLE team_seasons (
   PRIMARY KEY (season, team_id)
 );
 
+-- Player prop lines from The Odds API (decided 2026-09-27, JD):
+-- DraftKings only, two snapshots per game — 'open' (first pull the morning of
+-- the game) and 'close' (~30 min before tip). Graded at query time against
+-- player_game_stats; nothing is predicted. No history before we start pulling.
+CREATE TABLE prop_lines (
+  game_id          UUID NOT NULL REFERENCES games (id) ON DELETE CASCADE,
+  player_id        UUID NOT NULL REFERENCES players (id),
+  market           TEXT NOT NULL
+                   CHECK (market IN ('pts', 'reb', 'ast', 'fg3m', 'pra', 'pr', 'pa', 'ra', 'stl', 'blk', 'stocks', 'tov')),
+  snapshot         TEXT NOT NULL CHECK (snapshot IN ('open', 'close')),
+  book             TEXT NOT NULL DEFAULT 'draftkings',
+  line             NUMERIC(5,1) NOT NULL CHECK (line >= 0 AND line < 200),
+  over_price       SMALLINT,                    -- American odds, e.g. -115
+  under_price      SMALLINT,
+  book_updated_at  TIMESTAMPTZ,                 -- the book's own last_update for this market
+  fetched_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  source           TEXT NOT NULL DEFAULT 'odds_api',
+  PRIMARY KEY (game_id, player_id, market, book, snapshot)
+);
+CREATE INDEX prop_lines_player_idx ON prop_lines (player_id, market);
+
 CREATE TABLE schema_migrations (
   id          TEXT PRIMARY KEY,
   applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-INSERT INTO schema_migrations (id) VALUES ('001_playoff_series_best_of_2'), ('002_players_first_season'), ('003_player_rest'), ('004_box_score_sync'), ('005_team_seasons');
+INSERT INTO schema_migrations (id) VALUES ('001_playoff_series_best_of_2'), ('002_players_first_season'), ('003_player_rest'), ('004_box_score_sync'), ('005_team_seasons'), ('006_prop_lines');
 
 -- ---------------------------------------------------------------------------
 -- Auth: two-tier (PLATFORM.md §2)

@@ -20,4 +20,12 @@ describe('StatExplorer -> POST /query body', () => {
     expect(buildQuery('player', 'p1', { ...base, scope: 'career' })).not.toHaveProperty('season');
     expect(buildQuery('player', 'p1', { ...base, scope: 'last10' })).toMatchObject({ season: '2025-26', scope: 'last10', season_type: 'regular' });
   });
+  it('prop lines ride along on averaged player scopes only', () => {
+    const lines = { pts: 25.5, pra: 38.5 };
+    expect(buildQuery('player', 'p1', { ...base, scope: 'last10' }, lines).lines).toEqual(lines);
+    expect(buildQuery('player', 'p1', { ...base, scope: 'game_log' }, lines)).not.toHaveProperty('lines');
+    expect(buildQuery('team', 7, base, lines)).not.toHaveProperty('lines');
+    expect(buildQuery('player', 'p1', base, {})).not.toHaveProperty('lines');
+    expect(buildQuery('player', 'p1', base, null)).not.toHaveProperty('lines');
+  });
 });

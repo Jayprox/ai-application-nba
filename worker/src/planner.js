@@ -52,3 +52,47 @@ export function plan(now, games, state) {
   }
   return { dates: [...dates].sort(), reason: reasons.join('; '), daily };
 }
+
+// ---- player props (The Odds API) ------------------------------------------
+// JD's choice (2026-09-27): DraftKings, two snapshots per game.
+//   open  : the morning of the game (from 09:00 ET), retried hourly until the
+//           book has posted lines, and never later than 90 min before tip;
+//   close : in the 35 minutes before tip-off (the line that grades the prop).
+// Preseason is skipped. Quota guard: under 1,000 credits only closing lines
+// are pulled; under 150, nothing (a call costs up to 120).
+export const PROP_TYPES = ['regular', 'cup_final', 'play_in', 'playoffs'];
+export const PROPS_CLOSE_BEFORE = 35 * MIN;
+export const PROPS_OPEN_LAST = 90 * MIN;
+export const PROPS_OPEN_RETRY = HOUR;
+export const PROPS_OPEN_FROM_ET_HOUR = 9;
+export const PROPS_LOW_QUOTA = 1000;
+export const PROPS_MIN_QUOTA = 150;
+
+/**
+ * @param games [{id, tipoff_utc, status, season_type, props_open_at, props_close_at}]
+ * @param state {openTries: Map<gameId, ms>, quotaRemaining: number|null}
+ * @returns {open: string[], close: string[], reason: string}
+ */
+export function planProps(now, games, state) {
+  const t = now.getTime();
+  const q = state.quotaRemaining;
+  const out = { open: [], close: [], reason: '' };
+  if (q !== null && q < PROPS_MIN_QUOTA) return { ...out, reason: `quota ${q} < ${PROPS_MIN_QUOTA}: no prop pulls` };
+  const today = etDate(now);
+  const etHour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23' }).format(now));
+  for (const g of games) {
+    if (!PROP_TYPES.includes(g.season_type) || g.status !== 'scheduled' || !g.tipoff_utc) continue;
+    const tip = new Date(g.tipoff_utc).getTime();
+    if (!g.props_close_at && t >= tip - PROPS_CLOSE_BEFORE && t < tip) { out.close.push(g.id); continue; }
+    const lowQuota = q !== null && q < PROPS_LOW_QUOTA;
+    const lastTry = state.openTries?.get(g.id);
+    if (!lowQuota && !g.props_open_at && !g.props_close_at && etDate(new Date(tip)) === today && etHour >= PROPS_OPEN_FROM_ET_HOUR
+        && t < tip - PROPS_OPEN_LAST && (lastTry === undefined || t - lastTry >= PROPS_OPEN_RETRY)) out.open.push(g.id);
+  }
+  const parts = [];
+  if (out.open.length) parts.push(`${out.open.length} opening line pull(s)`);
+  if (out.close.length) parts.push(`${out.close.length} closing line pull(s)`);
+  if (q !== null && q < PROPS_LOW_QUOTA) parts.push(`quota ${q}: closing lines only`);
+  out.reason = parts.join('; ');
+  return out;
+}

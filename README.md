@@ -25,6 +25,7 @@ The second app on the Chalk That platform, after [Chalk That NFL](https://github
 - **Rest two ways:** measured from the player's own games (NBA.com's definition, so a player back from injury is rested) or from the team's schedule.
 - **Scopes:** season average, last 5, last 10, career, game log. Splits apply before the window, so *Last 10 + Away* means his last 10 road games.
 - **Leaderboards** with a stated qualifier: played in 70% of team games.
+- **Player props:** DraftKings lines (The Odds API), pulled the morning of each game and again just before tip. A Props board shows each line with how often the player went over it in his last 10 and this season, and the result once the game ends. Player pages grade his next lines under any split: *over 25.5 in 7 of his last 10 road games*. Counts, not picks.
 - **Standings and playoff bracket** for every season: records computed live from games, ranked by NBA.com's official standings (tiebreakers included).
 - **Efficiency stats:** TS%, eFG%, free-throw rate and per-36 numbers for players; offensive/defensive rating for teams.
 - **NBA Cup** as its own season type (2023-24 on).
@@ -85,15 +86,15 @@ Full decisions and trade-offs: [`docs/architecture.md`](docs/architecture.md). B
 | Backend | Node 22, Express, `pg`, Redis (optional cache), JWT + bcrypt |
 | Frontend | React 19, Vite, Tailwind CSS v4, React Router 7 (plain JS) |
 | Data | Postgres 18: 14 tables, CHECK constraints that reject impossible stat lines at write time |
-| Ingestion | Standalone Node worker (Highlightly), planner-driven polling |
+| Ingestion | Standalone Node worker: Highlightly (scores, box scores) and The Odds API (props), planner-driven polling |
 | Hosting | Railway: `backend-api`, `web`, `ingestion-worker`, Postgres, Redis |
-| Tests | `node:test` (backend, worker, scripts) and Vitest + Testing Library (frontend): 101 tests |
+| Tests | `node:test` (backend, worker, scripts) and Vitest + Testing Library (frontend): 122 tests |
 
 ## Repo layout
 
 ```
 backend/    backend-api: auth, POST /query engine, browse routes      (Railway root: /backend)
-frontend/   web app: 8 screens, shared StatExplorer, fetch hook        (Railway root: /frontend)
+frontend/   web app: 10 screens, shared StatExplorer, fetch hook        (Railway root: /frontend)
 worker/     ingestion-worker: Highlightly scores + box scores          (Railway root: /worker)
 scripts/    run from a Mac: schema, seed, backfill, schedule, status
 db/         schema.sql, migrations/, constraint tests
@@ -128,7 +129,7 @@ npm install
 npm run dev
 ```
 
-Fill in `DATABASE_PUBLIC_URL` and `HIGHLIGHTLY_API_KEY` in `.env` before running the scripts. `npm run db:backfill` with no arguments loads all 23 seasons (about 10 minutes). The frontend runs on http://localhost:5173.
+Fill in `DATABASE_PUBLIC_URL`, `HIGHLIGHTLY_API_KEY` and `ODDS_API_KEY` in `.env` before running the scripts. `npm run db:backfill` with no arguments loads all 23 seasons (about 10 minutes). The frontend runs on http://localhost:5173.
 
 ### Data operations
 
@@ -138,7 +139,9 @@ Fill in `DATABASE_PUBLIC_URL` and `HIGHLIGHTLY_API_KEY` in `.env` before running
 | NBA changes the schedule (Cup knockouts, postponements) | `npm run db:schedule` |
 | Official standings rank (also written by the backfill) | `npm run db:standings` |
 | One-off live sync for a date | `cd worker && npm run sync -- --date 2026-10-21` |
-| Health check | `npm run db:status`: row counts, failed runs, Highlightly quota, players waiting for review |
+| Health check | `npm run db:status`: row counts, failed runs, Highlightly quota, prop lines + Odds API credits, players waiting for review |
+| Check the Odds API key (free) | `cd worker && npm run props -- --check` |
+| Pull prop lines by hand | `cd worker && npm run props -- --date 2026-10-21 --snapshot close` |
 
 ### Tests
 
@@ -150,8 +153,8 @@ cd frontend && npm test
 ```
 
 - **Repo root:** names, tagging and rest rules.
-- **backend:** 39 tests, including the NBA.com number checks.
-- **worker:** mapping and polling planner. Add `WORKER_TEST_DATABASE_URL` pointing at a local test database to also run the end-to-end sync.
+- **backend:** 46 tests, including the NBA.com number checks and prop grading.
+- **worker:** mapping, polling planner and the props planner. Add `WORKER_TEST_DATABASE_URL` pointing at a local test database to also run the end-to-end sync.
 - **frontend:** fetch-hook race conditions, token refresh, filter-to-query mapping.
 
 ---
@@ -172,5 +175,6 @@ Returns the averages plus `meta`: sample size, W-L in those games, the filters a
 - **Stats begin in 2003-04.** Earlier careers (Kobe, Duncan, Dirk) are partial and the UI says so.
 - **NBA.com blocks cloud IPs,** so the historical loads and the weekly reconcile run from a laptop.
 - **Injuries aren't shown yet.** The source is still being evaluated against real preseason data.
+- **Prop lines start with the 2026-27 regular season,** DraftKings only. There is no line history before that (a deliberate cost call), so older games show hit rates against today's line, not the line of the day.
 - **The sign-in lockout is in memory:** one backend instance, and it resets on redeploy.
 - **Auto-deploy needs the Railway GitHub App** installed on the repo; without it, reconnecting a service's source forces a fresh build.

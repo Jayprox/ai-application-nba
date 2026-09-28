@@ -1,12 +1,17 @@
 // Scope tabs + season/season-type + split filters over ONE POST /query.
 // Shared by Player Detail and Team Detail. Every control lives in the URL
 // (?season=&type=&scope=&venue=...), so views are shareable and Back works.
+// Players with DraftKings lines for their next game also get a "Prop check":
+// how often he went over each line in exactly the games the filters select.
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { api } from '../lib/api.js';
 import { useFetch } from '../lib/useFetch.js';
 import { SEASON_TYPE_OPTIONS } from '../lib/seasons.js';
-import { ago, avg, made, mins, pct, pm, SEASON_TYPE_LOWER, signedAvg, tinyDate } from '../lib/format.js';
+import { ago, avg, made, mins, pct, pm, SEASON_TYPE_LOWER, signedAvg, tinyDate, tipTime } from '../lib/format.js';
+import { MARKETS, MARKET_SHORT, price, RESULT } from '../lib/props.js';
+
+const MARKET_ORDER = MARKETS.map(([m]) => m);
 import { Pills, Select, Tabs } from './Controls.jsx';
 import { Empty, ErrorBox, Loading } from './States.jsx';
 
@@ -21,8 +26,8 @@ const SPLITS = [
 ];
 const SPLIT_KEYS = SPLITS.map(([k]) => k);
 
-/** URL params -> POST /query body. Exported for tests. */
-export function buildQuery(entity, id, p) {
+/** URL params -> POST /query body (+ prop lines to grade, averaged scopes only). Exported for tests. */
+export function buildQuery(entity, id, p, lines = null) {
   const byPlayer = entity === 'player' && p.restby !== 'team';
   const splits = {};
   if (p.venue) splits.venue = p.venue;
@@ -32,10 +37,11 @@ export function buildQuery(entity, id, p) {
   if (p.alt) splits.altitude = p.alt === 'yes';
   const body = { entity, id, scope: p.scope, season_type: p.type, splits };
   if (p.scope !== 'career') body.season = p.season;
+  if (entity === 'player' && lines && Object.keys(lines).length && p.scope !== 'game_log') body.lines = lines;
   return body;
 }
 
-export default function StatExplorer({ entity, id, name, seasons, seasonTypes = {}, defaultSeason }) {
+export default function StatExplorer({ entity, id, name, seasons, seasonTypes = {}, defaultSeason, props = null }) {
   const [params, setParams] = useSearchParams();
   const get = (k, d) => params.get(k) ?? d;
   const p = {
@@ -56,7 +62,10 @@ export default function StatExplorer({ entity, id, name, seasons, seasonTypes = 
   }, { replace: true });
   const clear = () => setParams((prev) => { const n = new URLSearchParams(prev); SPLIT_KEYS.forEach((k) => n.delete(k)); return n; }, { replace: true });
 
-  const body = defaultSeason ? buildQuery(entity, id, p) : null;
+  const upcoming = props?.upcoming ?? null;
+  const lines = upcoming ? Object.fromEntries(upcoming.lines.map((l) => [l.market, l.line])) : null;
+  // props === undefined: the player's lines are still loading — wait, so the query runs once, with them.
+  const body = defaultSeason && props !== undefined ? buildQuery(entity, id, p, lines) : null;
   const key = body ? JSON.stringify(body) : null;
   const { data, error, loading, retry } = useFetch(key, (signal) => api('/query', { method: 'POST', body, signal }));
   const meta = data?.meta;
@@ -106,7 +115,7 @@ export default function StatExplorer({ entity, id, name, seasons, seasonTypes = 
         </div>
       </div>
 
-      {loading && <Loading label="Crunching…" />}
+      {(loading || props === undefined) && <Loading label="Crunching…" />}
       {error && <ErrorBox error={error} onRetry={retry} />}
       {data && (
         <>
@@ -122,9 +131,9 @@ export default function StatExplorer({ entity, id, name, seasons, seasonTypes = 
           {meta.sample_size === 0
             ? <NoGames name={name} p={p} where={where} splitCount={splitCount} played={p.scope === 'career' ? null : seasonTypes[p.season]}
                 onType={(v) => set('type', v)} onClear={clear} />
-            : p.scope === 'career' ? <Career entity={entity} data={data.data} />
+            : p.scope === 'career' ? <><PropCheck upcoming={upcoming} hits={data.props} record={props?.record} /><Career entity={entity} data={data.data} /></>
             : p.scope === 'game_log' ? <GameLog entity={entity} rows={data.data} restby={p.restby} />
-            : <Tiles entity={entity} d={data.data} />}
+            : <><PropCheck upcoming={upcoming} hits={data.props} record={props?.record} /><Tiles entity={entity} d={data.data} /></>}
           <p className="m-0 border-t border-line pt-3 text-[13px] text-muted">
             From NBA.com game logs{meta.freshness?.synced_at ? ` · synced ${ago(meta.freshness.synced_at)}` : ''}{meta.cached ? ' · cached' : ''}
           </p>
@@ -165,6 +174,38 @@ export function NoGames({ name, p, where, splitCount, played, onType, onClear })
     );
   }
   return <Empty>No games for {name} in the {where}.</Empty>;
+}
+
+/** Next game's DraftKings lines, graded over the games on screen (filters + scope). Exported for tests. */
+export function PropCheck({ upcoming, hits, record }) {
+  const rec = Object.entries(record ?? {}).sort(([a], [b]) => MARKET_ORDER.indexOf(a) - MARKET_ORDER.indexOf(b));
+  if (!upcoming && !rec.length) return null;
+  const g = upcoming?.game;
+  return (
+    <section aria-label="Prop check" className="flex flex-col gap-3 rounded-[10px] border border-line bg-card p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="eyebrow m-0">Prop check{g ? ` · ${g.away} @ ${g.home} · ${tinyDate(g.date)} ${g.status === 'live' ? '(live)' : tipTime(g.tipoff_utc)}` : ''}</h3>
+        <span className="text-xs text-muted">DraftKings{upcoming ? ` · ${upcoming.lines.some((l) => l.snapshot === 'close') ? 'closing' : 'opening'} lines` : ''}</span>
+      </div>
+      {upcoming && (
+        <ul className="m-0 grid list-none grid-cols-2 gap-2 p-0 sm:grid-cols-3 lg:grid-cols-6">
+          {upcoming.lines.map((l) => {
+            const h = hits?.[l.market];
+            return (
+              <li key={l.market} className="flex flex-col gap-0.5 rounded-lg border border-rule px-3 py-2" title={`${l.label}: over ${price(l.over_price)} / under ${price(l.under_price)}${l.open_line != null && l.open_line !== l.line ? ` · opened ${l.open_line}` : ''}`}>
+                <span className="eyebrow">{MARKET_SHORT[l.market]} {l.line}</span>
+                <span className="num text-[15px]">{h?.games ? <><strong>Over {h.over}</strong> of {h.games}{h.push ? ` · ${h.push} push` : ''}</> : <span className="text-muted">no games</span>}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <p className="m-0 text-xs text-muted">
+        {upcoming ? 'Counts use the games selected above (season, type, splits, last N). ' : ''}
+        {rec.length ? `Vs. his past DraftKings lines (over–under${rec.some(([, r]) => r.push) ? '–push' : ''}): ${rec.map(([m, r]) => `${MARKET_SHORT[m]} ${r.over}–${r.under}${r.push ? `–${r.push}` : ''}`).join(' · ')}.` : ''}
+      </p>
+    </section>
+  );
 }
 
 const SplitRow = ({ label, children }) => (
@@ -254,7 +295,7 @@ function GameLog({ entity, rows, restby }) {
     );
   }
   return (
-    <Table minWidth={900} head={[['Date', L], ['Opp', L], ['Result', L], ['Min', R], ['Pts', R], ['Reb', R], ['Ast', R], ['3PM', R], ['FG', R], ['+/-', R], ['Tags', L]]}>
+    <Table minWidth={960} head={[['Date', L], ['Opp', L], ['Result', L], ['Min', R], ['Pts', R], ['Reb', R], ['Ast', R], ['3PM', R], ['FG', R], ['+/-', R], ['Pts line', R], ['Tags', L]]}>
       {rows.map((r) => (
         <tr key={r.game_id}>
           <td className={`${td} ${L} ${sticky}`}><Link to={`/games/${r.game_id}`}>{tinyDate(r.date)}</Link></td>
@@ -267,6 +308,9 @@ function GameLog({ entity, rows, restby }) {
           <td className={`${td} ${R}`}>{r.fg3m}</td>
           <td className={`${td} ${R}`}>{made(r.fgm, r.fga)}</td>
           <td className={`${td} ${R}`}>{pm(r.plus_minus)}</td>
+          <td className={`${td} ${R}`} title={r.props ? Object.entries(r.props).map(([m, x]) => `${MARKET_SHORT[m]} ${x.line}: ${RESULT[x.result] ?? '—'}`).join(' · ') : undefined}>
+            {r.props?.pts ? <>{r.props.pts.line} <span className="text-xs text-muted">{r.props.pts.result === 'over' ? 'O' : r.props.pts.result === 'under' ? 'U' : r.props.pts.result === 'push' ? 'P' : ''}</span></> : r.props ? <span className="text-xs text-muted">lines</span> : ''}
+          </td>
           <td className={`${td} ${L} text-[13px] text-muted`}>{tags(r, restby)}</td>
         </tr>
       ))}

@@ -68,7 +68,7 @@ Read with:
 ## 3. Screens → endpoints
 
 The web routes are in `frontend/src/App.jsx`. Tabs are a suggestion: the
-web has 8 nav items, and iOS should fit them into 5 tabs.
+web has 8 section links plus a Guide page, and iOS should fit them into 5 tabs.
 
 | # | Screen | Endpoints | Notes / parity details |
 |---|---|---|---|
@@ -84,6 +84,7 @@ web has 8 nav items, and iOS should fit them into 5 tabs.
 | 10 | Rankings | `GET /rankings/players\|teams\|matchups` | Three views. Players: position G/F/C, scope Season/Last 10, score plus a breakdown of all eight z-scores. Teams: sort by net/off/def/pace with ranks. Matchups: position × market table, strong/weak marks. |
 | 11 | Props | `GET /props?date=&market=` | Date arrows (dates with lines only), market picker (12 markets from `meta.markets`). Per line: line and movement (open → close), prices, L10 and season hit rates, matchup note, result after the final. Counts, not picks. |
 | 12 | Ask | `POST /ask` | Search box and example questions. Answer = `sentence` + a view by `view.type` + removable chips (re-POST `{plan}`) + clarify buttons. Map `link` to a native screen. Page eyebrow: "Plain English · verified numbers". |
+| 13 | Guide | none (static) | The user guide: port the text of `frontend/src/pages/Guide.jsx` (sections plus jump links). Reachable from the More/League tab or a "?" in the nav bar. Keep it in sync when screens change. |
 
 ## 4. The stat explorer (player and team detail)
 
@@ -175,7 +176,7 @@ Fonts: **Oswald** for display (titles, big numbers; bundle it) and
 4. Teams → Team detail (reuses the explorer in team mode, plus defense by
    position).
 5. Leaders, Standings (table + bracket).
-6. Rankings, Props board, Prop check on player detail.
+6. Rankings, Props board, Prop check on player detail, Guide.
 7. Ask.
 8. Empty states pass, accessibility (Dynamic Type, VoiceOver labels on
    tiles), iPhone SE through Pro Max layouts, App Store assets.

@@ -12,6 +12,7 @@ import Leaders from './pages/Leaders.jsx';
 import Props from './pages/Props.jsx';
 import Rankings from './pages/Rankings.jsx';
 import Ask from './pages/Ask.jsx';
+import Guide from './pages/Guide.jsx';
 import Standings from './pages/Standings.jsx';
 import NotFound from './pages/NotFound.jsx';
 
@@ -33,6 +34,7 @@ export default function App() {
             <Route path="props" element={<Props />} />
             <Route path="rankings" element={<Rankings />} />
             <Route path="ask" element={<Ask />} />
+            <Route path="guide" element={<Guide />} />
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>

@@ -13,14 +13,18 @@ export default function Layout() {
   return (
     <div className="min-h-dvh">
       <header className="border-b border-line bg-card">
-        <nav aria-label="Main" className="mx-auto flex max-w-[1280px] flex-wrap items-center gap-x-4 gap-y-1 px-4 md:gap-x-4 xl:gap-x-8 py-2 sm:px-10 md:h-14 md:flex-nowrap md:py-0">
-          <NavLink to="/" className="shrink-0 whitespace-nowrap font-display text-xl font-bold sm:text-2xl tracking-[0.04em] text-ink no-underline hover:text-ink">
+        <nav aria-label="Main" className="mx-auto flex max-w-[1280px] flex-wrap items-center gap-x-4 gap-y-1 px-4 md:gap-x-3 xl:gap-x-8 py-2 sm:px-10 md:h-14 md:flex-nowrap md:py-0">
+          <NavLink to="/" className="shrink-0 whitespace-nowrap font-display text-xl font-bold sm:text-2xl md:text-xl xl:text-2xl tracking-[0.04em] text-ink no-underline hover:text-ink">
             CHALK THAT <span className="text-nav-accent">NBA</span>
           </NavLink>
-          <button type="button" onClick={async () => { await logout(); navigate('/login'); }}
-            className="ml-auto shrink-0 cursor-pointer rounded-md px-3 py-2 text-[15px] font-medium text-nav-text hover:bg-nav-hover hover:text-ink md:order-last">
-            Sign out
-          </button>
+          {/* Guide sits with Sign out (a utility link, like Chalk That NFL's), not in the scrolling section links. */}
+          <div className="ml-auto flex shrink-0 items-center gap-1 md:order-last md:gap-0 xl:gap-1">
+            <NavLink to="/guide" className={link}>Guide</NavLink>
+            <button type="button" onClick={async () => { await logout(); navigate('/login'); }}
+              className="shrink-0 cursor-pointer rounded-md px-3 py-2 text-[15px] font-medium text-nav-text hover:bg-nav-hover hover:text-ink md:px-2 md:text-[14px] xl:px-3 xl:text-[15px]">
+              Sign out
+            </button>
+          </div>
           <div className="-mx-1 flex w-full gap-1 overflow-x-auto pr-6 [mask-image:linear-gradient(to_right,black_85%,transparent)] md:mx-0 md:w-auto md:grow md:pr-6 xl:pr-0 xl:[mask-image:none]">
             {LINKS.map(([to, label]) => <NavLink key={to} to={to} end={to === '/'} className={link}>{label}</NavLink>)}
           </div>

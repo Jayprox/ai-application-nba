@@ -35,6 +35,7 @@ The second app on the Chalk That platform, after [Chalk That NFL](https://github
 - **Standings and playoff bracket** for every season: records computed live from games, ranked by NBA.com's official standings (tiebreakers included).
 - **Efficiency and usage:** TS%, eFG%, free-throw rate, per-36 numbers and usage rate for players (with a Usage leaderboard); offensive/defensive rating for teams.
 - **NBA Cup** as its own season type (2023-24 on).
+- **Built-in Guide:** a Guide page (next to Sign out) explains every screen, the splits, the qualifier rules and each stat, so users can read the numbers without asking.
 - **One query API** (`POST /query`) serves the web app today and AI agents tomorrow (API-key auth).
 
 ### Verified against NBA.com
@@ -99,7 +100,7 @@ Full decisions and trade-offs: [`docs/architecture.md`](docs/architecture.md). B
 | Ingestion | Standalone Node worker: Highlightly (scores, box scores) and The Odds API (props), planner-driven polling |
 | AI | Claude Haiku 4.5 for search only: one forced tool call turns a question into a structured query; numbers and sentences come from the API (`npm run ask:eval`: 36/36 real questions) |
 | Hosting | Railway: `backend-api`, `web`, `ingestion-worker`, Postgres, Redis |
-| Tests | `node:test` (backend, worker, scripts) and Vitest + Testing Library (frontend): 150 tests |
+| Tests | `node:test` (backend, worker, scripts) and Vitest + Testing Library (frontend): 152 tests |
 
 ## Repo layout
 

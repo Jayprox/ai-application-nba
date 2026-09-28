@@ -155,7 +155,7 @@ The Odds API — free 500 credits/mo; paid from $30/mo. Fast-follow only.
     offense/defense rankings~~ *(done 2026-09-27: Rankings page, Props matchup notes, team defense by position)*
   - ~~NBA Cup split filter~~ — *done 2026-09-27: "NBA Cup" season type.*
   - Swift iOS app (same API, later)
-  - Natural-language search bar
+  - ~~Natural-language search bar~~ *(done 2026-09-27: Haiku picks the query, the API supplies every number)*
   - ~~Standings page, playoff bracket view~~ — *done 2026-09-27.*
   - User-adjustable leaderboard qualifier; usage rate (needs team possessions per player);
     ~~advanced stats (TS%, eFG%, per-36, ratings)~~ — *done 2026-09-27.*
@@ -423,6 +423,7 @@ Answer these. If you stumble on any, go back.
 
 | Date | What I built | Decision made | Why |
 |------|-------------|---------------|-----|
+| 2026-09-27 | Natural-language search | Haiku only maps the question to a structured plan (forced tool call); names resolved by our code, ambiguity asked back; the sentence is a template over API numbers | The one thing an LLM could get wrong here is a number, so it never writes one; every answer is the same verified query a screen would run |
 | 2026-09-27 | Rankings + matchup insights | G/F/C from NBA.com's listing (first position wins); equal-weight z-scores with every z shown; defenses ranked by what they allow per position, 1 = fewest | Stays inside real data (NBA.com has no PG/SG); a score anyone can decompose is a stat, an unexplained one is a model; the matchup rank turns props from "he usually goes over" into "and tonight's defense is 27th against guards" |
 | 2026-09-27 | Season-start prep: weekly NBA.com run automated (launchd), injury probe | The reconcile runs itself on the Mac instead of relying on memory; injuries are tested on real preseason data before any UI depends on them | NBA.com blocks cloud IPs, so the Mac is the only place it can run; a feature built on an unconfirmed feed would be guessing |
 | 2026-09-27 | Player props (The Odds API, DraftKings) | Real sportsbook lines only, two snapshots (morning open, pre-tip close), graded at query time; no history backfill; unmatched names held, never guessed | Hit rates against the line people actually bet are the useful number; grading at read time means a corrected box score fixes every prop; history would cost ~$119 for little |

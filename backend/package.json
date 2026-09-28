@@ -3,13 +3,16 @@
   "private": true,
   "description": "Chalk That NBA backend-api: auth + the shared POST /query engine + browse routes (Railway rootDirectory: backend).",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node src/server.js",
     "dev": "node scripts/dev.js",
     "test": "node --test --test-concurrency=1 'test/*.test.js'",
     "create-user": "node scripts/create-user.js",
-    "create-api-key": "node scripts/create-api-key.js"
+    "create-api-key": "node scripts/create-api-key.js",
+    "ask:eval": "node scripts/ask-eval.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

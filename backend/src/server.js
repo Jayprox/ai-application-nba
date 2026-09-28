@@ -12,8 +12,9 @@ import { browseRoutes } from './routes/browse.js';
 import { leagueRoutes } from './routes/league.js';
 import { propsRoutes } from './routes/props.js';
 import { rankingsRoutes } from './routes/rankings.js';
+import { askRoutes } from './routes/ask.js';
 
-export function createApp({ db, cache, corsOrigins = (process.env.CORS_ORIGIN ?? 'http://localhost:5173').split(',').map((s) => s.trim()), currentSeason = process.env.CURRENT_SEASON ?? '2026-27' }) {
+export function createApp({ db, cache, llm, corsOrigins = (process.env.CORS_ORIGIN ?? 'http://localhost:5173').split(',').map((s) => s.trim()), currentSeason = process.env.CURRENT_SEASON ?? '2026-27' }) {
   jwtSecret(); // fail fast at startup if unset
   const app = express();
   app.disable('x-powered-by');
@@ -37,6 +38,7 @@ export function createApp({ db, cache, corsOrigins = (process.env.CORS_ORIGIN ??
   app.use(leagueRoutes(db));
   app.use(propsRoutes(db));
   app.use(rankingsRoutes(db));
+  app.use(askRoutes(db, cache, { currentSeason, ...(llm ? { llm } : {}) }));
 
   app.use((_req, res) => res.status(404).json({ error: 'not found' }));
   app.use((err, _req, res, _next) => {             // never leak stack traces

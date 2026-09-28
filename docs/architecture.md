@@ -611,6 +611,39 @@ with the rest of the API on real data (a player's stats = POST /query,
 team ratings = POST /query, every point allowed is accounted for by
 position + unlisted).
 
+## 7.8 Natural-language search (as built, 2026-09-27)
+
+Decisions (JD): a search box + results page (no chat); numbers + one plain
+sentence; launch scope = player/team splits, leaders & rankings, props,
+standings & games; model = Claude Haiku 4.5 (`claude-haiku-4-5`, env
+`ASK_MODEL` to change).
+
+How it works (`POST /ask {q}` or `{plan}`):
+1. Haiku gets the question + a system prompt (today, current/latest
+   season, split vocabulary, examples) and must answer with ONE forced tool
+   call, `plan` (kind, player/team/opponent names, season, season type,
+   scope, splits, stat/market/line, position, order, date, limit). It never
+   sees or writes numbers.
+2. `normalizePlan` drops anything invalid (never guesses); a plan missing
+   its subject becomes "which player?".
+3. Names -> ids (accents, suffixes, nicknames like SGA/KD/Sixers); an
+   ambiguous name ("LA", "Williams") comes back as choices, never a guess.
+4. The plan runs through the same API as the screens (internal request with
+   the caller's auth) — validation, caching and every verified number reused.
+5. The sentence is a template over the API's numbers; chips show every
+   filter used (removing one re-runs the plan with no model call); a link
+   opens the full view.
+
+Guards: 20 questions/min and 300/day per user (in memory), plan cache 1 day
+per question (Redis), 300-character questions, 20 s model timeout, 503 with
+a clear message when `ANTHROPIC_API_KEY` is missing. Cost ≈ $0.003 per new
+question at Haiku 4.5 prices ($1 / $5 per MTok).
+
+Tests: everything we own with a fake model (validation, names, requests,
+sentences, chips, end-to-end on real data). The model itself:
+`npm run ask:eval` (backend) sends 33 real questions and checks the plan
+fields that must match (≥ 90% to pass).
+
 ## 8. Railway (as built)
 
 Created 2026-09-26, per PLATFORM.md §4. Deploy configured 2026-09-27 (step 9). Project `chalk-that-nba`,
@@ -621,7 +654,7 @@ as chalk-that-nfl).
 |---|---|---|---|
 | Postgres (18) | Railway template | private only | managed |
 | Redis (8.2) | Railway template | private only | managed |
-| backend-api | GitHub `Jayprox/ai-application-nba` @ `main`, rootDirectory `/backend`, `npm start`, healthcheck `/health` | backend-api-production-f05a.up.railway.app → :8080 | DATABASE_URL, REDIS_URL (refs), CORS_ORIGIN = https://web-production-081bcf.up.railway.app, PORT 8080, CURRENT_SEASON, NODE_ENV; **JWT_SECRET set by JD** |
+| backend-api | GitHub `Jayprox/ai-application-nba` @ `main`, rootDirectory `/backend`, `npm start`, healthcheck `/health` | backend-api-production-f05a.up.railway.app → :8080 | DATABASE_URL, REDIS_URL (refs), CORS_ORIGIN = https://web-production-081bcf.up.railway.app, PORT 8080, CURRENT_SEASON, NODE_ENV; **JWT_SECRET set by JD**; **ANTHROPIC_API_KEY set by JD** (search) |
 | web | same repo, rootDirectory `/frontend`, `npm run build` then `npm start` (`server.js`: static dist/ + SPA fallback, zero deps), healthcheck `/health` | web-production-081bcf.up.railway.app → :8080 | VITE_API_URL = https://backend-api-production-f05a.up.railway.app (set before first build — PLATFORM.md §4 gotcha), PORT 8080, NODE_ENV |
 | ingestion-worker | same repo, rootDirectory `/worker`, `npm start`, restart ALWAYS | none (by design) | DATABASE_URL (ref), CURRENT_SEASON, NODE_ENV; **HIGHLIGHTLY_API_KEY set by JD**; **ODDS_API_KEY set by JD** (props; without it the worker skips props) |
 

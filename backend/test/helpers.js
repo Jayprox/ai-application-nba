@@ -7,10 +7,10 @@ import { hashPassword } from '../src/auth.js';
 
 process.env.JWT_SECRET ??= randomBytes(32).toString('hex');
 
-export async function startServer({ cache } = {}) {
+export async function startServer({ cache, llm } = {}) {
   const db = createPool(process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL);
   const memCache = cache ?? memoryCache();
-  const app = createApp({ db, cache: memCache, corsOrigins: ['http://localhost:5173'] });
+  const app = createApp({ db, cache: memCache, llm, corsOrigins: ['http://localhost:5173'] });
   const server = await new Promise((r) => { const s = app.listen(0, () => r(s)); });
   const base = `http://127.0.0.1:${server.address().port}`;
   const username = `test_${randomBytes(4).toString('hex')}`;

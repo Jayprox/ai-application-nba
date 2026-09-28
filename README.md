@@ -33,7 +33,7 @@ The second app on the Chalk That platform, after [Chalk That NFL](https://github
 - **Rankings:** players by position (G/F/C) on an equal-weight z-score of eight stats, with every piece shown; team offense/defense/net ratings and pace ranked 1-30; and what each defense allows to guards, forwards and centers, which also appears next to every prop line and on team pages.
 - **Player props:** DraftKings lines (The Odds API), pulled the morning of each game and again just before tip. A Props board shows each line with how often the player went over it in his last 10 and this season, and the result once the game ends. Player pages grade his next lines under any split: *over 25.5 in 7 of his last 10 road games*. Counts, not picks.
 - **Standings and playoff bracket** for every season: records computed live from games, ranked by NBA.com's official standings (tiebreakers included).
-- **Efficiency stats:** TS%, eFG%, free-throw rate and per-36 numbers for players; offensive/defensive rating for teams.
+- **Efficiency and usage:** TS%, eFG%, free-throw rate, per-36 numbers and usage rate for players (with a Usage leaderboard); offensive/defensive rating for teams.
 - **NBA Cup** as its own season type (2023-24 on).
 - **One query API** (`POST /query`) serves the web app today and AI agents tomorrow (API-key auth).
 
@@ -50,6 +50,7 @@ The test suite pins real published numbers, not hand-made fixtures:
 | 2025-26 scoring leader | Luka Dončić, 33.5 PPG in 64 games |
 | Every team's W-L, every season | Equals NBA.com standings (checked on every load) |
 | TS% / eFG% (LeBron 2003-04, Morant 2019-20) | .488 / .438 and .556 / .509, same as NBA.com |
+| Usage rate, box-score estimate (Morant 2019-20, LeBron 2003-04) | 25.9% and 28.3%, vs Basketball-Reference's 25.9% and 28.2% |
 
 Matching the rest splits exactly meant learning NBA.com's own rules. A season opener's rest counts from the last preseason game. The 2020 bubble scrimmages count too. The 2007-08 Heat–Hawks game, replayed after the Shaq/Marion trade, puts Shawn Marion in two games on one date.
 
@@ -98,7 +99,7 @@ Full decisions and trade-offs: [`docs/architecture.md`](docs/architecture.md). B
 | Ingestion | Standalone Node worker: Highlightly (scores, box scores) and The Odds API (props), planner-driven polling |
 | AI | Claude Haiku 4.5 for search only: one forced tool call turns a question into a structured query; numbers and sentences come from the API (`npm run ask:eval`: 36/36 real questions) |
 | Hosting | Railway: `backend-api`, `web`, `ingestion-worker`, Postgres, Redis |
-| Tests | `node:test` (backend, worker, scripts) and Vitest + Testing Library (frontend): 146 tests |
+| Tests | `node:test` (backend, worker, scripts) and Vitest + Testing Library (frontend): 150 tests |
 
 ## Repo layout
 
@@ -164,7 +165,7 @@ cd frontend && npm test
 ```
 
 - **Repo root:** names, tagging and rest rules.
-- **backend:** 65 tests, including the NBA.com number checks and prop grading.
+- **backend:** 68 tests, including the NBA.com number checks and prop grading.
 - **worker:** mapping, polling planner and the props planner. Add `WORKER_TEST_DATABASE_URL` pointing at a local test database to also run the end-to-end sync.
 - **frontend:** fetch-hook race conditions, token refresh, filter-to-query mapping.
 

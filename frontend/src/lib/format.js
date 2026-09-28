@@ -54,6 +54,8 @@ export const avg = (v) => (v == null ? '—' : Number(v).toFixed(1));
 /** Shooting percentage the NBA way: .561 */
 export const pct = (v) => (v == null ? '—' : v >= 1 ? '1.000' : `.${String(Math.round(v * 1000)).padStart(3, '0')}`);
 /** Signed average: +4.2 / -1.0 */
+/** Usage rate (a share of plays, stored 0-1) as "28.3%". */
+export const usgPct = (v) => (v == null ? '—' : `${(v * 100).toFixed(1)}%`);
 export const signedAvg = (v) => (v == null ? '—' : `${v > 0 ? '+' : ''}${Number(v).toFixed(1)}`);
 
 /** "just now", "12 min ago", "3 h ago", "2 days ago" */

@@ -5,11 +5,12 @@ import { MARKET_LABEL } from '../query/markets.js';
 
 const STAT_LABEL = { pts: 'points', reb: 'rebounds', ast: 'assists', stl: 'steals', blk: 'blocks', tov: 'turnovers', fg3m: '3-pointers',
   minutes: 'minutes', plus_minus: 'plus-minus', fg_pct: 'FG%', fg3_pct: '3P%', ft_pct: 'FT%', ts_pct: 'true shooting %', efg_pct: 'effective FG%',
-  off_rtg: 'offensive rating', def_rtg: 'defensive rating', net_rtg: 'net rating', pace: 'pace' };
+  off_rtg: 'offensive rating', def_rtg: 'defensive rating', net_rtg: 'net rating', pace: 'pace', usg_pct: 'usage rate' };
 const POS = { G: 'guards', F: 'forwards', C: 'centers' };
 const TYPE = { regular: 'regular season', playoffs: 'playoffs', play_in: 'play-in', all: 'all games', cup: 'NBA Cup' };
 const PCT = new Set(['fg_pct', 'fg3_pct', 'ft_pct', 'ts_pct', 'efg_pct']);
-const fmt = (k, v) => (v == null ? '—' : PCT.has(k) ? (v >= 1 ? '1.000' : `.${String(Math.round(v * 1000)).padStart(3, '0')}`) : Number(v).toFixed(1));
+const usg = (v) => `${(v * 100).toFixed(1)}%`;   // usage reads as a share of plays: 28.3%
+const fmt = (k, v) => (v == null ? '—' : k === 'usg_pct' ? usg(v) : PCT.has(k) ? (v >= 1 ? '1.000' : `.${String(Math.round(v * 1000)).padStart(3, '0')}`) : Number(v).toFixed(1));
 const num = (v) => (v == null ? '—' : Number(v).toFixed(1));   // per-game values: always one decimal (2.0, not 2)
 const ord = (n) => { const v = n % 100; return `${n}${v >= 11 && v <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' })[n % 10] ?? 'th'}`; };
 const signed = (v) => (v == null ? '' : `${v > 0 ? '+' : ''}${Number(v).toFixed(1)}`);
@@ -137,7 +138,7 @@ export function summarize(plan, ids, r, ctx) {
       const d = plan.scope === 'career' ? q.data.totals : q.data;
       if (plan.stat && d[plan.stat] !== undefined) {
         const v = fmt(plan.stat, d[plan.stat]), label = STAT_LABEL[plan.stat];
-        const verb = PCT.has(plan.stat) || ['off_rtg', 'def_rtg'].includes(plan.stat) ? `had a ${label} of ${v}` : `averaged ${v} ${label}`;
+        const verb = PCT.has(plan.stat) || ['off_rtg', 'def_rtg', 'usg_pct'].includes(plan.stat) ? `had a ${label} of ${v}` : `averaged ${v} ${label}`;
         return { sentence: `${subj} ${verb} ${window}${rec}.`, view: { type: 'stats', query: q } };
       }
       return {
@@ -152,7 +153,7 @@ export function summarize(plan, ids, r, ctx) {
       if (!rows.length) return { sentence: `No qualified players for ${where} yet.`, view: { type: 'leaders', rows, meta: r.main.meta } };
       const t = rows[0];
       const live = ctx.seasonInProgress && season === ctx.latestSeason;
-      return { sentence: `${t.full_name} (${t.team}) ${live ? 'leads' : 'led'} the ${where} in ${STAT_LABEL[plan.stat]} at ${num(t.value)} per game over ${t.gp} games.`, view: { type: 'leaders', rows, meta: r.main.meta } };
+      return { sentence: `${t.full_name} (${t.team}) ${live ? 'leads' : 'led'} the ${where} in ${STAT_LABEL[plan.stat]} at ${plan.stat === 'usg_pct' ? `${usg(t.value)} (est.)` : `${num(t.value)} per game`} over ${t.gp} games.`, view: { type: 'leaders', stat: plan.stat, rows, meta: r.main.meta } };
     }
     case 'player_rankings': {
       const rows = r.main.data, worst = plan.order === 'worst';

@@ -157,9 +157,10 @@ The Odds API — free 500 credits/mo; paid from $30/mo. Fast-follow only.
   - Swift iOS app (same API, later)
   - ~~Natural-language search bar~~ *(done 2026-09-27: Haiku picks the query, the API supplies every number)*
   - ~~Standings page, playoff bracket view~~ — *done 2026-09-27.*
-  - User-adjustable leaderboard qualifier; usage rate (needs team possessions per player);
+  - ~~Usage rate~~ *(done 2026-09-28: box-score estimate, player pages + Usage leaderboard + Ask)*;
+    user-adjustable leaderboard qualifier — *dropped 2026-09-28: the 70% rule stays fixed*;
     ~~advanced stats (TS%, eFG%, per-36, ratings)~~ — *done 2026-09-27.*
-  - Self-serve signup / email verification
+  - ~~Self-serve signup / email verification~~ — *dropped 2026-09-28: JD adds users himself (`npm run create-user`).*
 - [x] **Success metric** — How will you know v1 is shippable?
   A user can look up any NBA team, player, or game and see numbers that
   match NBA.com — season/L5/L10/career/game log, by season type, under
@@ -423,6 +424,7 @@ Answer these. If you stumble on any, go back.
 
 | Date | What I built | Decision made | Why |
 |------|-------------|---------------|-----|
+| 2026-09-28 | Usage rate | Box-score estimate per game (his plays / team plays x his share of team minutes), summed over his games; labelled "est."; Usage leaderboard also needs 15+ min/game; qualifier stays fixed, self-serve signup dropped | NBA.com's usage comes from play-by-play we don't store; the per-game sum handles trades and missed games, and matches Basketball-Reference (Morant 2019-20 25.9% exactly, LeBron 2003-04 within 0.1); a minutes floor keeps 4-minute players off the top |
 | 2026-09-27 | Natural-language search | Haiku only maps the question to a structured plan (forced tool call); names resolved by our code, ambiguity asked back; the sentence is a template over API numbers | The one thing an LLM could get wrong here is a number, so it never writes one; every answer is the same verified query a screen would run |
 | 2026-09-27 | Rankings + matchup insights | G/F/C from NBA.com's listing (first position wins); equal-weight z-scores with every z shown; defenses ranked by what they allow per position, 1 = fewest | Stays inside real data (NBA.com has no PG/SG); a score anyone can decompose is a stat, an unexplained one is a model; the matchup rank turns props from "he usually goes over" into "and tonight's defense is 27th against guards" |
 | 2026-09-27 | Season-start prep: weekly NBA.com run automated (launchd), injury probe | The reconcile runs itself on the Mac instead of relying on memory; injuries are tested on real preseason data before any UI depends on them | NBA.com blocks cloud IPs, so the Mac is the only place it can run; a feature built on an unconfirmed feed would be guessing |

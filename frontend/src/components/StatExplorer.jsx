@@ -8,7 +8,7 @@ import { Link, useSearchParams } from 'react-router';
 import { api } from '../lib/api.js';
 import { useFetch } from '../lib/useFetch.js';
 import { SEASON_TYPE_OPTIONS } from '../lib/seasons.js';
-import { ago, avg, made, mins, pct, pm, SEASON_TYPE_LOWER, signedAvg, tinyDate, tipTime } from '../lib/format.js';
+import { ago, avg, made, mins, pct, pm, SEASON_TYPE_LOWER, signedAvg, tinyDate, tipTime, usgPct } from '../lib/format.js';
 import { MARKETS, MARKET_SHORT, price, RESULT } from '../lib/props.js';
 
 const MARKET_ORDER = MARKETS.map(([m]) => m);
@@ -225,7 +225,8 @@ function Tiles({ entity, d }) {
   const adv = entity === 'player'
     ? [['TS%', pct(d.ts_pct), 'True shooting: points per shot, counting 3s and free throws'], ['eFG%', pct(d.efg_pct), 'Effective FG%: a 3 counts 1.5 makes'],
       ['FT rate', pct(d.ft_rate), 'Free-throw attempts per field-goal attempt'], ['Pts / 36', avg(d.pts_per36), 'Points per 36 minutes'],
-      ['Reb / 36', avg(d.reb_per36), 'Rebounds per 36 minutes'], ['Ast / 36', avg(d.ast_per36), 'Assists per 36 minutes']]
+      ['Reb / 36', avg(d.reb_per36), 'Rebounds per 36 minutes'], ['Ast / 36', avg(d.ast_per36), 'Assists per 36 minutes'],
+      ['Usage (est.)', usgPct(d.usg_pct), "Share of his team's plays (shots, free-throw trips, turnovers) he used while on the floor, estimated from the box score"]]
     : [['Off rtg (est.)', avg(d.off_rtg), 'Points per 100 possessions (possessions estimated from the box score)'],
       ['Def rtg (est.)', avg(d.def_rtg), 'Opponent points per 100 possessions (estimated)'],
       ['Net rtg (est.)', d.off_rtg == null || d.def_rtg == null ? '—' : signedAvg(d.off_rtg - d.def_rtg), 'Off rtg minus def rtg'],
@@ -240,8 +241,8 @@ function Tiles({ entity, d }) {
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">{tiles.map(tile)}</div>
       <section aria-label="Efficiency" className="flex flex-col gap-2">
-        <h3 className="eyebrow m-0">Efficiency</h3>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">{adv.map(tile)}</div>
+        <h3 className="eyebrow m-0">{entity === 'player' ? 'Efficiency & usage' : 'Efficiency'}</h3>
+        <div className={`grid grid-cols-2 gap-3 ${entity === 'player' ? 'sm:grid-cols-4 lg:grid-cols-7' : 'sm:grid-cols-3 lg:grid-cols-6'}`}>{adv.map(tile)}</div>
       </section>
     </div>
   );

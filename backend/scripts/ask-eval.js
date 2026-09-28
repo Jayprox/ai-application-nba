@@ -29,6 +29,8 @@ const CASES = [
   ['who leads the league in steals', { kind: 'leaders', stat: 'stl' }],
   ['top 10 scorers 2015-16', { kind: 'leaders', stat: 'pts', season: '2015-16', limit: 10 }],
   ['most threes per game last season', { kind: 'leaders', stat: 'fg3m', season: /^(2025-26|)$/ }],
+  ['who has the highest usage rate', { kind: 'leaders', stat: 'usg_pct' }],
+  ['Jokic usage rate this season', { kind: 'player_stats', stat: 'usg_pct' }],
   ['best centers in the league', { kind: 'player_rankings', position: 'C' }],
   ['top 5 point guards over the last 10 games', { kind: 'player_rankings', position: 'G', scope: 'last10' }],
   ['best defense in the NBA', { kind: 'team_rankings', stat: 'def_rtg' }],

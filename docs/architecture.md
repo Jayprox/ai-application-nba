@@ -502,6 +502,16 @@ Highlightly (§3.2). Decisions (JD, 2026-09-27):
   offensive/defensive rating per 100 *estimated* possessions (teams, labelled
   "est."; NBA.com counts possessions from play-by-play). Checked: LeBron
   2003-04 TS .488 / eFG .438 and Morant 2019-20 .556 / .509 = NBA.com.
+- **Usage rate** (`usg_pct`, players, every scope and split; added
+  2026-09-28): his plays (FGA + 0.44 FTA + TOV) over his team's plays while
+  he was on the floor, estimated per game as team plays x his minutes /
+  (team minutes / 5), both summed over his games (trades and missed games
+  handled). Stored 0-1, shown as "28.3%", labelled "est." (NBA.com counts
+  on-floor plays from play-by-play, which we don't store). Checked against
+  Basketball-Reference: Morant 2019-20 25.9% exact, LeBron 2003-04 28.3% vs
+  28.2%. Also a leaderboard stat (`stat: "usg_pct"`): same 70% games rule
+  plus 15+ minutes per game. Ask understands "usage rate" (plan cache key
+  bumped to `ask:v3`).
 - **NBA Cup** season type (`season_type: "cup"` = games with a Cup stage,
   group stage through the final; 2023-24 on). Not on leaderboards.
 - **Auto-deploy**: Railway ignored pushes because the Railway GitHub App was

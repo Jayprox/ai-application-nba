@@ -4,8 +4,8 @@
 import { MARKETS } from '../query/markets.js';
 
 export const KINDS = ['player_stats', 'team_stats', 'leaders', 'player_rankings', 'team_rankings', 'matchups', 'props', 'standings', 'game', 'series', 'unsupported'];
-export const LEADER_STATS = ['pts', 'reb', 'ast', 'stl', 'blk', 'fg3m', 'tov', 'minutes', 'plus_minus'];
-const STAT_FOCUS = ['pts', 'reb', 'ast', 'stl', 'blk', 'tov', 'fg3m', 'minutes', 'plus_minus', 'fg_pct', 'fg3_pct', 'ft_pct', 'ts_pct', 'efg_pct', 'off_rtg', 'def_rtg'];
+export const LEADER_STATS = ['pts', 'reb', 'ast', 'stl', 'blk', 'fg3m', 'tov', 'minutes', 'plus_minus', 'usg_pct'];
+const STAT_FOCUS = ['pts', 'reb', 'ast', 'stl', 'blk', 'tov', 'fg3m', 'minutes', 'plus_minus', 'fg_pct', 'fg3_pct', 'ft_pct', 'ts_pct', 'efg_pct', 'usg_pct', 'off_rtg', 'def_rtg'];
 const TEAM_SORTS = ['net_rtg', 'off_rtg', 'def_rtg', 'pace'];
 
 export const PLAN_TOOL = {
@@ -59,7 +59,7 @@ season_type: regular (default), playoffs, play_in, all, cup (NBA Cup / in-season
 Kinds:
 - player_stats: "how is Brunson doing on the road", "Jokic triple doubles"? (use player_stats with stat), "LeBron career playoffs".
 - team_stats: "Celtics on the second night of back-to-backs", "Knicks at home this season".
-- leaders: "who leads the league in steals", "top 10 scorers 2015-16" (stat + limit).
+- leaders: "who leads the league in steals", "top 10 scorers 2015-16", "highest usage rate" (stat + limit; usage / usage rate = usg_pct).
 - player_rankings: "best centers", "top 5 guards last 10 games" (position; order worst for "worst").
 - team_rankings: "best defense", "fastest pace", "worst offense" (stat = def_rtg / pace / off_rtg / net_rtg, order).
 - matchups: "which teams give up the most points to centers", "how do the Lakers defend guards" (position, stat market, order, optional team). "worst defense vs X" = order worst (allows the most).

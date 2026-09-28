@@ -90,6 +90,12 @@ test('sentences are templates over the API numbers', () => {
   assert.equal(noDk.sentence, 'Anthony Edwards went over 27.5 points in 4 of his last 10 games.');
   const lead = summarize({ kind: 'leaders', stat: 'stl' }, {}, { main: { data: [{ full_name: 'Dyson Daniels', team: 'ATL', value: 2, gp: 76 }], meta: {} } }, ctx);
   assert.equal(lead.sentence, 'Dyson Daniels (ATL) led the 2025-26 regular season in steals at 2.0 per game over 76 games.');
+  const q2 = { ...q, data: { ...q.data, usg_pct: 0.283 } };
+  assert.equal(summarize({ kind: 'player_stats', stat: 'usg_pct' }, ids, { main: q2 }, ctx).sentence,
+    'Nikola Jokić had a usage rate of 28.3% in 9 2025-26 regular season games (his team went 6-3).');
+  const usgLead = summarize({ kind: 'leaders', stat: 'usg_pct' }, {}, { main: { data: [{ full_name: 'Luka Dončić', team: 'LAL', value: 0.351, gp: 64 }], meta: {} } }, ctx);
+  assert.equal(usgLead.sentence, 'Luka Dončić (LAL) led the 2025-26 regular season in usage rate at 35.1% (est.) over 64 games.');
+  assert.equal(normalizePlan({ kind: 'leaders', stat: 'usg_pct' }).stat, 'usg_pct', 'usage is a leaderboard stat');
 });
 
 // ---- end to end (fake model, real API + data) ------------------------------------------------

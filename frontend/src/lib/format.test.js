@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { gameContext, isYmd, longDate, made, mins, pm, restLabel, tinyDate, todayLocal, tvLabel } from './format.js';
+import { gameContext, isYmd, longDate, made, mins, pm, restLabel, tinyDate, todayLocal, tvLabel, usgPct } from './format.js';
 
 describe('format', () => {
   it('dates never shift a day', () => {
@@ -21,6 +21,12 @@ describe('format', () => {
     expect(gameContext({ season_type: 'regular', cup_stage: 'group', is_neutral_site: true, arena_city: 'Mexico City' })).toBe('NBA Cup group · in Mexico City');
     expect(gameContext({ season_type: 'regular' })).toBe('');
   });
+  it('usage reads as a percent with one decimal', () => {
+    expect(usgPct(0.283)).toBe('28.3%');
+    expect(usgPct(0.2)).toBe('20.0%');
+    expect(usgPct(null)).toBe('—');
+  });
+
   it('box score cells', () => {
     expect(mins('35.00')).toBe('35');
     expect(pm(7)).toBe('+7'); expect(pm(-3)).toBe('-3'); expect(pm(null)).toBe('');

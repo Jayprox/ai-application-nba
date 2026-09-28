@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { api } from '../lib/api.js';
 import { useFetch } from '../lib/useFetch.js';
-import { avg, pct, signedAvg, tinyDate } from '../lib/format.js';
+import { avg, pct, signedAvg, tinyDate, usgPct } from '../lib/format.js';
 import { MARKET_SHORT, price } from '../lib/props.js';
 import { Empty, ErrorBox, Loading } from '../components/States.jsx';
 import { PageTitle } from '../components/Controls.jsx';
@@ -143,8 +143,8 @@ function View({ v, season }) {
       return <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{tiles.map(([k, val]) => <Tile key={k} k={k} v={val} />)}</div>;
     }
     case 'leaders':
-      return <Table head={[['#'], ['Player'], ['Team'], ['GP', 'r'], ['Per game', 'r']]}
-        rows={v.rows.map((r) => [r.rank, <Link key="p" to={`/players/${r.player_id}?season=${season}`}>{r.full_name}</Link>, r.team, r.gp, avg(r.value)])} />;
+      return <Table head={[['#'], ['Player'], ['Team'], ['GP', 'r'], [v.stat === 'usg_pct' ? 'Usage (est.)' : 'Per game', 'r']]}
+        rows={v.rows.map((r) => [r.rank, <Link key="p" to={`/players/${r.player_id}?season=${season}`}>{r.full_name}</Link>, r.team, r.gp, v.stat === 'usg_pct' ? usgPct(r.value) : avg(r.value)])} />;
     case 'player_rankings':
       return <Table head={[['#'], ['Player'], ['Team'], ['Score', 'r'], ['Pts', 'r'], ['Reb', 'r'], ['Ast', 'r']]}
         rows={v.rows.map((r) => [r.rank, <Link key="p" to={`/players/${r.player_id}?season=${season}`}>{r.name}</Link>, r.team, signedAvg(r.score), avg(r.pts), avg(r.reb), avg(r.ast)])} />;

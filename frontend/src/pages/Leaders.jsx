@@ -2,11 +2,11 @@ import { Link, useSearchParams } from 'react-router';
 import { api } from '../lib/api.js';
 import { useFetch } from '../lib/useFetch.js';
 import { SEASON_TYPE_OPTIONS, useSeasons } from '../lib/seasons.js';
-import { avg, SEASON_TYPE } from '../lib/format.js';
+import { avg, SEASON_TYPE, usgPct } from '../lib/format.js';
 import { PageTitle, Pills, Select, Tabs } from '../components/Controls.jsx';
 import { Empty, ErrorBox, Loading } from '../components/States.jsx';
 
-const STATS = [['pts', 'Points'], ['reb', 'Rebounds'], ['ast', 'Assists'], ['fg3m', '3-pointers'], ['stl', 'Steals'], ['blk', 'Blocks']];
+const STATS = [['pts', 'Points'], ['reb', 'Rebounds'], ['ast', 'Assists'], ['fg3m', '3-pointers'], ['stl', 'Steals'], ['blk', 'Blocks'], ['usg_pct', 'Usage']];
 // The leaderboard scope has no play-in or Cup option: too few games to rank.
 const TYPES = SEASON_TYPE_OPTIONS.filter(([v]) => v !== 'play_in' && v !== 'cup');
 
@@ -24,10 +24,11 @@ export default function Leaders() {
   const q = data?.meta.qualifier;
   const label = STATS.find(([v]) => v === stat)[1];
   const typeName = type === 'all' ? 'All game types' : SEASON_TYPE[type];
+  const usage = stat === 'usg_pct';
 
   return (
     <>
-      <PageTitle eyebrow={season ? `${season} · ${typeName} · per game` : 'Per game'}>League leaders</PageTitle>
+      <PageTitle eyebrow={season ? `${season} · ${typeName} · ${usage ? 'usage rate' : 'per game'}` : 'Per game'}>League leaders</PageTitle>
       {seasons.error && <ErrorBox error={seasons.error} onRetry={seasons.retry} />}
       {season && (
         <div className="flex flex-wrap items-end gap-4">
@@ -58,7 +59,7 @@ export default function Leaders() {
                     </span>
                     <span className="hidden text-sm text-muted sm:block">{r.team}</span>
                     <span className="num hidden text-right text-sm text-muted sm:block">{r.gp} GP</span>
-                    <span className="num text-right font-display text-[28px] font-bold">{avg(r.value)}</span>
+                    <span className="num text-right font-display text-[28px] font-bold">{usage ? usgPct(r.value) : avg(r.value)}</span>
                   </li>
                 ))}
               </ol>
@@ -69,12 +70,14 @@ export default function Leaders() {
             <h2 className="m-0 font-display text-2xl font-bold">Who qualifies</h2>
             {q ? (
               <p className="m-0 text-[15px] leading-relaxed">
-                Played in at least <strong>70% of the team's games</strong>: {q.min_games} of {q.team_games}{season === seasons.data?.meta.current_season ? ' so far' : ''}. <strong>{q.qualified_players} player{q.qualified_players === 1 ? '' : 's'}</strong> {q.qualified_players === 1 ? 'qualifies' : 'qualify'}.
+                Played in at least <strong>70% of the team's games</strong>: {q.min_games} of {q.team_games}{season === seasons.data?.meta.current_season ? ' so far' : ''}{q.min_minutes ? <>, and <strong>{q.min_minutes}+ minutes per game</strong></> : ''}. <strong>{q.qualified_players} player{q.qualified_players === 1 ? '' : 's'}</strong> {q.qualified_players === 1 ? 'qualifies' : 'qualify'}.
               </p>
             ) : <p className="m-0 text-[15px] leading-relaxed">Played in at least <strong>70% of the team's games</strong>.</p>}
             <p className="m-0 text-sm leading-relaxed text-muted">This is Chalk That's rule, not the NBA's official qualifier. It scales with games played, so it works early in the season too, and a 1-game outlier can't top the list.</p>
           </div>
-          <p className="m-0 text-[13px] text-muted">{label} per game · computed from NBA.com game logs</p>
+          {usage
+            ? <p className="m-0 text-[13px] leading-relaxed text-muted">Usage: the share of his team's plays (shots, free-throw trips, turnovers) he used while on the floor. Estimated from box scores; NBA.com counts on-floor plays from play-by-play, so it can differ by about a point.</p>
+            : <p className="m-0 text-[13px] text-muted">{label} per game · computed from NBA.com game logs</p>}
         </aside>
       </div>
     </>

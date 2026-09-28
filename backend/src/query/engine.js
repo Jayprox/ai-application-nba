@@ -27,7 +27,9 @@ const SPLITS = {
   altitude: [true, false],
 };
 export const STATS = ['pts', 'reb', 'ast', 'stl', 'blk', 'tov', 'fg3m', 'fgm', 'fga', 'fg3a', 'ftm', 'fta', 'oreb', 'dreb', 'pf', 'plus_minus', 'minutes'];
-const LEADERBOARD_STATS = ['pts', 'reb', 'ast', 'stl', 'blk', 'fg3m', 'tov', 'minutes', 'plus_minus'];
+const LEADERBOARD_STATS = ['pts', 'reb', 'ast', 'stl', 'blk', 'fg3m', 'tov', 'minutes', 'plus_minus', 'usg_pct'];
+// Usage leaderboard also needs this many minutes per game (a 4-minute player can post a 40% usage).
+export const USG_MIN_MINUTES = 15;
 export const QUALIFIER = 0.7; // played in >= 70% of games (Chalk That's rule, not the NBA's)
 export const FIRST_SEASON = '2003-04';
 
@@ -95,12 +97,21 @@ const avgCols = (alias) => STATS.map((c) => `round(avg(${alias}.${c})::numeric, 
 //   per 36 = total / minutes * 36 (players)
 //   possessions ~ FGA - OREB + TOV + 0.44 FTA; ratings per 100 of them (teams; NBA.com counts
 //   possessions from play-by-play, so its ratings differ slightly — labelled "est." in the UI).
-const advCols = (a, entity) => `
+//   usage % (players) = his plays (FGA + 0.44 FTA + TOV) / his team's plays while he was on the
+//   floor, estimated per game as team plays * his minutes / (team minutes / 5), summed over his
+//   games (so trades and missed games are handled). NBA.com counts on-floor plays from
+//   play-by-play, so it can differ by a point or so — "est." in the UI.
+//   `tm(c)` names his team's game total for column c (team_games.minutes / fga / fta / tov).
+const usgCol = (a, tm) => `round((sum(${a}.fga + 0.44 * ${a}.fta + ${a}.tov) FILTER (WHERE ${tm('minutes')} > 0)
+    / nullif(sum(${a}.minutes * 5.0 / ${tm('minutes')} * (${tm('fga')} + 0.44 * ${tm('fta')} + ${tm('tov')})) FILTER (WHERE ${tm('minutes')} > 0), 0))::numeric, 3)::float8 AS usg_pct`;
+const onTg = (c) => `tg.${c}`;
+const TEAM_TOTALS = 'tg.minutes AS tm_minutes, tg.fga AS tm_fga, tg.fta AS tm_fta, tg.tov AS tm_tov';
+const advCols = (a, entity, tm = onTg) => `
   round((sum(${a}.pts)::numeric / nullif(2 * (sum(${a}.fga) + 0.44 * sum(${a}.fta)), 0)), 3)::float8 AS ts_pct,
   round(((sum(${a}.fgm) + 0.5 * sum(${a}.fg3m))::numeric / nullif(sum(${a}.fga), 0)), 3)::float8 AS efg_pct,
   round((sum(${a}.fta)::numeric / nullif(sum(${a}.fga), 0)), 3)::float8 AS ft_rate,
   ${entity === 'player'
-    ? ['pts', 'reb', 'ast'].map((c) => `round((sum(${a}.${c}) * 36 / nullif(sum(${a}.minutes), 0))::numeric, 1)::float8 AS ${c}_per36`).join(', ')
+    ? ['pts', 'reb', 'ast'].map((c) => `round((sum(${a}.${c}) * 36 / nullif(sum(${a}.minutes), 0))::numeric, 1)::float8 AS ${c}_per36`).join(', ') + `, ${usgCol(a, tm)}`
     : `round((100 * sum(${a}.pts) / nullif(sum(${a}.fga) - sum(${a}.oreb) + sum(${a}.tov) + 0.44 * sum(${a}.fta), 0))::numeric, 1)::float8 AS off_rtg,
        round((100 * sum(${a}.opp_pts) / nullif(sum(${a}.fga) - sum(${a}.oreb) + sum(${a}.tov) + 0.44 * sum(${a}.fta), 0))::numeric, 1)::float8 AS def_rtg`}`;
 const pctCols = (alias) => `
@@ -174,8 +185,8 @@ async function playerQuery(db, v) {
 
   // season / last5 / last10 — splits first, then the window ("Last 10 + Home" = last 10 home games)
   const n = v.scope === 'last5' ? 5 : v.scope === 'last10' ? 10 : null;
-  const inner = `SELECT s.*, tg.won ${base} ORDER BY g.game_date_local DESC${n ? ` LIMIT ${n}` : ''}`;
-  const { rows: [r] } = await db.query(`SELECT count(*)::int AS gp, count(*) FILTER (WHERE x.won)::int AS w, ${avgCols('x')}, ${pctCols('x')}, ${advCols('x', 'player')}${v.lines ? `, ${hitCols('x', v.lines)}` : ''} FROM (${inner}) x`, params);
+  const inner = `SELECT s.*, tg.won, ${TEAM_TOTALS} ${base} ORDER BY g.game_date_local DESC${n ? ` LIMIT ${n}` : ''}`;
+  const { rows: [r] } = await db.query(`SELECT count(*)::int AS gp, count(*) FILTER (WHERE x.won)::int AS w, ${avgCols('x')}, ${pctCols('x')}, ${advCols('x', 'player', (c) => `x.tm_${c}`)}${v.lines ? `, ${hitCols('x', v.lines)}` : ''} FROM (${inner}) x`, params);
   const props = propsOut(r, v.lines);
   return { data: r.gp ? stripCounts(r) : null, sample: r.gp, record: `${r.w}-${r.gp - r.w}`, notes, player, props };
 }
@@ -220,25 +231,30 @@ async function leaderboard(db, v) {
       WHERE g.season = $1 AND g.season_type = ANY($2::text[]) AND g.status = 'final' GROUP BY 1) t`, [v.season, types]);
   const teamGames = m?.team_games ?? 0;
   const minGp = Math.ceil(teamGames * QUALIFIER);
+  const usg = v.stat === 'usg_pct';
+  const value = usg ? usgCol('s', onTg).replace(/ AS usg_pct$/, '') : `round(avg(s.${v.stat})::numeric, 1)::float8`;
+  const join = usg ? 'JOIN team_games tg ON tg.game_id = s.game_id AND tg.team_id = s.team_id' : '';
+  const having = `count(*) >= $3${usg ? ` AND avg(s.minutes) >= ${USG_MIN_MINUTES}` : ''}`;
   const { rows } = await db.query(
     `SELECT p.id AS player_id, p.full_name, count(*)::int AS gp,
-            round(avg(s.${v.stat})::numeric, 1)::float8 AS value,
+            ${value} AS value,
             (SELECT t.abbreviation FROM player_game_stats s2 JOIN games g2 ON g2.id = s2.game_id JOIN teams t ON t.id = s2.team_id
               WHERE s2.player_id = p.id AND g2.season = $1 ORDER BY g2.game_date_local DESC LIMIT 1) AS team
-       FROM player_game_stats s JOIN games g ON g.id = s.game_id JOIN players p ON p.id = s.player_id
+       FROM player_game_stats s JOIN games g ON g.id = s.game_id JOIN players p ON p.id = s.player_id ${join}
       WHERE g.season = $1 AND g.season_type = ANY($2::text[]) AND g.status = 'final' AND NOT s.dnp
-      GROUP BY p.id, p.full_name HAVING count(*) >= $3
+      GROUP BY p.id, p.full_name HAVING ${having}
       ORDER BY value DESC NULLS LAST, gp DESC, p.full_name LIMIT $4`, [v.season, types, Math.max(minGp, 1), v.limit]);
   const { rows: [q] } = await db.query(
-    `SELECT count(*)::int n FROM (SELECT s.player_id FROM player_game_stats s JOIN games g ON g.id = s.game_id
-      WHERE g.season = $1 AND g.season_type = ANY($2::text[]) AND g.status = 'final' AND NOT s.dnp GROUP BY 1 HAVING count(*) >= $3) t`,
+    `SELECT count(*)::int n FROM (SELECT s.player_id FROM player_game_stats s JOIN games g ON g.id = s.game_id ${join}
+      WHERE g.season = $1 AND g.season_type = ANY($2::text[]) AND g.status = 'final' AND NOT s.dnp GROUP BY 1 HAVING ${having}) t`,
     [v.season, types, Math.max(minGp, 1)]);
   return {
     data: rows.map((r, i) => ({ rank: i + 1, ...r })),
     sample: q.n,
     record: null,
-    notes: [`Qualifier: played in at least ${Math.round(QUALIFIER * 100)}% of team games (${minGp} of ${teamGames}) — Chalk That's rule, not the NBA's official one.`],
-    qualifier: { min_games: minGp, team_games: teamGames, qualified_players: q.n },
+    notes: [`Qualifier: played in at least ${Math.round(QUALIFIER * 100)}% of team games (${minGp} of ${teamGames})${usg ? ` and ${USG_MIN_MINUTES}+ minutes per game` : ''} — Chalk That's rule, not the NBA's official one.`,
+      ...(usg ? ['Usage is estimated from box scores (NBA.com counts on-floor plays from play-by-play), so it can differ by about a point.'] : [])],
+    qualifier: { min_games: minGp, team_games: teamGames, qualified_players: q.n, ...(usg ? { min_minutes: USG_MIN_MINUTES } : {}) },
   };
 }
 

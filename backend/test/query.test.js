@@ -145,6 +145,8 @@ test('Jokić 2025-26 = NBA.com (65 GP, 27.7 PPG) and Dončić leads scoring (33.
   const lb = await s.query({ scope: 'leaderboard', season: '2025-26', stat: 'pts', limit: 3 });
   assert.equal(lb.body.meta.qualifier.min_games, 58);
   assert.deepEqual([lb.body.data[0].full_name, lb.body.data[0].value, lb.body.data[0].gp], ['Luka Dončić', 33.5, 64]);
+  const u = await s.query({ scope: 'leaderboard', season: '2025-26', stat: 'usg_pct', limit: 1 });
+  assert.ok(u.body.data[0].value > 0.3 && u.body.data[0].value < 0.4, `usage leader ${JSON.stringify(u.body.data[0])}`);
 });
 
 test('advanced stats = NBA.com: TS% / eFG% (LeBron 2003-04 .488 / .438, Morant 2019-20 .556 / .509)', async () => {
@@ -155,6 +157,37 @@ test('advanced stats = NBA.com: TS% / eFG% (LeBron 2003-04 .488 / .438, Morant 2
   assert.ok(Math.abs(m.pts_per36 - 20.7) <= 0.1, `Morant pts/36 ${m.pts_per36} vs NBA.com 20.7`);
   const c = (await s.query({ entity: 'player', id: lebron, scope: 'career' })).body.data;
   assert.equal(c.by_season.find((x) => x.season === '2003-04').ts_pct, 0.488, 'career rows carry it too');
+});
+
+test('usage rate (est.) = Basketball-Reference: Morant 2019-20 25.9%, LeBron 2003-04 28.2% (box-score formula, +/-0.2)', async () => {
+  const m = (await q(morant, 'season', '2019-20')).body.data;
+  assert.equal(m.usg_pct, 0.259);
+  const l = (await q(lebron, 'season', '2003-04')).body.data;
+  assert.ok(Math.abs(l.usg_pct - 0.282) <= 0.002, `LeBron usage ${l.usg_pct} vs 0.282`);
+  const l10 = (await q(lebron, 'last10', '2003-04')).body.data;
+  assert.ok(l10.usg_pct > 0.2 && l10.usg_pct < 0.4, 'last-N windows carry it');
+  const c = (await s.query({ entity: 'player', id: lebron, scope: 'career' })).body.data;
+  assert.equal(c.by_season.find((x) => x.season === '2003-04').usg_pct, l.usg_pct, 'career rows carry it too');
+  assert.ok(c.totals.usg_pct > 0);
+  const home = (await q(lebron, 'season', '2003-04', { venue: 'home' })).body.data;
+  assert.ok(home.usg_pct > 0.2 && home.usg_pct < 0.4, 'and splits');
+});
+
+test('usage leaderboard: same number as the player query; also needs 15+ minutes per game; explained', async () => {
+  const r = await s.query({ scope: 'leaderboard', season: '2003-04', stat: 'usg_pct', limit: 50 });
+  assert.equal(r.status, 200);
+  const { qualifier, notes } = r.body.meta;
+  assert.equal(qualifier.min_minutes, 15);
+  assert.match(notes.join(' '), /15\+ minutes per game/);
+  assert.match(notes.join(' '), /estimated/);
+  assert.ok(r.body.data.length >= 1 && r.body.data.length === Math.min(50, qualifier.qualified_players));
+  const values = r.body.data.map((x) => x.value);
+  assert.deepEqual(values, [...values].sort((a, b) => b - a), 'sorted high to low');
+  for (const row of r.body.data.slice(0, 3)) {
+    const p = (await q(row.player_id, 'season', '2003-04')).body.data;
+    assert.equal(row.value, p.usg_pct, `${row.full_name}: leaderboard = player page`);
+    assert.ok(row.gp >= qualifier.min_games && p.minutes >= 15);
+  }
 });
 
 test('team ratings: points per 100 estimated possessions; NBA Cup is a season type (not for leaderboards)', async () => {

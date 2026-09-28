@@ -38,7 +38,7 @@ export function askRoutes(db, cache, { currentSeason = '2026-27', llm = createLl
       let plan, cached = false;
       if (body.plan) plan = normalizePlan(body.plan);
       else {
-        const key = `ask:v2:${ctx.latestSeason}:${q.toLowerCase().replace(/\s+/g, ' ')}`;
+        const key = `ask:v3:${ctx.latestSeason}:${q.toLowerCase().replace(/\s+/g, ' ')}`;
         const hit = await cache.get(key);
         if (hit) { plan = hit; cached = true; } else {
           if (!llm.configured) return res.status(503).json({ error: 'Search is not set up yet (ANTHROPIC_API_KEY missing on the server).' });

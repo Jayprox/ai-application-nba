@@ -279,7 +279,7 @@ async function loadSeason(db, season, maps, data) {
       WHERE g.season = $1 AND g.season_type = 'regular' AND g.id = ANY($2::uuid[]) GROUP BY 1`, [season, loadedIds]);
   const wlMap = new Map(wl.map((r) => [r.nba, r]));
   for (const s of standings) {
-    const got = wlMap.get(String(s.TeamID));
+    const got = wlMap.get(String(s.TeamID)) ?? (Number(s.WINS) + Number(s.LOSSES) === 0 ? { w: 0, l: 0 } : null);  // 0-0 before opening night
     if (!got || got.w !== Number(s.WINS) || got.l !== Number(s.LOSSES)) problems.push(`${s.TeamCity} ${s.TeamName}: standings ${s.WINS}-${s.LOSSES}, loaded ${got ? `${got.w}-${got.l}` : 'nothing'}`);
   }
   // (the worker's DNP rows aren't in NBA.com's logs: count played rows in the games we just loaded)

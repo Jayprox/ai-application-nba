@@ -423,6 +423,7 @@ Answer these. If you stumble on any, go back.
 
 | Date | What I built | Decision made | Why |
 |------|-------------|---------------|-----|
+| 2026-09-27 | Season-start prep: weekly NBA.com run automated (launchd), injury probe | The reconcile runs itself on the Mac instead of relying on memory; injuries are tested on real preseason data before any UI depends on them | NBA.com blocks cloud IPs, so the Mac is the only place it can run; a feature built on an unconfirmed feed would be guessing |
 | 2026-09-27 | Player props (The Odds API, DraftKings) | Real sportsbook lines only, two snapshots (morning open, pre-tip close), graded at query time; no history backfill; unmatched names held, never guessed | Hit rates against the line people actually bet are the useful number; grading at read time means a corrected box score fixes every prop; history would cost ~$119 for little |
 | 2026-09-27 | Backlog: standings + bracket, advanced stats, NBA Cup filter, auto-deploy diagnosis | Standings computed live but ranked by NBA.com's stored official rank; advanced stats from season sums | Tiebreakers are the league's call, not ours; sums (not averages of percentages) are how NBA.com computes TS%/eFG%, and the tests prove the match |
 | 2026-09-27 | Phase 7: README, pitch, gut-check drafts | README leads with NBA.com-verified numbers | Trust is the product: showing the checks is the fastest way to earn it |

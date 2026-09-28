@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Weekly NBA.com run (scripts/weekly.sh): Mondays 9:07 am local time.
+     If the Mac is asleep then, launchd runs it at the next wake. Install: ops/launchd/README.md -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.chalkthat.nba.weekly</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-l</string>
+    <string>/Users/jayprox/Documents/Projects/git/ai-application-nba/scripts/weekly.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key>
+    <integer>1</integer>
+    <key>Hour</key>
+    <integer>9</integer>
+    <key>Minute</key>
+    <integer>7</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/tmp/chalk-that-nba-weekly.out</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/chalk-that-nba-weekly.err</string>
+</dict>
+</plist>

@@ -40,6 +40,8 @@ export function createHighlightly({ key = process.env.HIGHLIGHTLY_API_KEY, fixtu
       }
       return out;
     },
+    /** One match with all its detail (injuries are expected here, if Highlightly has them). */
+    match: (matchId) => get(`/matches/${matchId}`, `match_${matchId}`),
     boxScore: (matchId) => get(`/box-score/${matchId}`, `box-score_${matchId}`),
     lineups: (matchId) => get(`/lineups/${matchId}`, `lineups_${matchId}`),
   };

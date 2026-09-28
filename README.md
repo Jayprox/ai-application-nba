@@ -135,7 +135,8 @@ Fill in `DATABASE_PUBLIC_URL`, `HIGHLIGHTLY_API_KEY` and `ODDS_API_KEY` in `.env
 
 | When | Command (repo root unless noted) |
 |---|---|
-| Weekly during the season | `npm run db:backfill -- --season 2026-27`: NBA.com overwrites live data and reports any rows that differed |
+| Weekly during the season | `npm run db:weekly` (runs by itself Monday mornings via launchd, see `ops/launchd/`): schedule refresh + `db:backfill -- --season 2026-27` (NBA.com overwrites live data and reports any rows that differed) + `db:status` |
+| Injury source check (preseason) | `cd worker && npm run injuries-probe -- --date 2026-10-03` |
 | NBA changes the schedule (Cup knockouts, postponements) | `npm run db:schedule` |
 | Official standings rank (also written by the backfill) | `npm run db:standings` |
 | One-off live sync for a date | `cd worker && npm run sync -- --date 2026-10-21` |
@@ -177,4 +178,3 @@ Returns the averages plus `meta`: sample size, W-L in those games, the filters a
 - **Injuries aren't shown yet.** The source is still being evaluated against real preseason data.
 - **Prop lines start with the 2026-27 regular season,** DraftKings only. There is no line history before that (a deliberate cost call), so older games show hit rates against today's line, not the line of the day.
 - **The sign-in lockout is in memory:** one backend instance, and it resets on redeploy.
-- **Auto-deploy needs the Railway GitHub App** installed on the repo; without it, reconnecting a service's source forces a fresh build.

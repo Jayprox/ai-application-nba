@@ -507,7 +507,24 @@ Highlightly (§3.2). Decisions (JD, 2026-09-27):
 - **Auto-deploy**: Railway ignored pushes because the Railway GitHub App was
   not installed on `Jayprox/ai-application-nba` (diagnosis: NO_INSTALLATION
   on all three services). Fix: install the app for this repo (GitHub
-  settings), then auto-deploy can be enabled per service.
+  settings), then auto-deploy can be enabled per service. **Done
+  2026-09-27:** app installed for the repo, auto-deploy on push to `main`
+  enabled on backend-api, web and ingestion-worker.
+
+## 7.5.1 Season-start prep (2026-09-27)
+
+- **Weekly NBA.com run is automated on JD's Mac** (`scripts/weekly.sh`,
+  `npm run db:weekly`; launchd job `ops/launchd/`, Mondays 09:07 local,
+  runs at next wake if asleep): `db:schedule` (schedule/TV/Cup changes) +
+  `db:backfill -- --season 2026-27` (reconcile) + `db:status`, logged to
+  `logs/weekly.log`, macOS notification with the result. Still from the Mac
+  because NBA.com blocks cloud IPs.
+- Backfill's standings check now accepts 0-0 teams, so the weekly run
+  works before opening night.
+- **Injury re-test tool**: `npm run injuries-probe -- --date D` (worker)
+  scans Highlightly's match detail, box score and lineups for any
+  injury-looking field. Run on the first preseason dates (Oct 3+); §3.2
+  stays open until it answers.
 
 ## 7.6 Player props (as built, 2026-09-27)
 

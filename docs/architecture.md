@@ -598,6 +598,12 @@ Decisions (JD):
   market, regular season before that date, once the opponent has 5 games),
   and "Defense by position" on team pages.
 
+**Positions for retired players (fixed 2026-27 pre-season):** the seed
+only took positions from current rosters, so on first deploy 99% of
+2003-04 points (and 11% of 2024-25) came from players with no position.
+`npm run db:positions` fills blanks from NBA.com's player index
+(Historical=1, one request; roster listing wins); weekly.sh re-runs it.
+
 API: `GET /rankings/players?season=&season_type=&position=&scope=`,
 `/rankings/teams`, `/rankings/matchups[?team_id=]`. Tests: the math by hand
 (z-scores, ranks with ties, per-game allowed, labels) plus consistency

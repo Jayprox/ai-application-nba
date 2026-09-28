@@ -57,6 +57,11 @@ export async function nbaStandings(season) {
 export async function nbaAllPlayers(season) {
   return fixture(`allplayers_${season}`) ?? nbaStats('commonallplayers', { IsOnlyCurrentSeason: '0', LeagueID: '00', Season: season });
 }
+/** Every player ever (Historical=1) with NBA.com's listed POSITION — retired players included. */
+export async function nbaPlayerIndex(season) {
+  return fixture(`playerindex_${season}`) ?? nbaStats('playerindex', { College: '', Country: '', DraftPick: '', DraftRound: '', DraftYear: '', Height: '',
+    Historical: '1', LeagueID: '00', Season: season, SeasonType: 'Regular Season', TeamID: '0', Weight: '' });
+}
 /** Returns undefined in fixture mode when that team's roster wasn't captured. */
 export async function nbaRoster(teamId, season) {
   if (FIXTURES) return fixture(`roster_${teamId}_${season}`);

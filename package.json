@@ -16,7 +16,8 @@
     "db:status": "node scripts/db-status.mjs",
     "db:schedule": "node scripts/load-schedule.mjs",
     "db:standings": "node scripts/load-standings.mjs",
-    "db:weekly": "zsh scripts/weekly.sh"
+    "db:weekly": "zsh scripts/weekly.sh",
+    "db:positions": "node scripts/load-positions.mjs"
   },
   "dependencies": {
     "pg": "^8.13.0"

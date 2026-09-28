@@ -3,6 +3,7 @@
 # live on Railway). `npm run db:weekly`, or automatically via launchd:
 # ops/launchd/README.md.
 #   1. db:schedule  — pick up NBA schedule changes (Cup knockouts, postponements, TV)
+#      db:positions — listed position for anyone new (rankings group by G/F/C)
 #   2. db:backfill  — NBA.com overwrites the week's live (Highlightly) rows and
 #                     reports anything that differed; refreshes official standings
 #   3. db:status    — one-screen health check
@@ -14,6 +15,7 @@ LOG=logs/weekly.log
 {
   echo "=== $(date '+%Y-%m-%d %H:%M') weekly run, season $SEASON ==="
   npm run --silent db:schedule -- --season "$SEASON" &&
+  npm run --silent db:positions &&
   npm run --silent db:backfill -- --season "$SEASON" &&
   npm run --silent db:status
 } >> "$LOG" 2>&1

@@ -334,8 +334,11 @@ Still open:
   `current_injury: null` and no badge shows.
 - **The Odds API plan:** move to the 100K plan before opening night
   (2026-10-21); capture a real response as a test fixture that night (§7.6).
-- **Swift iOS app:** next. Start from `docs/ios-kickoff.md`; the contract
-  is `docs/api.md`.
+- **Backlog v2** (21 items, performance first): see
+  `docs/vibe-coding-checklist.md` Phase 3.
+
+Done since: the Swift iOS app (`ai-application-nba-ios`, 2026-09-29), built
+from `docs/ios-kickoff.md` against `docs/api.md`, with parity verified.
 
 Resolved:
 - ~~How NBA.com data reaches production~~: decided, see §3.2.

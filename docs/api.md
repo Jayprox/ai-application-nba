@@ -224,7 +224,7 @@ Team row: `game_id, date, season, season_type, venue, opponent, won, pts, opp_pt
 **`leaderboard`**:
 ```json
 "data": [ { "rank": 1, "player_id": "…", "full_name": "LeBron James", "gp": 79, "value": 20.9, "team": "CLE" } ],
-"meta": { "qualifier": { "min_games": 58, "team_games": 82, "qualified_players": 142 }, "notes": ["Qualifier: played in at least 70% of team games (58 of 82) — Chalk That's rule, not the NBA's official one."] }
+"meta": { "qualifier": { "min_games": 58, "team_games": 82, "qualified_players": 142 }, "notes": ["Qualifier: played in at least 70% of team games (58 of 82), the NBA's rule for per-game leaders."] }
 ```
 `value` is a per-game average, or for `usg_pct` a 0–1 share. The usage board
 also requires 15+ minutes per game (`qualifier.min_minutes: 15`) and adds an

@@ -141,8 +141,8 @@ The Odds API — free 500 credits/mo; paid from $30/mo. Fast-follow only.
   - **Scoreboard** (games by date, incl. preseason/Cup/play-in/playoff
     labels) + **box score** screen; game-log rows link into box scores
   - **Leaderboards** — top-N by per-game average for core stats;
-    qualifier: played in >= 70% of the team's games so far (labeled on
-    screen as Chalk That's rule, not the NBA's official one)
+    qualifier: played in >= 70% of the team's games so far (the NBA's
+    own per-game-leader rule; relabeled 2026-09-28, see build log)
   - Injury badge on player records — *if* an injury source is confirmed
     (architecture.md §3.2); otherwise ships without and is tracked
   - Empty states: preseason, offseason, rookie, retired player, split
@@ -154,13 +154,43 @@ The Odds API — free 500 credits/mo; paid from $30/mo. Fast-follow only.
     ~~composite position rankings, matchup-insight splits, team-unit
     offense/defense rankings~~ *(done 2026-09-27: Rankings page, Props matchup notes, team defense by position)*
   - ~~NBA Cup split filter~~ — *done 2026-09-27: "NBA Cup" season type.*
-  - Swift iOS app (same API): **next**. Kickoff: `docs/ios-kickoff.md`; contract: `docs/api.md`.
+  - ~~Swift iOS app (same API)~~ *(done 2026-09-29: built in `ai-application-nba-ios` from `docs/ios-kickoff.md`; parity verified by JD)*
   - ~~Natural-language search bar~~ *(done 2026-09-27: Haiku picks the query, the API supplies every number)*
   - ~~Standings page, playoff bracket view~~ — *done 2026-09-27.*
   - ~~Usage rate~~ *(done 2026-09-28: box-score estimate, player pages + Usage leaderboard + Ask)*;
     user-adjustable leaderboard qualifier — *dropped 2026-09-28: the 70% rule stays fixed*;
     ~~advanced stats (TS%, eFG%, per-36, ratings)~~ — *done 2026-09-27.*
   - ~~Self-serve signup / email verification~~ — *dropped 2026-09-28: JD adds users himself (`npm run create-user`).*
+- [ ] **Backlog v2 (agreed 2026-09-29, in priority order; not started).**
+  Rule for every item: counts, averages, ranks, percentiles or a formula
+  written out in the Guide. No fitted models, projections or probabilities.
+  1. **Faster career + leaderboard queries** (priority): pre-computed
+     per-season aggregates so career/leaderboard queries stay fast under load
+     (Gut Check #4). Also speeds up items 4, 7 and 17 below.
+  2. **Focus outline:** show the `:focus-visible` outline for keyboard use only, not mouse clicks.
+  3. **Rolling-average chart** on player pages: L5/L10 rolling line across
+     the season with the season average and tonight's line drawn in, plus
+     sparklines in the tiles.
+  4. **Last 5 vs season** difference with sample size ("+4.2 pts over his last 5, 5 games"), no hot/cold label.
+  5. **Streaks:** consecutive games at 20+ pts / double-doubles / 3+ threes,
+     plus an active-streaks league page.
+  6. **Minutes & role:** a starter/bench split and a minutes trend (`started` is null for older games).
+  7. **Vs opponent:** his numbers against one team.
+  8. **With/without a teammate:** his numbers in games another player played vs sat out, from box scores alone.
+  9. **More splits:** wins vs losses, close games (5 points or less), month, before/after the All-Star break.
+  10. **Tonight page:** each game side by side with both teams' L10, tonight's rest/B2B tags, recent meetings, defense-by-position ranks and prop lines.
+  11. **Rest edge:** tonight's rest gap between the teams, plus each team's historical record in that spot.
+  12. **Schedule outlook:** upcoming back-to-backs, road-trip length and altitude games per team.
+  13. **Line ladder:** hit rates at several lines at once (22.5 / 24.5 / 26.5).
+  14. **Distribution:** histogram of his results in the selected games with the line drawn in; floor / median / ceiling.
+  15. **Team lines:** spreads and totals from The Odds API; ATS and over/under records (more API credits).
+  16. **Favorites:** follow players and teams; "My players tonight" on the scoreboard (needs per-user storage).
+  17. **Compare:** two players side by side under the same filters.
+  18. **Percentile marks:** e.g. "TS% .612 · 88th percentile among qualified guards".
+  19. **CSV export** of any table.
+  20. **iOS notifications:** lines posted and results graded for followed players (iOS repo, needs APNs).
+  21. **NBA research agents:** a separate repo on this API, like ai-agents-nfl.
+  - *Dropped 2026-09-29:* share links / universal links; moving the sign-in lockout to Redis.
 - [x] **Success metric** — How will you know v1 is shippable?
   A user can look up any NBA team, player, or game and see numbers that
   match NBA.com — season/L5/L10/career/game log, by season type, under
@@ -424,6 +454,7 @@ Answer these. If you stumble on any, go back.
 
 | Date | What I built | Decision made | Why |
 |------|-------------|---------------|-----|
+| 2026-09-29 | Backlog v2 agreed | 21 items, all numbers-based (counts, averages, ranks, percentiles, written-out formulas); query performance first | Keeps the app's promise (every number real and explainable) while adding trends, splits and game-day views users asked for |
 | 2026-09-28 | Guide page (`/guide`) | A static in-app user guide, in the nav next to Sign out, like Chalk That NFL's Guide; written from what each page actually does, with a test that every jump link has its section | Users can look up what a split, a qualifier or "usage (est.)" means without asking; a utility link keeps the 8 section links fitting at 1024 px |
 | 2026-09-28 | Final docs for iOS: `docs/api.md` (API reference) + `docs/ios-kickoff.md` | Documented from real responses, not from memory of the code; fixed the two contract bugs this found (box-score minutes as a string, playoff-round labels) | A typed Swift client fails on a string where it expects a number, so the reference had to be checked against actual JSON; the round-label bug was invisible because its unit test used the wrong input |
 | 2026-09-28 | Usage rate | Box-score estimate per game (his plays / team plays x his share of team minutes), summed over his games; labelled "est."; Usage leaderboard also needs 15+ min/game; qualifier stays fixed, self-serve signup dropped | NBA.com's usage comes from play-by-play we don't store; the per-game sum handles trades and missed games, and matches Basketball-Reference (Morant 2019-20 25.9% exactly, LeBron 2003-04 within 0.1); a minutes floor keeps 4-minute players off the top |
@@ -451,3 +482,12 @@ Answer these. If you stumble on any, go back.
 ---
 
 *Template v1.0 — adapt as needed per project.*
+
+- **2026-09-28** — Qualifier wording corrected (web, API note, Guide; iOS
+  in its own repo). It said the 70% rule was "Chalk That's rule, not the
+  NBA's official one", but 70% of team games (58 of 82) IS the NBA's
+  per-game-leader minimum (nba.com/stats/help/statminimums). Now: "the
+  NBA's rule for per-game leaders"; the 15+ minutes on the usage board
+  is labeled Chalk That's addition. Not applied (documented in the
+  Guide): the NBA's exception for a player who'd still lead with his
+  total spread over the minimum games. No logic change.

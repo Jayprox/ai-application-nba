@@ -30,7 +30,7 @@ export const STATS = ['pts', 'reb', 'ast', 'stl', 'blk', 'tov', 'fg3m', 'fgm', '
 const LEADERBOARD_STATS = ['pts', 'reb', 'ast', 'stl', 'blk', 'fg3m', 'tov', 'minutes', 'plus_minus', 'usg_pct'];
 // Usage leaderboard also needs this many minutes per game (a 4-minute player can post a 40% usage).
 export const USG_MIN_MINUTES = 15;
-export const QUALIFIER = 0.7; // played in >= 70% of games (Chalk That's rule, not the NBA's)
+export const QUALIFIER = 0.7; // played in >= 70% of games: the NBA's rule for per-game leaders (NBA.com stat minimums)
 export const FIRST_SEASON = '2003-04';
 
 export function validate(q) {
@@ -252,7 +252,8 @@ async function leaderboard(db, v) {
     data: rows.map((r, i) => ({ rank: i + 1, ...r })),
     sample: q.n,
     record: null,
-    notes: [`Qualifier: played in at least ${Math.round(QUALIFIER * 100)}% of team games (${minGp} of ${teamGames})${usg ? ` and ${USG_MIN_MINUTES}+ minutes per game` : ''} — Chalk That's rule, not the NBA's official one.`,
+    // 70% is the NBA's own per-game-leader rule; its "would still lead over the minimum games" exception isn't applied.
+    notes: [`Qualifier: played in at least ${Math.round(QUALIFIER * 100)}% of team games (${minGp} of ${teamGames}), the NBA's rule for per-game leaders${usg ? `, plus ${USG_MIN_MINUTES}+ minutes per game (Chalk That's addition for usage, which the NBA doesn't rank)` : ''}.`,
       ...(usg ? ['Usage is estimated from box scores (NBA.com counts on-floor plays from play-by-play), so it can differ by about a point.'] : [])],
     qualifier: { min_games: minGp, team_games: teamGames, qualified_players: q.n, ...(usg ? { min_minutes: USG_MIN_MINUTES } : {}) },
   };
@@ -265,7 +266,8 @@ const record = (rows) => { const w = rows.filter((r) => r.won).length; return `$
 export async function runQuery(db, cache, body, { currentSeason = '2026-27' } = {}) {
   const v = validate(body);
   // (An array replacer filters nested keys too, so nested objects are added as sorted entries.)
-  const key = 'q:v1:' + JSON.stringify(v, Object.keys(v).sort()) + JSON.stringify(Object.entries(v.splits).sort())
+  // v2 (2026-09-28): leaderboard qualifier note reworded; bumping drops cached v1 answers.
+  const key = 'q:v2:' + JSON.stringify(v, Object.keys(v).sort()) + JSON.stringify(Object.entries(v.splits).sort())
     + (v.lines ? JSON.stringify(Object.entries(v.lines).sort()) : '');
   const hit = await cache.get(key);
   if (hit) return { ...hit, meta: { ...hit.meta, cached: true } };

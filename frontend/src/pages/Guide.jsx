@@ -170,10 +170,12 @@ export default function Guide() {
             usage, for any season and for the regular season, playoffs, or all games.
           </p>
           <p>
-            To qualify, a player must have played in <B>at least 70% of his team's games</B> so far. This is Chalk That's
-            own rule, not the NBA's official one; it scales with the season, so it works in November too, and a hot
-            3-game stretch can't top the list. The <B>usage</B> board also needs 15+ minutes per game, so a player who
-            gets 4 minutes a night can't lead it. The "Who qualifies" box shows the exact cutoff.
+            To qualify, a player must have played in <B>at least 70% of his team's games</B> so far, the NBA's own rule
+            for per-game leaders. It scales with the season, so it works in November too, and a hot 3-game stretch can't
+            top the list. (The NBA also lets a player who falls short qualify if he'd still lead with his total spread over
+            the minimum games; that exception isn't applied here.) The <B>usage</B> board also needs 15+ minutes per game,
+            Chalk That's addition since the NBA has no usage leaderboard, so a player who gets 4 minutes a night can't lead
+            it. The "Who qualifies" box shows the exact cutoff.
           </p>
         </Section>
 

@@ -190,6 +190,15 @@ The Odds API — free 500 credits/mo; paid from $30/mo. Fast-follow only.
   19. **CSV export** of any table.
   20. **iOS notifications:** lines posted and results graded for followed players (iOS repo, needs APNs).
   21. **NBA research agents:** a separate repo on this API, like ai-agents-nfl.
+  22. **Scoreboard ladder** (web + iOS; also posted in the Hardwood iOS chat). Order on a date:
+      1. Live and not-yet-started games in tip-time order; live games keep their place.
+      2. **Delayed** games: postponed, or still not started **30+ minutes after tip time**.
+         If a delayed game starts later that same date, it is live again and moves back up
+         to its tip-time place.
+      3. **Final** games at the bottom (by tip time). Cancelled games go below finals.
+      E.g. once the 10am games finish, the games that haven't started move up. Same order on
+      the Props board's game list. Pure ordering by `status` + `tipoff_utc` + the current time,
+      no new data.
   - *Dropped 2026-09-29:* share links / universal links; moving the sign-in lockout to Redis.
 - [x] **Success metric** — How will you know v1 is shippable?
   A user can look up any NBA team, player, or game and see numbers that

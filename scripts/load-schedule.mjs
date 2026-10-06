@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { publicDbUrl } from './lib/env.mjs';
 import { nbaScheduleSeason } from './lib/sources.mjs';
 import { upsertArena } from './lib/arenas.mjs';
-import { isNeutralSite, nationalTvTier, nationalBroadcasterList, cupStage, localGameDate, restTags } from './lib/tagging.mjs';
+import { isNeutralSite, scheduleStatus, nationalTvTier, nationalBroadcasterList, cupStage, localGameDate, restTags } from './lib/tagging.mjs';
 
 const log = (...a) => console.log('[schedule]', ...a);
 const argSeason = process.argv.indexOf('--season');
@@ -23,7 +23,6 @@ const season = argSeason > 0 ? process.argv[argSeason + 1] : '2026-27';
 if (!/^\d{4}-\d{2}$/.test(season)) { console.error(`bad --season ${season}`); process.exit(1); }
 
 const TYPE = { '001': 'preseason', '002': 'regular', '006': 'cup_final' }; // playoffs/play-in come later in the season
-const STATUS = { 1: 'scheduled', 2: 'live', 3: 'final' };
 
 const { url, host, ssl } = publicDbUrl();
 const db = new pg.Client({ connectionString: url, ssl });
@@ -77,7 +76,7 @@ try {
        status = CASE WHEN games.status IN ('live', 'final') THEN games.status ELSE EXCLUDED.status END, updated_at = now()`,
     [col((x) => x.id), col((x) => x.type), col((x) => cupStage(x.g, x.g.gameId)), col((x) => x.date), col((x) => (tbd(x.g) ? null : x.g.gameDateTimeUTC)),
      col((x) => x.home), col((x) => x.away), col((x) => x.arenaId), col((x) => x.neutral), col((x) => nationalTvTier(x.g.broadcasters)),
-     col((x) => JSON.stringify(nationalBroadcasterList(x.g.broadcasters))), col((x) => (x.g.postponedStatus === 'Y' ? 'postponed' : STATUS[x.g.gameStatus] ?? 'scheduled')), season]);
+     col((x) => JSON.stringify(nationalBroadcasterList(x.g.broadcasters))), col((x) => scheduleStatus(x.g)), season]);
   if (fresh.length) await db.query(`INSERT INTO entity_id_crosswalk (entity_type, canonical_id, source, source_id, match_method)
     SELECT 'game', c, 'nba_stats', s, 'exact_id' FROM unnest($1::text[], $2::text[]) AS t(c, s) ON CONFLICT DO NOTHING`, [fresh.map((f) => f[0]), fresh.map((f) => f[1])]);
 

@@ -549,6 +549,18 @@ Highlightly (§3.2). Decisions (JD, 2026-09-27):
   injury-looking field. Run on the first preseason dates (Oct 3+); §3.2
   stays open until it answers.
 
+- **2026-10-05 weekly run failed (fixed 2026-10-06).** The first finished
+  (preseason) game made `db:schedule` write NBA.com's "final" with no score,
+  which `games_check6` rejects, so the whole run rolled back. The loader now
+  writes only `scheduled` / `postponed` (`scheduleStatus` in
+  `scripts/lib/tagging.mjs`); live/final belong to the worker and the NBA.com
+  backfill.
+- **Held players: `npm run db:review`.** Lists Highlightly players the worker
+  held (a near-match to someone already in the database), with candidates, and
+  `npm run db:review -- --link <source_id> <player_id>` links one. First case:
+  Lester Quinones (Oct 3 preseason). The Oct 3 injury probe found no injury
+  data on Highlightly; re-checked on opening night (Oct 22 check-in).
+
 ## 7.6 Player props (as built, 2026-09-27)
 
 Decisions (JD, 2026-09-27):

@@ -2,7 +2,14 @@
 // designing the backfill (2026-09-26).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { seasonTypeFromGameId, isNeutralSite, nationalTvTier, cupStage, localGameDate, restTags, buildSeries } from './tagging.mjs';
+import { seasonTypeFromGameId, scheduleStatus, isNeutralSite, nationalTvTier, cupStage, localGameDate, restTags, buildSeries } from './tagging.mjs';
+
+test('schedule loader never writes live/final (no scores in the schedule; the 2026-10-05 weekly failure)', () => {
+  assert.equal(scheduleStatus({ gameStatus: 3, gameStatusText: 'Final' }), 'scheduled');
+  assert.equal(scheduleStatus({ gameStatus: 2 }), 'scheduled');
+  assert.equal(scheduleStatus({ gameStatus: 1 }), 'scheduled');
+  assert.equal(scheduleStatus({ gameStatus: 1, postponedStatus: 'Y' }), 'postponed');
+});
 
 test('season type from game-id prefix; preseason and All-Star are not loaded', () => {
   assert.equal(seasonTypeFromGameId('0022500002'), 'regular');

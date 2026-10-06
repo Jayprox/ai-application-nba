@@ -463,6 +463,7 @@ Answer these. If you stumble on any, go back.
 
 | Date | What I built | Decision made | Why |
 |------|-------------|---------------|-----|
+| 2026-10-06 | Weekly-run fix + `db:review` | Schedule loader never writes live/final; held players get a list-and-link script instead of hand SQL | The first finished game broke the weekly run (final with no score); a near-match is still a human's call, but it should take one command |
 | 2026-09-29 | Backlog v2 agreed | 21 items, all numbers-based (counts, averages, ranks, percentiles, written-out formulas); query performance first | Keeps the app's promise (every number real and explainable) while adding trends, splits and game-day views users asked for |
 | 2026-09-28 | Guide page (`/guide`) | A static in-app user guide, in the nav next to Sign out, like Chalk That NFL's Guide; written from what each page actually does, with a test that every jump link has its section | Users can look up what a split, a qualifier or "usage (est.)" means without asking; a utility link keeps the 8 section links fitting at 1024 px |
 | 2026-09-28 | Final docs for iOS: `docs/api.md` (API reference) + `docs/ios-kickoff.md` | Documented from real responses, not from memory of the code; fixed the two contract bugs this found (box-score minutes as a string, playoff-round labels) | A typed Swift client fails on a string where it expects a number, so the reference had to be checked against actual JSON; the round-label bug was invisible because its unit test used the wrong input |

@@ -30,6 +30,18 @@ export function isNeutralSite(g, season, localDate) {
 const MAJOR = new Set(['ABC', 'ESPN', 'ESPN2', 'TNT', 'TBS', 'TRUTV', 'NBC', 'PEACOCK', 'NBCSN', 'AMAZON', 'PRIME VIDEO', 'TELEMUNDO', 'ESPN+', 'DISNEY+', 'MAX', 'DISNEY', 'DISNEY XD']);
 
 /** 'major' | 'nba_tv' | 'local' from the schedule's national TV/OTT broadcasters. */
+/**
+ * Status the schedule loader may write: only 'scheduled' or 'postponed'.
+ * Live/final (and their scores) belong to the ingestion worker and the NBA.com
+ * backfill. The schedule has no scores, and games requires a score on a final
+ * game (games_check6), so passing NBA.com's "final" through failed the whole
+ * weekly run on 2026-10-05, the first week with a finished (preseason) game.
+ * Existing live/final rows are never downgraded (the upsert keeps them).
+ */
+export function scheduleStatus(g) {
+  return g?.postponedStatus === 'Y' ? 'postponed' : 'scheduled';
+}
+
 export function nationalTvTier(broadcasters) {
   const b = broadcasters ?? {};
   const names = [...(b.nationalBroadcasters ?? []), ...(b.nationalOttBroadcasters ?? [])]

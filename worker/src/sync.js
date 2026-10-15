@@ -37,7 +37,7 @@ async function findGame(db, m, home, away) {
  * scores for games that are final and due (first load, or the 3h re-check).
  */
 export async function syncDate(db, hl, etDate, { now = new Date(), log = () => {} } = {}) {
-  const report = { date: etDate, matches: 0, updated: 0, boxes: 0, player_rows: 0, created_players: [], held_players: [], unmatched: [] };
+  const report = { date: etDate, matches: 0, updated: 0, boxes: 0, player_rows: 0, created_players: [], autolinked_players: [], held_players: [], unmatched: [] };
   const teams = await teamMap(db);
   for (const m of await hl.matches(etDate)) {
     report.matches++;
@@ -62,6 +62,7 @@ export async function syncDate(db, hl, etDate, { now = new Date(), log = () => {
       const b = await loadBoxScore(db, hl, { game, match: m, teams, log });
       if (b.loaded) { report.boxes++; report.player_rows += b.rows; }
       report.created_players.push(...b.created);
+      report.autolinked_players.push(...b.autolinked);
       report.held_players.push(...b.held);
     }
   }
@@ -73,7 +74,7 @@ export const boxDue = (g, now = new Date()) =>
   g.box_score_checks === 0 || (g.box_score_checks === 1 && g.box_score_synced_at && now - new Date(g.box_score_synced_at) >= 3 * HOUR);
 
 export async function loadBoxScore(db, hl, { game, match, teams, log = () => {} }) {
-  const out = { loaded: false, rows: 0, created: [], held: [] };
+  const out = { loaded: false, rows: 0, created: [], autolinked: [], held: [] };
   const box = await hl.boxScore(match.id);
   if (!Array.isArray(box) || box.length < 2 || !box.every((t) => t.boxScores?.length)) { log(`box score not ready for match ${match.id}`); return out; }
   const lineups = await hl.lineups(match.id).catch(() => null);
@@ -104,6 +105,7 @@ export async function loadBoxScore(db, hl, { game, match, teams, log = () => {} 
         const r = who.get(e.hlId);
         if (r.status !== 'matched') { out.held.push(`${e.name} (${r.reason})`); continue; }
         if (r.created) out.created.push(e.name);
+        if (r.autolinked) out.autolinked.push(e.name);
         const s = e.line.stats;
         await db.query(
           `INSERT INTO player_game_stats (game_id, player_id, team_id, started, dnp, ${STAT_COLS.join(', ')}, source, updated_at)

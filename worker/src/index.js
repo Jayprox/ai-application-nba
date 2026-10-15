@@ -30,6 +30,7 @@ export async function runDates(db, hl, dates, { triggeredBy = 'schedule', reason
     for (const r of reports) {
       log(`${r.date}: ${r.matches} matches, ${r.updated} updated, ${r.boxes} box scores (${r.player_rows} player rows)` +
         (r.created_players.length ? ` · new players: ${r.created_players.join(', ')}` : '') +
+        (r.autolinked_players.length ? ` · auto-linked: ${r.autolinked_players.join(', ')}` : '') +
         (r.held_players.length ? ` · HELD for review: ${r.held_players.join('; ')}` : '') +
         (r.unmatched.length ? ` · unmatched: ${r.unmatched.join('; ')}` : ''));
     }

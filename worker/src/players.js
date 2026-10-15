@@ -2,6 +2,7 @@
 //   known id (crosswalk)            -> use it
 //   name matches on THAT team       -> match (names.js: suffix-aware, never guesses)
 //   unique name among active players (trades) -> match
+//   unique exact name, inactive over the offseason but with a stat row in this or last season -> match (auto-linked, 2026-10-15)
 //   any near-match / ambiguity      -> manual_review, stats held back
 //   nobody remotely similar         -> clearly new: create him ("created_by_worker")
 import { initialKey, matchPlayer, nameKey, suffixOf } from './names.js';
@@ -36,6 +37,12 @@ export async function resolvePlayers(db, { teamId, season, entries }) {
          OR p.id IN (SELECT s.player_id FROM player_game_stats s JOIN games g ON g.id = s.game_id
                       WHERE s.team_id = $1 AND g.season IN ($2, $3))`, [teamId, season, prev]);
   const { rows: everyone } = await db.query('SELECT id, full_name AS name, is_active FROM players');
+  let recentIds = null;  // players with a stat row this or last season, loaded only if a name needs it
+  const recentPlayers = async () => {
+    recentIds ??= new Set((await db.query(
+      `SELECT DISTINCT s.player_id FROM player_game_stats s JOIN games g ON g.id = s.game_id WHERE g.season IN ($1, $2)`, [season, prev])).rows.map((r) => r.player_id));
+    return recentIds;
+  };
 
   for (const e of todo) {
     const hlId = String(e.hlId);
@@ -54,6 +61,18 @@ export async function resolvePlayers(db, { teamId, season, entries }) {
         await db.query(XW, [hits[0].id, hlId, 'matched', 'name+active_league']);
         await db.query('UPDATE players SET current_team_id = $2, updated_at = now() WHERE id = $1', [hits[0].id, teamId]);
         out.set(hlId, { status: 'matched', playerId: hits[0].id, method: 'name+active_league' });
+        continue;
+      }
+      // Inactive over the offseason (no team) but played within the last two seasons: if exactly
+      // one player has this exact name (suffix-aware) and he has a stat row, link him and mark him
+      // active. Tagged name+recent_inactive in the crosswalk so every auto-link can be audited.
+      let past = everyone.filter((p) => nameKey(p.name) === key);
+      if (past.length > 1) past = past.filter((p) => suffixOf(p.name) === suffixOf(e.name));
+      if (past.length === 1 && (await recentPlayers()).has(past[0].id)) {
+        await db.query(XW, [past[0].id, hlId, 'matched', 'name+recent_inactive']);
+        await db.query('UPDATE players SET current_team_id = $2, is_active = true, updated_at = now() WHERE id = $1', [past[0].id, teamId]);
+        past[0].is_active = true;
+        out.set(hlId, { status: 'matched', playerId: past[0].id, method: 'name+recent_inactive', autolinked: true });
         continue;
       }
       // Anyone at all who looks similar (retired namesake, initial+last) -> a human decides.

@@ -10,7 +10,7 @@
   <array>
     <string>/bin/zsh</string>
     <string>-l</string>
-    <string>/Users/jayprox/Documents/Projects/git/ai-application-nba/scripts/weekly.sh</string>
+    <string>/Users/jayprox_pro/Documents/Projects/git/ai-application-nba/scripts/weekly.sh</string>
   </array>
   <key>StartCalendarInterval</key>
   <dict>

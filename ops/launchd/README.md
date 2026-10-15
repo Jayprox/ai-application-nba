@@ -6,6 +6,8 @@ NBA.com blocks cloud IPs, so the weekly reconcile runs from the Mac:
 
 Run it by hand any time: `npm run db:weekly`
 
+As of 2026-10-15 it runs on the MacBook Pro (the plist path is `/Users/jayprox_pro/...`). Only one Mac should have it loaded; on the Air run the `unload` line below and delete its copy in `~/Library/LaunchAgents/`. If you move it again, change the path in the plist first.
+
 ## Install (once)
 
 ```

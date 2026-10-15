@@ -1,6 +1,6 @@
-# Chalk That NBA — Architecture
+# Chalk That Hardwood — Architecture
 
-This document is Chalk That NBA's own record, same role `docs/architecture.md`
+This document is Chalk That Hardwood's own record, same role `docs/architecture.md`
 plays in `ai-application-nfl`: a pointer to the sport-agnostic platform
 patterns (kept in `PLATFORM.md` at this repo's root, copied unchanged from
 Chalk That NFL) plus this app's own sport-specific decisions below. Update

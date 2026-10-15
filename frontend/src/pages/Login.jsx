@@ -28,7 +28,7 @@ export default function Login() {
   return (
     <div className="flex min-h-dvh items-center justify-center px-4">
       <form onSubmit={submit} className="flex w-full max-w-[400px] flex-col gap-5 rounded-[14px] border border-line bg-card p-8 sm:p-10">
-        <div className="text-center font-display text-3xl font-bold tracking-[0.04em]">CHALK THAT <span className="text-nav-accent">NBA</span></div>
+        <div className="text-center font-display text-3xl font-bold tracking-[0.04em]">CHALK THAT <span className="text-nav-accent">HARDWOOD</span></div>
         <h1 className="m-0 text-center text-xl font-semibold">Sign in</h1>
         <label className="flex flex-col gap-1.5 text-sm font-semibold">Username
           <input className={field} autoComplete="username" autoFocus required value={username} onChange={(e) => setUsername(e.target.value)} />

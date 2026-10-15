@@ -1,4 +1,4 @@
-# Chalk That NBA — API Reference
+# Chalk That Hardwood — API Reference
 
 The contract every client builds against: the React web app today, the
 iOS app next, and AI agents. One service (`backend-api`), JSON over HTTPS.

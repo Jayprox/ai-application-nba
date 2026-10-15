@@ -21,6 +21,6 @@ LOG=logs/weekly.log
 } >> "$LOG" 2>&1
 STATUS=$?
 if [ $STATUS -eq 0 ]; then MSG="Weekly NBA.com run OK"; else MSG="Weekly NBA.com run FAILED — see logs/weekly.log"; fi
-osascript -e "display notification \"$MSG\" with title \"Chalk That NBA\"" 2>/dev/null
+osascript -e "display notification \"$MSG\" with title \"Chalk That Hardwood\"" 2>/dev/null
 echo "=== exit $STATUS ===" >> "$LOG"
 exit $STATUS

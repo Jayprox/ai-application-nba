@@ -15,7 +15,7 @@ export default function Layout() {
       <header className="border-b border-line bg-card">
         <nav aria-label="Main" className="mx-auto flex max-w-[1280px] flex-wrap items-center gap-x-4 gap-y-1 px-4 md:gap-x-3 xl:gap-x-8 py-2 sm:px-10 md:h-14 md:flex-nowrap md:py-0">
           <NavLink to="/" className="shrink-0 whitespace-nowrap font-display text-xl font-bold sm:text-2xl md:text-xl xl:text-2xl tracking-[0.04em] text-ink no-underline hover:text-ink">
-            CHALK THAT <span className="text-nav-accent">NBA</span>
+            CHALK THAT <span className="text-nav-accent">HARDWOOD</span>
           </NavLink>
           {/* Guide sits with Sign out (a utility link, like Chalk That NFL's), not in the scrolling section links. */}
           <div className="ml-auto flex shrink-0 items-center gap-1 md:order-last md:gap-0 xl:gap-1">

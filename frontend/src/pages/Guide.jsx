@@ -56,7 +56,7 @@ function Terms({ items }) {
 export default function Guide() {
   return (
     <>
-      <PageTitle eyebrow="How to use Chalk That NBA">Guide</PageTitle>
+      <PageTitle eyebrow="How to use Chalk That Hardwood">Guide</PageTitle>
       <p className="m-0 max-w-[760px] text-[15px] leading-relaxed text-muted">
         What every screen does and how to read its numbers. The guide is always one click away in the menu.
       </p>
@@ -249,6 +249,7 @@ export default function Guide() {
             ['Prop lines', 'DraftKings, via The Odds API, from the 2026-27 season on.'],
             ['Injuries', 'Not shown yet: an injury feed is still being tested. When it\'s ready, a badge will appear on player pages.'],
           ]} />
+          <p>Chalk That Hardwood is an independent stats research tool. It is not affiliated with, endorsed by, or sponsored by the NBA or any team. Team and league names are used only to identify the data.</p>
         </Section>
       </div>
     </>

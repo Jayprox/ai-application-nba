@@ -1,4 +1,4 @@
-# Chalk That NBA: 2-minute demo
+# Chalk That Hardwood: 2-minute demo
 
 The point to land: **every number is real, verified against NBA.com, and
 nothing is predicted.** Even the AI search only picks the query.

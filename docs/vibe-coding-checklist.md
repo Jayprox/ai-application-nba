@@ -1,4 +1,4 @@
-# Vibe Coding — Project Checklist (Chalk That NBA)
+# Vibe Coding — Project Checklist (Chalk That Hardwood)
 
 > Reset from Chalk That NFL's filled-in copy on 2026-09-26 — NFL's answers and
 > build log live in `ai-application-nfl/docs/vibe-coding-checklist.md` if you
@@ -18,7 +18,7 @@
 
 ```
 PITCH:
-Chalk That NBA is a stats research app — no predictive calculations —
+Chalk That Hardwood (internal name: Chalk That NBA) is a stats research app — no predictive calculations —
 giving access to every active NBA player's and team's season averages,
 last-5 and last-10 game trends, game logs, and full career stats (back to
 1996-97, when NBA.com's complete box scores begin), filterable by
@@ -400,7 +400,7 @@ each is actually built, not as it's planned.)*
 
 ### 2-minute explanation (draft)
 
-"Chalk That NBA answers split questions fans and bettors actually ask: how
+"Chalk That Hardwood answers split questions fans and bettors actually ask: how
 does Jokić play on the second night of a back-to-back, or on the road with
 no rest, or at altitude? It covers every game since 2003-04, about 620,000
 player box-score rows, and keeps the current season live.
@@ -468,6 +468,7 @@ Answer these. If you stumble on any, go back.
 | Date | What I built | Decision made | Why |
 |------|-------------|---------------|-----|
 | 2026-10-14 | Outside agents app design started (separate repo; notes in the Claude project) | Picks stay out of Chalk That; Chalk That supplies numbers and lines; 2-hour wave pick run; graded on the line at pick time | Keeps this app's no-predictions promise while giving agents one source of truth for stats and lines; Backlog v2 items 23 to 26 added as prerequisites |
+| 2026-10-15 | Web renamed to Chalk That Hardwood (tab title, header and login wordmark, Guide, weekly notification, README and docs titles; "not affiliated with the NBA" line added to the Guide). iOS already renamed 2026-09-29 | Same public name on web and iOS to avoid trademark and copycat problems | Internal names (repo, packages, bundle ID, code comments) stay "NBA"; to be rebuilt and verified after deploy |
 | 2026-10-06 | Weekly-run fix + `db:review` | Schedule loader never writes live/final; held players get a list-and-link script instead of hand SQL | The first finished game broke the weekly run (final with no score); a near-match is still a human's call, but it should take one command |
 | 2026-09-29 | Backlog v2 agreed | 21 items, all numbers-based (counts, averages, ranks, percentiles, written-out formulas); query performance first | Keeps the app's promise (every number real and explainable) while adding trends, splits and game-day views users asked for |
 | 2026-09-28 | Guide page (`/guide`) | A static in-app user guide, in the nav next to Sign out, like Chalk That NFL's Guide; written from what each page actually does, with a test that every jump link has its section | Users can look up what a split, a qualifier or "usage (est.)" means without asking; a utility link keeps the 8 section links fitting at 1024 px |

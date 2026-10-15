@@ -1,4 +1,6 @@
-# Chalk That NBA
+# Chalk That Hardwood
+
+> Public name: **Chalk That Hardwood** (renamed 2026-10-15; the iOS app made the same change on 2026-09-29 to avoid an App Store trademark rejection). Internal names such as the repo name, package names, the bundle ID and code comments still say "NBA" on purpose.
 
 **Split-based NBA stats research: how does a player or team actually perform on the second night of a back-to-back, on national TV, at altitude, or with two days of rest?** Every number comes from real box scores and is checked against NBA.com. Nothing is predicted or modeled.
 

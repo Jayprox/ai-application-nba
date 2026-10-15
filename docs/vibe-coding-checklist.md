@@ -189,7 +189,7 @@ The Odds API — free 500 credits/mo; paid from $30/mo. Fast-follow only.
   18. **Percentile marks:** e.g. "TS% .612 · 88th percentile among qualified guards".
   19. **CSV export** of any table.
   20. **iOS notifications:** lines posted and results graded for followed players (iOS repo, needs APNs).
-  21. **NBA research agents:** a separate repo on this API, like ai-agents-nfl.
+  21. **NBA research agents (outside agents props app):** a separate repo on this API, like ai-agents-nfl. Picks, simulations and confidence live ONLY in that repo; this app stays numbers-only. Needs items 23 to 26 below first. Design notes (2026-10-14): NBA only, web only, picks on points, rebounds, assists, threes and PRA; one morning run (provisional) plus one official pick run per wave of games, 2 hours before the earliest tip; picks graded on the line at pick time, closing line recorded separately.
   22. **Scoreboard ladder** (web + iOS; also posted in the Hardwood iOS chat). Order on a date:
       1. Live and not-yet-started games in tip-time order; live games keep their place.
       2. **Delayed** games: postponed, or still not started **30+ minutes after tip time**.
@@ -199,6 +199,10 @@ The Odds API — free 500 credits/mo; paid from $30/mo. Fast-follow only.
       E.g. once the 10am games finish, the games that haven't started move up. Same order on
       the Props board's game list. Pure ordering by `status` + `tipoff_utc` + the current time,
       no new data.
+  23. **Game props (prerequisite for 21; extends item 15):** spreads, totals, moneylines, team totals and quarters from The Odds API, stored and served like player props. More API credits; check the cost per market in a dry run first.
+  24. **Pick-time line snapshot (prerequisite for 21):** a third props pull 2 hours before tip (a wave: games tipping within 45 minutes pull together), alongside the existing open and close pulls. Never earlier than the NBA game-day injury report window plus 15 minutes. Served through the API as open, pick-time and close.
+  25. **Reliable injury source (prerequisite for 21):** opening-night Highlightly re-test (2026-10-21 or 22); if there is still no data, evaluate the NBA's official injury report (PDF; may need to run from the Mac) with a small test on real reports before building.
+  26. **Agent markets (prerequisite for 21):** PA, PR, RA, steals and blocks stay in Chalk That only; the agents cover points, rebounds, assists, threes and PRA. Item 8 (with/without a teammate) is also required by the agents' usage-shift adjustment, so it moves up if 21 starts.
   - *Dropped 2026-09-29:* share links / universal links; moving the sign-in lockout to Redis.
 - [x] **Success metric** — How will you know v1 is shippable?
   A user can look up any NBA team, player, or game and see numbers that
@@ -463,6 +467,7 @@ Answer these. If you stumble on any, go back.
 
 | Date | What I built | Decision made | Why |
 |------|-------------|---------------|-----|
+| 2026-10-14 | Outside agents app design started (separate repo; notes in the Claude project) | Picks stay out of Chalk That; Chalk That supplies numbers and lines; 2-hour wave pick run; graded on the line at pick time | Keeps this app's no-predictions promise while giving agents one source of truth for stats and lines; Backlog v2 items 23 to 26 added as prerequisites |
 | 2026-10-06 | Weekly-run fix + `db:review` | Schedule loader never writes live/final; held players get a list-and-link script instead of hand SQL | The first finished game broke the weekly run (final with no score); a near-match is still a human's call, but it should take one command |
 | 2026-09-29 | Backlog v2 agreed | 21 items, all numbers-based (counts, averages, ranks, percentiles, written-out formulas); query performance first | Keeps the app's promise (every number real and explainable) while adding trends, splits and game-day views users asked for |
 | 2026-09-28 | Guide page (`/guide`) | A static in-app user guide, in the nav next to Sign out, like Chalk That NFL's Guide; written from what each page actually does, with a test that every jump link has its section | Users can look up what a split, a qualifier or "usage (est.)" means without asking; a utility link keeps the 8 section links fitting at 1024 px |

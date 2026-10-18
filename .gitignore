@@ -12,3 +12,6 @@ dist/
 .vscode/
 *.log
 scripts/.dryrun-output/
+
+# third-party app screenshots used for design research (do not commit)
+screenshots_research/

@@ -695,8 +695,10 @@ as chalk-that-nfl).
 
 Backfill scripts run on JD's Mac against Postgres's public connection
 string (`DATABASE_PUBLIC_URL`), since NBA.com blocks Railway IPs.
-Postgres public endpoint: TCP proxy `iriguchi.proxy.rlwy.net:37012` ->
-5432 (added 2026-09-26). `DATABASE_PUBLIC_URL` on the Postgres service was
+Postgres public endpoint: the TCP proxy (`<railway-public-host>:<port>` ->
+5432) was removed on 2026-11-01 and the database password rotated. To run
+backfills via `DATABASE_PUBLIC_URL`, re-add a public TCP proxy in Railway
+(it gets a new host/port). `DATABASE_PUBLIC_URL` on the Postgres service was
 added by hand with Railway's standard reference definition — the template
 only creates it when a proxy exists at creation time.
 

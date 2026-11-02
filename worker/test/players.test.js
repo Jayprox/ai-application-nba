@@ -28,15 +28,17 @@ before(async () => {
     ('Ghost Guy', NULL, false)       -- no stat rows at all: hold
   `);
   const mk = async (season, date) => {
-    const { rows: [g] } = await db.query(`INSERT INTO games (season, season_type, game_date_local, tipoff_utc, home_team_id, away_team_id, status)
-      VALUES ($1, 'regular', $2, $2::date + time '20:00', ${HOU}, ${MEM}, 'final') RETURNING id`, [season, date]);
+    const { rows: [g] } = await db.query(`INSERT INTO games (season, season_type, game_date_local, tipoff_utc, home_team_id, away_team_id, status, home_score, away_score)
+      VALUES ($1, 'regular', $2, $2::date + time '20:00', ${HOU}, ${MEM}, 'final', 100, 90) RETURNING id`, [season, date]);
     await db.query(`INSERT INTO team_games (game_id, team_id, opponent_team_id, venue_split) VALUES ($1, ${HOU}, ${MEM}, 'home'), ($1, ${MEM}, ${HOU}, 'away')`, [g.id]);
     return g.id;
   };
   const recent = await mk('2025-26', '2026-04-12');
   const old = await mk('2023-24', '2024-04-14');
+  // Stat rows are for MEM, not HOU: a HOU row from last season would put the player in the team pool
+  // (name+team+date) and the recent-inactive path would never run.
   const stat = (gid, name) => db.query(`INSERT INTO player_game_stats (game_id, player_id, team_id, minutes, pts, source)
-    SELECT $1, id, ${HOU}, 20, 8, 'nba_stats' FROM players WHERE full_name = $2`, [gid, name]);
+    SELECT $1, id, ${MEM}, 20, 8, 'nba_stats' FROM players WHERE full_name = $2`, [gid, name]);
   await stat(recent, 'Zed Recent');
   await stat(old, 'Old Timer');
   await stat(recent, 'Dup Name');

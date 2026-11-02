@@ -172,6 +172,8 @@ cd frontend && npm test
 - **worker:** mapping, polling planner and the props planner. Add `WORKER_TEST_DATABASE_URL` pointing at a local test database to also run the end-to-end sync.
 - **frontend:** fetch-hook race conditions, token refresh, filter-to-query mapping.
 
+CI (`.github/workflows/test.yml`) runs all four suites on every pull request. For the backend it runs only the files that work on an empty database (the data-backed NBA.com checks run locally); see `docs/architecture.md` §9.3.
+
 ---
 
 ## API in one example

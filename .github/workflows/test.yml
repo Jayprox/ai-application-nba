@@ -1,0 +1,132 @@
+name: Tests
+
+# Runs the four test suites on every PR and on push to main.
+# No secrets or API keys are used anywhere; no lint step (see docs/STANDARDS.md).
+#
+# Backend scope (owner decision D1 = A, docs/plans/M1-ci-test-workflow.md):
+# the full backend suite needs real NBA.com data that CI cannot load, so CI
+# applies the schema + constraint tests (npm run db:apply at the repo root)
+# and runs only the backend test files that are valid on an empty schema.
+# The NBA.com number checks, auth, browse, query, props and ask tests still
+# run only locally. Add new backend test files to the list below.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  root:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: worker
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          # Throwaway password for a disposable CI container. Not a secret.
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: worker_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # The worker suite drops and recreates schema public, so it gets its own DB.
+      WORKER_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/worker_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          # Throwaway password for a disposable CI container. Not a secret.
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: backend_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_PUBLIC_URL: postgres://postgres:postgres@localhost:5432/backend_test
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/backend_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+      - name: Apply schema and run constraint tests (repo root)
+        run: |
+          npm ci
+          npm run db:apply
+      - name: Backend tests valid on an empty schema (D1 = A)
+        working-directory: backend
+        run: |
+          npm ci
+          node --test --test-concurrency=1 test/league.test.js test/names.test.js test/rankings.test.js test/ratelimit.test.js

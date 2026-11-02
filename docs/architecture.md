@@ -700,3 +700,103 @@ Postgres public endpoint: TCP proxy `iriguchi.proxy.rlwy.net:37012` ->
 added by hand with Railway's standard reference definition — the template
 only creates it when a proxy exists at creation time.
 
+
+## 9. How to run and how to test (onboarding map, added 2026-11-01)
+
+*Added by the Engineering Lead during the AI-team onboarding. On macOS this
+file is also the charter's `docs/ARCHITECTURE.md` (case-insensitive file
+system), so the lowercase name stays. Sections 1-8 above are unchanged;
+`README.md` "Run it locally" / "Tests" is the short version of this.*
+
+### 9.1 Packages and entry points
+
+Four independent npm packages, each with its own `package.json` and
+`package-lock.json` (lockfileVersion 3, all resolved from
+registry.npmjs.org). No npm workspaces; nothing is shared between them
+(PLATFORM.md §3; copied helpers such as `names` are kept in sync by tests).
+
+| Package | Path | Node (`engines`) | Entry point | Talks to |
+|---|---|---|---|---|
+| scripts (root) | `/` (`scripts/`, `db/`) | >=20 | `scripts/*.mjs` via `npm run db:*` | NBA.com, Highlightly, Open-Meteo -> Postgres (`DATABASE_PUBLIC_URL`) |
+| backend-api | `backend/` | >=20 | `src/server.js` (`npm start`), `scripts/dev.js` (`npm run dev`) | Postgres (`DATABASE_URL`), Redis (`REDIS_URL`, optional), Anthropic (`ANTHROPIC_API_KEY`, `/ask` only) |
+| ingestion-worker | `worker/` | >=20 | `src/index.js` (`npm start`), `scripts/sync.js`, `scripts/props.js` | Highlightly (`HIGHLIGHTLY_API_KEY`), The Odds API (`ODDS_API_KEY`) -> Postgres (`DATABASE_URL`) |
+| web | `frontend/` | >=22.12 | Vite (`npm run dev`, :5173 strict), `server.js` (prod static) | backend-api only (`VITE_API_URL`, build time) |
+
+Production: Node 22, Postgres 18, Redis 8.2 on Railway (§8). Data flow:
+see the README diagram and §3.2.
+
+### 9.2 How to run
+
+Install per package: `npm ci` (or `npm install`) in `/`, `backend/`,
+`worker/`, `frontend/`. Then follow README "Run it locally". Notes:
+
+- **Schema:** `npm run db:apply` (root) applies `db/schema.sql` and then
+  runs `db/tests/schema_constraints.sql` (rolls back). It refuses to run if
+  a `teams` table already exists. `db/schema.sql` already contains every
+  migration in `db/migrations/`; `npm run db:migrate` is only for
+  databases created before a migration (it records them in
+  `schema_migrations`). `npm run db:test` re-runs only the constraint tests.
+- **Connection for root scripts:** always `DATABASE_PUBLIC_URL`, read from
+  `.env` and overridden by the process environment (`scripts/lib/env.mjs`);
+  a `*.railway.internal` host is refused. TLS is off only for
+  localhost/127.0.0.1.
+- **Connection for backend/worker:** `DATABASE_URL` (`src/db.js`); TLS off
+  for localhost, 127.0.0.1 and `*.railway.internal`.
+- **Loading data needs NBA.com,** which blocks cloud IPs (§3.1), so
+  `db:seed` / `db:backfill` / `db:schedule` run from JD's Mac only. There
+  is no committed data fixture; a fresh database has an empty schema.
+
+### 9.3 How to test (verified locally 2026-11-01, Node 26.11, Postgres 18.6 in Docker)
+
+| Package | Command | Runner | Needs Postgres? | Env vars | Result on an empty-schema DB |
+|---|---|---|---|---|---|
+| root | `npm test` | `node --test 'scripts/lib/*.test.mjs'` | No | none (`sources.test.mjs` stubs `fetch`, unsets `SEED_FIXTURES`) | 31/31 pass |
+| root (schema) | `npm run db:apply` | SQL constraint tests | Yes, empty DB | `DATABASE_PUBLIC_URL` | PASSED |
+| backend | `npm test` | `node --test --test-concurrency=1 'test/*.test.js'` | **Yes, with real loaded data** | `TEST_DATABASE_URL` (falls back to `DATABASE_URL`); `JWT_SECRET` is generated if unset | 21 pass / 44 fail / 3 skip (see below) |
+| worker | `npm test` | `node --test --test-concurrency=1 'test/*.test.js'` | Optional | `WORKER_TEST_DATABASE_URL` | without it: 17 pass, 6 skip. With it: 23 pass, 0 skip |
+| frontend | `npm test` | `vitest run` (jsdom) | No | none (`fetch` mocked) | 32/32 pass |
+
+Details:
+
+- **No test needs an API key or makes a real external call.** Backend
+  `/ask` tests inject a fake LLM; the worker's Highlightly / Odds API
+  clients read recorded fixtures (`worker/test/fixtures/`); root and
+  frontend tests stub `fetch`. Redis is never used in tests (in-memory
+  cache from `backend/test/helpers.js`).
+- **Backend tests need a database with the real NBA.com data loaded**
+  (at least 2003-04 and 2019-20 plus the seed: 30 teams, LeBron James,
+  Ja Morant, the 2003-10-30 Tokyo game). They pin published NBA.com
+  numbers, so an empty schema is not enough: `ask`, `props` and `query`
+  files fail in their `before` hook (`playerId` throws), `browse` and one
+  `auth` test expect 30 teams. Files that pass on an empty schema:
+  `league`, `names`, `rankings` (3 data tests skip themselves),
+  `ratelimit`. The backend does not apply the schema itself.
+  The tests write and then delete `test_*` users and API keys in whatever
+  database they point at. **Not determined:** which database JD normally
+  uses for `TEST_DATABASE_URL` (README leaves it as `...`).
+- **Worker DB tests** (`sync.test.js`, `players.test.js`) run only when
+  `WORKER_TEST_DATABASE_URL` has host `localhost`/`127.0.0.1` and a
+  database name containing `test`, because they `DROP SCHEMA public
+  CASCADE` and re-apply `db/schema.sql` themselves. Do not point them at
+  the backend's test database.
+- **Fixed (M1, T1):** `worker/test/players.test.js` used to insert a
+  `final` game without scores, which `games_check6` (`db/schema.sql:152`)
+  rejects. It only showed when `WORKER_TEST_DATABASE_URL` was set. The
+  fixture now sets `home_score`/`away_score`. The fixture's stat rows
+  also moved from HOU to MEM: with HOU rows the player landed in the
+  team pool and matched `name+team+date`, so the `name+recent_inactive`
+  path (f0e6dd3) was never exercised.
+- **Model eval** (`cd backend && npm run ask:eval`) calls Claude for real
+  and needs `ANTHROPIC_API_KEY`. It is not part of `npm test`.
+- **No lint or formatter** is configured in any package.
+- **CI:** `.github/workflows/test.yml` runs on every pull request and on
+  push to `main` (plan: `docs/plans/M1-ci-test-workflow.md`). Four
+  parallel jobs on Node 22.x, no secrets, no lint: `root` and `frontend`
+  (no DB); `worker` (postgres:18 service, 23 tests, none skipped); and
+  `backend`, which runs `npm run db:apply` (schema + constraint tests)
+  and then only `league`, `names`, `rankings` and `ratelimit` tests.
+  **What CI does not cover (decision D1 = A):** the backend `auth`,
+  `browse`, `query`, `props` and `ask` tests and the NBA.com number checks
+  need real loaded data, which CI cannot fetch. They still run only
+  locally. A committed data fixture is proposed as M2. The backend file
+  list in the workflow is explicit: add new backend test files to it.

@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import {
   loadConfig, dumpName, DUMP_RE, PARTIAL_RE, selectForDeletion, parseTunnelOutput, hasUrlToken,
   redact, buildPgEnv, isMountPoint, assertSafeBackupDir, prodGuard,
+  timeMachineDevices,
 } from './lib/backup.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -126,7 +127,23 @@ function canConnect(port) {
   });
 }
 
-function takeLock() {
+// A SIGKILLed run leaves its tunnel (own process group) alive. Its PGID is kept
+// in the lock dir; a later run kills that group, but only if the group leader
+// still looks like `railway connect ... --tunnel-only`.
+async function reapStaleTunnel() {
+  let pgid = 0;
+  try { pgid = Number(fs.readFileSync(path.join(cfg.lockDir, 'tunnel.pgid'), 'utf8')); } catch { return false; }
+  if (!(pgid > 1) || pgid === process.pid || !groupAlive(pgid)) return false;
+  const r = spawnSync('/bin/ps', ['-p', String(pgid), '-o', 'command='], { encoding: 'utf8' });
+  const cmd = r.status === 0 ? r.stdout : '';
+  if (!/railway/i.test(cmd) || !/\bconnect\b/.test(cmd) || !/--tunnel-only/.test(cmd)) return false;
+  try { process.kill(-pgid, 'SIGTERM'); } catch { return false; }
+  for (let i = 0; i < 50 && groupAlive(pgid); i++) await sleep(100);
+  if (groupAlive(pgid)) { try { process.kill(-pgid, 'SIGKILL'); } catch { /* gone */ } }
+  return true;
+}
+
+async function takeLock() {
   fs.mkdirSync(path.dirname(cfg.lockDir), { recursive: true, mode: 0o700 });
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -141,6 +158,7 @@ function takeLock() {
       let alive = false;
       if (pid > 0) { try { process.kill(pid, 0); alive = true; } catch (er) { alive = er.code === 'EPERM'; } }
       if (alive) throw new Fail('preflight', 'another backup is running');
+      if (await reapStaleTunnel()) logLine(`${iso()} NOTE reaped an orphaned tunnel left by a crashed run`);
       fs.rmSync(cfg.lockDir, { recursive: true, force: true }); // stale
     }
   }
@@ -161,21 +179,22 @@ async function preflight() {
 
   // 1. Drive: real mount point, safe path. Nothing touches the network before this.
   let dir;
+  const tmDevs = timeMachineDevices();
   try {
     if (!isMountPoint(cfg.volume)) throw new Error('not a mount point');
   } catch { throw new Fail('preflight', `volume ${cfg.volume} is not mounted`); }
   try {
-    ({ dir } = assertSafeBackupDir(cfg.dir, cfg.volume, { repoRoot: REPO_ROOT }));
+    ({ dir } = assertSafeBackupDir(cfg.dir, cfg.volume, { repoRoot: REPO_ROOT, denyDevices: tmDevs }));
   } catch (e) { throw new Fail('preflight', e.message); }
   try {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     if (!isMountPoint(cfg.volume)) throw new Error('unmounted');
-    assertSafeBackupDir(dir, cfg.volume, { repoRoot: REPO_ROOT }); // re-check after creation
+    assertSafeBackupDir(dir, cfg.volume, { repoRoot: REPO_ROOT, denyDevices: tmDevs }); // re-check after creation
     fs.accessSync(dir, fs.constants.W_OK);
   } catch { throw new Fail('preflight', `cannot write to ${cfg.dir}`); }
   cfg.realDir = dir;
 
-  takeLock();
+  await takeLock();
   for (const n of fs.readdirSync(dir)) if (PARTIAL_RE.test(n)) fs.rmSync(path.join(dir, n), { force: true });
 
   // 2. Client tools.
@@ -206,6 +225,7 @@ async function openTunnel() {
   const spawnErr = new Promise((r) => child.once('error', () => r(true)));
   if (!child.pid) { await spawnErr; throw new Fail('tunnel', 'could not start railway CLI'); }
   tunnel = { child, pid: child.pid };
+  try { fs.writeFileSync(path.join(cfg.lockDir, 'tunnel.pgid'), String(child.pid)); } catch { /* best effort */ }
 
   const deadline = Date.now() + cfg.tunnelTimeoutS * 1000;
   let creds = null;

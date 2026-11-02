@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   loadConfig, dumpName, DUMP_RE, selectForDeletion, parseTunnelOutput, hasUrlToken,
-  redact, buildPgEnv, assertSafeBackupDir, isMountPoint, prodGuard,
+  redact, buildPgEnv, assertSafeBackupDir, isMountPoint, prodGuard, timeMachineDevices,
 } from './backup.mjs';
 
 // Fake password with the characters that need percent-encoding in a URL.
@@ -144,23 +144,60 @@ test('isMountPoint is false for a plain subdirectory', () => {
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
 
-test('prodGuard: real CLI needs BACKUP_CONFIRM_PROD=1 exactly; a non-railway test binary does not', () => {
-  const msg = 'production run not confirmed (set BACKUP_CONFIRM_PROD=1)';
-  assert.equal(prodGuard({}), msg);
-  assert.equal(prodGuard({ BACKUP_RAILWAY_BIN: '' }), msg);
-  for (const v of ['0', 'true', 'yes', '', ' 1', '11']) assert.equal(prodGuard({ BACKUP_CONFIRM_PROD: v }), msg, v);
+const FAKE_BIN = path.resolve(new URL('../fixtures/fake-railway.sh', import.meta.url).pathname);
+const GUARD_MSG = 'production run not confirmed (set BACKUP_CONFIRM_PROD=1)';
+
+test('prodGuard: the flag must be exactly 1', () => {
+  assert.equal(prodGuard({}), GUARD_MSG);
+  assert.equal(prodGuard({ BACKUP_RAILWAY_BIN: '' }), GUARD_MSG);
+  for (const v of ['0', 'true', 'yes', '', ' 1', '11']) assert.equal(prodGuard({ BACKUP_CONFIRM_PROD: v }), GUARD_MSG, v);
   assert.equal(prodGuard({ BACKUP_CONFIRM_PROD: '1' }), null);
-  // pointing the seam at something called railway is still the real CLI
-  assert.equal(prodGuard({ BACKUP_RAILWAY_BIN: '/opt/homebrew/bin/railway' }), msg);
   assert.equal(prodGuard({ BACKUP_RAILWAY_BIN: '/opt/homebrew/bin/railway', BACKUP_CONFIRM_PROD: '1' }), null);
-  assert.equal(prodGuard({ BACKUP_RAILWAY_BIN: '/x/fake-railway.sh' }), null);
 });
 
-test('prodGuard: a differently named symlink to a binary called railway is still guarded', () => {
+test('prodGuard: only the repo fake-railway.sh (by realpath) is exempt', () => {
+  assert.equal(prodGuard({ BACKUP_RAILWAY_BIN: FAKE_BIN }), null);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bkg-'));
   try {
-    fs.writeFileSync(path.join(tmp, 'railway'), '');
-    fs.symlinkSync(path.join(tmp, 'railway'), path.join(tmp, 'harmless'));
-    assert.match(prodGuard({ BACKUP_RAILWAY_BIN: path.join(tmp, 'harmless') }), /not confirmed/);
+    const ln = path.join(tmp, 'link-to-fake'); fs.symlinkSync(FAKE_BIN, ln);
+    assert.equal(prodGuard({ BACKUP_RAILWAY_BIN: ln }), null); // resolves to the fixture
+    // everything else needs the flag: copy, hard link, wrapper, other names, real-looking names, missing file
+    const copy = path.join(tmp, 'fake-railway.sh'); fs.copyFileSync(FAKE_BIN, copy);
+    const hard = path.join(tmp, 'hard'); fs.linkSync(copy, hard);
+    const wrap = path.join(tmp, 'wrapper'); fs.writeFileSync(wrap, '#!/bin/sh\nexec railway "$@"\n', { mode: 0o755 });
+    const rail = path.join(tmp, 'railway'); fs.writeFileSync(rail, '');
+    const sym = path.join(tmp, 'harmless'); fs.symlinkSync(rail, sym);
+    for (const b of [copy, hard, wrap, rail, sym, path.join(tmp, 'Railway'), path.join(tmp, 'RAILWAY'), path.join(tmp, 'missing'), '/opt/homebrew/bin/railway', '/bin/sh']) {
+      assert.equal(prodGuard({ BACKUP_RAILWAY_BIN: b }), GUARD_MSG, b);
+    }
+    // a different repoRoot has a different fixture
+    assert.equal(prodGuard({ BACKUP_RAILWAY_BIN: FAKE_BIN }, { repoRoot: tmp }), GUARD_MSG);
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('assertSafeBackupDir: /System/Volumes/Data firmlink spelling of TM-Prism is denied, any case', () => {
+  for (const p of ['/System/Volumes/Data/Volumes/TM-Prism/db-backups', '/system/volumes/data/volumes/tm-prism', '/SYSTEM/VOLUMES/DATA/VOLUMES/TM-PRISM/x']) {
+    assert.throws(() => assertSafeBackupDir(p, p), /Time Machine/, p);
+  }
+  assert.throws(() => assertSafeBackupDir('/Volumes/DB-Backups/x', '/System/Volumes/Data/Volumes/TM-Prism'), /Time Machine/);
+});
+
+test('assertSafeBackupDir: denies by device of a Time Machine destination (renamed volume)', () => {
+  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bkd-')));
+  try {
+    const vol = path.join(tmp, 'vol'); fs.mkdirSync(vol);
+    const dev = fs.statSync(vol).dev;
+    assert.throws(() => assertSafeBackupDir(path.join(vol, 'db'), vol, { denyDevices: new Set([dev]) }), /Time Machine device/);
+    assert.doesNotThrow(() => assertSafeBackupDir(path.join(vol, 'db'), vol, { denyDevices: new Set([dev + 1]) }));
+    assert.doesNotThrow(() => assertSafeBackupDir(path.join(vol, 'db'), vol, { denyDevices: new Set() }));
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('timeMachineDevices reads tmutil mount points by stat only', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bkt2-'));
+  try {
+    const run = () => ({ stdout: `Name : X\nMount Point : ${tmp}\nID : 1\n` });
+    assert.ok(timeMachineDevices(run).has(fs.statSync(tmp).dev));
+    assert.doesNotThrow(() => timeMachineDevices(() => { throw new Error('no tmutil'); }));
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });

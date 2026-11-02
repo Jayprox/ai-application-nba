@@ -21,13 +21,13 @@ production database, plus how to restore them.
 `BACKUP_CONFIRM_PROD=1 npm run db:backup` (or daily 03:17 via launchd, whose
 plist sets the flag; `ops/launchd/README.md`):
 
-0. **Production guard.** Using the real Railway CLI requires
+0. **Production guard.** Anything but the repo's own test fake needs
    `BACKUP_CONFIRM_PROD=1` (exactly `1`). The only exemption is
-   `BACKUP_RAILWAY_BIN` pointing at an executable not named `railway` (the
-   drill's fake; symlinks are resolved). Otherwise the run stops with
+   `BACKUP_RAILWAY_BIN` resolving (realpath) to `scripts/fixtures/fake-railway.sh`.
+   Unset, a binary named `railway` or `Railway`, copies, hard links and wrapper
+   scripts are all treated as the real CLI. Without the flag the run stops with
    `FAIL stage=preflight reason="production run not confirmed (set BACKUP_CONFIRM_PROD=1)"`
-   before any CLI call. A bare `npm run db:backup` therefore can't reach production.
-
+   before any CLI call, so a bare `npm run db:backup` can't reach production.
 1. Checks the drive is a real mount point and the path is safe. If not: `FAIL stage=preflight`, and Railway is never contacted.
 2. Checks `pg_dump` is version 18+ (Homebrew libpq), the Railway CLI is logged in, and the local tunnel port (default 55432) is free.
 3. Starts `railway connect Postgres --tunnel-only -P 55432 -e production`
@@ -80,15 +80,23 @@ Always restore into a **new** database first.
 
 ```
 # (a) list what is in a dump
-/opt/homebrew/opt/libpq/bin/pg_restore --list /Volumes/DB-Backups/db-backups/chalk-that-nba_<stamp>.dump | head
+export PGBIN=/opt/homebrew/opt/libpq/bin
+DUMP=/Volumes/DB-Backups/db-backups/chalk-that-nba_<stamp>.dump    # pick a real file
+$PGBIN/pg_restore --list "$DUMP" | head
+```
 
-# (b) restore into a throwaway local server (password via env, not argv)
-docker run -d --name restore-test -e POSTGRES_PASSWORD -p 127.0.0.1:55433:5432 postgres:18   # export POSTGRES_PASSWORD first
+```
+# (b) restore into a throwaway local server (password via env, never on a command line)
+export POSTGRES_PASSWORD="$(openssl rand -hex 16)"
 export PGPASSWORD="$POSTGRES_PASSWORD"
-/opt/homebrew/opt/libpq/bin/createdb -h 127.0.0.1 -p 55433 -U postgres restored
-/opt/homebrew/opt/libpq/bin/pg_restore --no-owner --no-acl -h 127.0.0.1 -p 55433 -U postgres -d restored <dump>
-DATABASE_PUBLIC_URL=postgres://postgres:$PGPASSWORD@127.0.0.1:55433/restored npm run db:test   # constraints came back
-docker rm -fv restore-test
+docker run -d --rm --name restore-test -e POSTGRES_PASSWORD -p 127.0.0.1:55433:5432 postgres:18
+until $PGBIN/pg_isready -q -h 127.0.0.1 -p 55433; do sleep 1; done; sleep 3   # first start restarts once
+$PGBIN/createdb -h 127.0.0.1 -p 55433 -U postgres restored
+$PGBIN/pg_restore --no-owner --no-acl -h 127.0.0.1 -p 55433 -U postgres -d restored "$DUMP"
+# constraints came back (from the repo root):
+DATABASE_PUBLIC_URL="postgres://postgres:$PGPASSWORD@127.0.0.1:55433/restored" npm run db:test
+docker stop restore-test            # --rm removes the container
+unset POSTGRES_PASSWORD PGPASSWORD
 ```
 
 `npm run db:backup:drill` does exactly this end to end against two throwaway
@@ -101,6 +109,23 @@ path: restore into a new Railway Postgres service through its own
 `--clean` into the live database without owner approval.
 
 A Railway Pro plan upgrade adds native volume backups (daily/weekly/monthly) and point-in-time recovery; they are deleted with the volume, so this off-platform dump stays useful.
+
+## If a run was killed hard (SIGKILL, power loss)
+
+A normal exit, any failure, a timeout and SIGINT/SIGTERM/SIGHUP all stop the
+tunnel. A SIGKILL can't be handled, so the tunnel (an authenticated forward to
+the production database on `127.0.0.1:55432`) may stay alive. The script
+records the tunnel's process group in `backup.lock/tunnel.pgid` next to the log;
+the next run finds the dead PID's stale lock and, if that group's leader is still
+a `railway connect ... --tunnel-only` process, kills it and logs
+`NOTE reaped an orphaned tunnel`. To clean up by hand:
+
+```
+pgrep -fl 'railway connect'      # look for a leftover tunnel
+pkill -f 'railway connect'       # then kill it (only if you are sure it is ours)
+```
+
+Runs fail with `tunnel port 55432 is already in use` while one is left over.
 
 ## Setup on a Mac
 

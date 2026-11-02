@@ -35,8 +35,10 @@ DB="${FAKE_RAILWAY_DB:-railway}"
   echo "Press Ctrl+C to close the tunnel."
   echo
 } >&2
-# Forward 127.0.0.1:PORT -> 127.0.0.1:TARGET (exec keeps this PID, so SIGTERM kills it).
-exec node -e '
+# Forward 127.0.0.1:PORT -> 127.0.0.1:TARGET. No exec: this sh stays the group leader
+# with `connect ... --tunnel-only` in its argv, like the real CLI, so the
+# stale-tunnel reaper can recognise it. A group kill takes the node child too.
+node -e '
 const net = require("net");
 const [lp, tp] = process.argv.slice(1).map(Number);
 net.createServer((c) => {
@@ -44,4 +46,6 @@ net.createServer((c) => {
   c.pipe(t); t.pipe(c);
   c.on("error", () => t.destroy()); t.on("error", () => c.destroy());
 }).listen(lp, "127.0.0.1");
-' "$PORT" "$FAKE_RAILWAY_TARGET_PORT"
+' "$PORT" "$FAKE_RAILWAY_TARGET_PORT" &
+trap 'kill $! 2>/dev/null; exit 143' TERM INT HUP
+wait

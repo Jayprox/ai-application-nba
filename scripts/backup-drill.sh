@@ -73,7 +73,35 @@ hdiutil create -size 64m -fs APFS -volname DRILL $WORK/drive.dmg >/dev/null 2>&1
 BENV=(BACKUP_VOLUME=$VOL BACKUP_DIR=$DIR BACKUP_LOG=$LOG BACKUP_RAILWAY_BIN=$FAKE BACKUP_TUNNEL_PORT=$TP
   BACKUP_NOTIFY=0 FAKE_RAILWAY_PASSWORD=$PW FAKE_RAILWAY_USER=postgres FAKE_RAILWAY_DB=backup_test
   FAKE_RAILWAY_TARGET_PORT=$SP FAKE_RAILWAY_PIDFILE=$WORK/fake.pid)
-run_backup() { env $BENV "$@" node scripts/backup-db.mjs; }
+
+# ---- Safety: the real railway CLI must be unreachable in EVERY case ----------
+# build_env [--no-bin] [VAR=val ...] fills LE (the complete env assignments for
+# one script run) and aborts the whole drill unless the railway the run could
+# reach is a verified fake and the production flag is never combined with a PATH
+# lookup. Every launch of backup-db.mjs goes through it.
+SHADOW=$WORK/shadow; mkdir -p $SHADOW
+printf '#!/bin/sh\n# chalk-drill-shadow\necho invoked >> %s/shadow.calls\nexit 1\n' $WORK > $SHADOW/railway
+chmod +x $SHADOW/railway
+abort_unsafe() { print "ABORT  unsafe drill configuration ($1); nothing was run"; exit 99; }
+[[ ${FAKE:A} == ${REPO:A}/scripts/fixtures/fake-railway.sh ]] || abort_unsafe "fake path"
+grep -q chalk-drill-shadow $SHADOW/railway && [[ -x $SHADOW/railway ]] || abort_unsafe "shadow not created"
+[[ "$(PATH=$SHADOW:$PATH /usr/bin/which railway)" == $SHADOW/railway ]] || abort_unsafe "shadow does not win the PATH lookup"
+LE=()
+build_env() {
+  local nobin=0 a bin="" flag=""
+  [[ $1 == --no-bin ]] && { nobin=1; shift; }
+  LE=($BENV); (( nobin )) && LE=(${LE:#BACKUP_RAILWAY_BIN=*})
+  LE+=("$@")
+  for a in $LE; do case $a in BACKUP_RAILWAY_BIN=*) bin=${a#*=};; BACKUP_CONFIRM_PROD=*) flag=${a#*=};; esac; done
+  if [[ -z $bin ]]; then
+    [[ $flag == 1 ]] && abort_unsafe "production flag with a PATH-resolved railway"
+    [[ "$(PATH=$SHADOW:$PATH /usr/bin/which railway)" == $SHADOW/railway ]] || abort_unsafe "shadow lost the PATH lookup"
+    LE+=(PATH=$SHADOW:$PATH)
+  else
+    [[ -x $bin && ( ${bin:A} == ${FAKE:A} || ${bin:A} == ${SHADOW:A}/railway ) ]] || abort_unsafe "BACKUP_RAILWAY_BIN is not a verified fake"
+  fi
+}
+run_backup() { build_env "$@"; env $LE node scripts/backup-db.mjs; }
 OUTN=0
 run_case() { OUTN=$((OUTN+1)); rm -f $WORK/fake.pid; run_backup "$@" >$WORK/out.$OUTN 2>$WORK/err.$OUTN; RC=$?; }
 last_log() { tail -1 $LOG 2>/dev/null; }
@@ -172,17 +200,17 @@ expect_fail "wrong password" dump FAKE_RAILWAY_PASSWORD=$WRONG
 expect_fail "database without teams table" validate FAKE_RAILWAY_DB=empty_test
 secret_scan "all failure-case logs/output" $LOG $WORK/out.* $WORK/err.*
 
-print "== Production guard (PATH-shadowed fake named railway; the real CLI is never reachable) =="
-SHADOW=$WORK/shadow; mkdir -p $SHADOW
-printf '#!/bin/sh\necho invoked >> %s/shadow.calls\nexit 1\n' $WORK > $SHADOW/railway; chmod +x $SHADOW/railway
-guard_run() { rm -f $WORK/shadow.calls $WORK/fake.pid; OUTN=$((OUTN+1)); env ${BENV:#BACKUP_RAILWAY_BIN=*} PATH=$SHADOW:$PATH "$@" node scripts/backup-db.mjs >$WORK/out.$OUTN 2>$WORK/err.$OUTN; RC=$?; }
-guard_run
+print "== Production guard (verified shadow named railway; the real CLI is never reachable) =="
+guard_run() { local nb=(); [[ $1 == --no-bin ]] && { nb=(--no-bin); shift; }; rm -f $WORK/shadow.calls $WORK/fake.pid; OUTN=$((OUTN+1)); build_env $nb "$@"; env $LE node scripts/backup-db.mjs >$WORK/out.$OUTN 2>$WORK/err.$OUTN; RC=$?; }
+guard_run --no-bin
 [[ $RC -eq 1 && $(last_log) == *'FAIL stage=preflight reason="production run not confirmed (set BACKUP_CONFIRM_PROD=1)"'* ]] && pass "no flag, real-binary path -> refused" || fail "no flag refused (rc=$RC $(last_log))"
 [[ ! -e $WORK/shadow.calls && ! -f $WORK/fake.pid ]] && pass "no flag: railway never invoked, tunnel never started" || fail "no flag: railway was invoked"
-guard_run BACKUP_CONFIRM_PROD=true
+guard_run --no-bin BACKUP_CONFIRM_PROD=true
 [[ $RC -eq 1 && $(last_log) == *"production run not confirmed"* && ! -e $WORK/shadow.calls ]] && pass "BACKUP_CONFIRM_PROD=true (not 1) -> refused, railway not invoked" || fail "CONFIRM_PROD=true not refused"
-guard_run BACKUP_CONFIRM_PROD=1
-[[ -e $WORK/shadow.calls && $(last_log) == *"railway CLI not logged in"* ]] && pass "with flag the guard lets the (shadow) CLI be called" || fail "flag did not unlock: $(last_log)"
+guard_run BACKUP_RAILWAY_BIN=$SHADOW/railway
+[[ $RC -eq 1 && $(last_log) == *"production run not confirmed"* && ! -e $WORK/shadow.calls ]] && pass "binary named railway by absolute path, no flag -> refused" || fail "named-railway bin not refused"
+guard_run BACKUP_RAILWAY_BIN=$SHADOW/railway BACKUP_CONFIRM_PROD=1
+[[ -e $WORK/shadow.calls && $(last_log) == *"railway CLI not logged in"* ]] && pass "with flag (absolute verified shadow) the guard lets the CLI be called" || fail "flag did not unlock: $(last_log)"
 [[ "$(dumps)" == "$BEFORE" ]] && pass "guard cases: dumps unchanged" || fail "guard cases changed dumps"
 
 print "== SIGTERM during dump =="
@@ -190,7 +218,7 @@ rm -f $WORK/fake.pid
 ( DBN=backup_test psql_src -c "BEGIN; LOCK TABLE teams IN ACCESS EXCLUSIVE MODE; SELECT pg_sleep(60);" >/dev/null 2>&1 ) & LOCKPID=$!
 sleep 1.5
 OUTN=$((OUTN+1))
-env $BENV node scripts/backup-db.mjs >$WORK/out.$OUTN 2>$WORK/err.$OUTN & BPID=$!
+build_env; env $LE node scripts/backup-db.mjs >$WORK/out.$OUTN 2>$WORK/err.$OUTN & BPID=$!
 for i in {1..100}; do pgrep -f "pg_dump -h 127.0.0.1 -p $TP" >/dev/null && break; sleep 0.2; done
 pgrep -f "pg_dump -h 127.0.0.1 -p $TP" >/dev/null && pass "pg_dump is running (blocked on lock)" || fail "pg_dump never started"
 kill -TERM $BPID
@@ -205,6 +233,28 @@ no_partial && pass "SIGTERM: no .partial" || fail "SIGTERM: .partial left"
 kill $LOCKPID 2>/dev/null; LOCKPID=""
 DBN=postgres psql_src -c "select pg_terminate_backend(pid) from pg_stat_activity where query like '%pg_sleep(60)%' and pid <> pg_backend_pid()" >/dev/null 2>&1
 secret_scan "SIGTERM-case output" $LOG $WORK/out.$OUTN $WORK/err.$OUTN
+
+print "== SIGKILL of the script orphans the tunnel; the next run reaps it =="
+rm -f $WORK/fake.pid
+( DBN=backup_test psql_src -c "BEGIN; LOCK TABLE teams IN ACCESS EXCLUSIVE MODE; SELECT pg_sleep(60);" >/dev/null 2>&1 ) & LOCKPID=$!
+sleep 1.5
+OUTN=$((OUTN+1))
+build_env; env $LE node scripts/backup-db.mjs >$WORK/out.$OUTN 2>$WORK/err.$OUTN & BPID=$!
+for i in {1..100}; do pgrep -f "pg_dump -h 127.0.0.1 -p $TP" >/dev/null && break; sleep 0.2; done
+kill -KILL $BPID; wait $BPID 2>/dev/null
+OLDFAKE=$(cat $WORK/fake.pid 2>/dev/null)
+pkill -f "pg_dump -h 127.0.0.1 -p $TP" 2>/dev/null
+[[ -n $OLDFAKE ]] && kill -0 $OLDFAKE 2>/dev/null && pass "SIGKILL: tunnel is orphaned (expected: the script cannot clean up)" || fail "SIGKILL: tunnel not alive after kill -9"
+[[ -s $WORK/backup.lock/tunnel.pgid ]] && pass "tunnel PGID recorded in the lock dir" || fail "no tunnel.pgid in lock dir"
+kill $LOCKPID 2>/dev/null; LOCKPID=""
+DBN=postgres psql_src -c "select pg_terminate_backend(pid) from pg_stat_activity where query like '%pg_sleep(60)%' and pid <> pg_backend_pid()" >/dev/null 2>&1
+BEFORE2=$(dumps)
+run_case
+[[ $RC -eq 0 ]] && pass "next run succeeds (stale lock + orphan tunnel reaped)" || fail "next run rc=$RC $(last_log)"
+! kill -0 $OLDFAKE 2>/dev/null && pass "orphaned tunnel was killed by the next run" || { fail "orphaned tunnel still alive"; kill $OLDFAKE 2>/dev/null; }
+grep -q "NOTE reaped an orphaned tunnel" $LOG && pass "reap noted in the log" || fail "reap not logged"
+no_partial && pass "stale .partial gone" || fail "stale .partial left"
+secret_scan "SIGKILL-case output" $LOG $WORK/out.$OUTN $WORK/err.$OUTN
 secret_scan "ps argv samples (final)" $WORK/ps.txt
 
 print "== Summary: $PASS passed, $FAILN failed =="

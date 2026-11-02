@@ -5,6 +5,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 
 export const DUMP_PREFIX = 'chalk-that-nba_';
 export const DUMP_RE = /^chalk-that-nba_\d{8}T\d{6}Z\.dump$/;
@@ -111,22 +113,41 @@ export function buildPgEnv(password, base = process.env) {
   };
 }
 
-// Production guard (fix cycle 1 after the M3 incident). Returns null when the
-// run may proceed, else a fixed reason string. Rule, fail-closed: the run is
-// "test mode" only when BACKUP_RAILWAY_BIN is set to an executable whose name
-// (and whose symlink target's name) is not `railway`. Anything else (unset,
-// empty, or pointing at a binary called `railway`) targets the real CLI and
-// needs BACKUP_CONFIRM_PROD to be exactly "1".
-export function prodGuard(env = process.env) {
+const LIB_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+export const FAKE_RAILWAY_REL = 'scripts/fixtures/fake-railway.sh';
+
+// Production guard (M3 fix cycles 1-2, after the disclosed incident). Returns
+// null when the run may proceed, else a fixed reason string. Allow-list,
+// fail-closed: the run is exempt ONLY when BACKUP_RAILWAY_BIN resolves (realpath)
+// to this repo's own scripts/fixtures/fake-railway.sh. Everything else (unset,
+// empty, a binary called railway/Railway, copies, hard links, wrappers, a
+// missing file) needs BACKUP_CONFIRM_PROD to be exactly "1". The drill's
+// PATH-shadow cases need no exemption: the no-flag cases are refused before any
+// lookup, and the flag=1 case points BACKUP_RAILWAY_BIN at a verified shadow.
+export function prodGuard(env = process.env, { repoRoot = LIB_REPO_ROOT } = {}) {
+  if (env.BACKUP_CONFIRM_PROD === '1') return null;
   const bin = env.BACKUP_RAILWAY_BIN || '';
-  let testBin = false;
   if (bin) {
-    let real = bin;
-    try { real = fs.realpathSync(bin); } catch { /* keep the given name */ }
-    testBin = path.basename(bin) !== 'railway' && path.basename(real) !== 'railway';
+    try {
+      const real = fs.realpathSync.native(bin);
+      const fake = fs.realpathSync.native(path.join(repoRoot, FAKE_RAILWAY_REL));
+      if (real === fake) return null;
+    } catch { /* missing or unresolvable: not exempt */ }
   }
-  if (testBin || env.BACKUP_CONFIRM_PROD === '1') return null;
   return 'production run not confirmed (set BACKUP_CONFIRM_PROD=1)';
+}
+
+// Devices of any Time Machine destination mount point (stat of the mount point
+// only; nothing is listed, read or written inside it).
+export function timeMachineDevices(run = spawnSync) {
+  const cands = new Set(['/Volumes/TM-Prism', '/System/Volumes/Data/Volumes/TM-Prism']);
+  try {
+    const r = run('/usr/bin/tmutil', ['destinationinfo'], { encoding: 'utf8', timeout: 10000 });
+    for (const m of String(r.stdout || '').matchAll(/Mount Point\s*:\s*(.+)/g)) cands.add(m[1].trim());
+  } catch { /* tmutil unavailable */ }
+  const devs = new Set();
+  for (const c of cands) { try { devs.add(fs.statSync(c).dev); } catch { /* not mounted */ } }
+  return devs;
 }
 
 export function isMountPoint(p, statFn = fs.statSync) {
@@ -159,14 +180,18 @@ export function realpathLoose(p, depth = 0) {
 }
 
 const within = (child, parent) => child === parent || child.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep);
-const deniedPath = (p) => within(p.toLowerCase(), DENIED_VOLUME);
+// /System/Volumes/Data/Volumes/X is the same place as /Volumes/X (firmlink).
+const normDeny = (p) => p.toLowerCase().replace(/^\/system\/volumes\/data(?=\/|$)/, '');
+const deniedPath = (p) => within(normDeny(p), DENIED_VOLUME);
+const nearestDev = (p) => { let c = p; for (;;) { try { return fs.statSync(c).dev; } catch { const n = path.dirname(c); if (n === c) return null; c = n; } } };
 
 // Throws Error (fixed message) unless `dir` is safe to write backups into.
-export function assertSafeBackupDir(dir, volume, { repoRoot } = {}) {
+export function assertSafeBackupDir(dir, volume, { repoRoot, denyDevices } = {}) {
   if (deniedPath(path.resolve(dir)) || deniedPath(path.resolve(volume))) throw new Error('backup path is under the Time Machine volume');
   const rVol = realpathLoose(volume);
   const rDir = realpathLoose(dir);
   if (deniedPath(rDir) || deniedPath(rVol)) throw new Error('backup path resolves under the Time Machine volume');
+  if (denyDevices && denyDevices.size && (denyDevices.has(nearestDev(rDir)) || denyDevices.has(nearestDev(rVol)))) throw new Error('backup path is on the Time Machine device');
   if (!within(rDir, rVol)) throw new Error('backup dir is outside the backup volume');
   if (repoRoot && within(rDir, realpathLoose(repoRoot))) throw new Error('backup dir is inside the repository');
   return { dir: rDir, volume: rVol };

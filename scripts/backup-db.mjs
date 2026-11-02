@@ -166,7 +166,11 @@ async function takeLock() {
 }
 
 function resolveRailway() {
-  if (cfg.railwayBin) return cfg.railwayBin;
+  // When set, run exactly the file the guard approved (its realpath), for both
+  // `whoami` and `connect`. Unset (production) is unchanged.
+  if (cfg.railwayBin) {
+    try { return fs.realpathSync(cfg.railwayBin); } catch { throw new Fail('preflight', 'BACKUP_RAILWAY_BIN not found'); }
+  }
   const r = spawnSync('/usr/bin/which', ['railway'], { encoding: 'utf8' });
   const p = r.status === 0 ? r.stdout.trim() : '';
   return p || '/opt/homebrew/bin/railway';

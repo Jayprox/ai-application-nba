@@ -101,7 +101,13 @@ build_env() {
     [[ -x $bin && ( ${bin:A} == ${FAKE:A} || ${bin:A} == ${SHADOW:A}/railway ) ]] || abort_unsafe "BACKUP_RAILWAY_BIN is not a verified fake"
   fi
 }
-run_backup() { build_env "$@"; env $LE node scripts/backup-db.mjs; }
+# The only way the drill launches the script: a scrubbed env (no inherited BACKUP_*,
+# PG*, DATABASE_*, RAILWAY_*), plus exactly the vetted assignments in LE.
+LAUNCH=(env -i HOME=$HOME PATH=$PATH TMPDIR=${TMPDIR:-/tmp} LANG=${LANG:-en_US.UTF-8})
+launch_node() { $LAUNCH $LE node scripts/backup-db.mjs; }
+# Background launches are written inline as `( exec $LAUNCH $LE node ... ) & BPID=$!` so $! is
+# node's own pid (a backgrounded function would add a subshell and signals would miss the script).
+run_backup() { build_env "$@"; launch_node; }
 OUTN=0
 run_case() { OUTN=$((OUTN+1)); rm -f $WORK/fake.pid; run_backup "$@" >$WORK/out.$OUTN 2>$WORK/err.$OUTN; RC=$?; }
 last_log() { tail -1 $LOG 2>/dev/null; }
@@ -201,12 +207,17 @@ expect_fail "database without teams table" validate FAKE_RAILWAY_DB=empty_test
 secret_scan "all failure-case logs/output" $LOG $WORK/out.* $WORK/err.*
 
 print "== Production guard (verified shadow named railway; the real CLI is never reachable) =="
-guard_run() { local nb=(); [[ $1 == --no-bin ]] && { nb=(--no-bin); shift; }; rm -f $WORK/shadow.calls $WORK/fake.pid; OUTN=$((OUTN+1)); build_env $nb "$@"; env $LE node scripts/backup-db.mjs >$WORK/out.$OUTN 2>$WORK/err.$OUTN; RC=$?; }
+guard_run() { local nb=(); [[ $1 == --no-bin ]] && { nb=(--no-bin); shift; }; rm -f $WORK/shadow.calls $WORK/fake.pid; OUTN=$((OUTN+1)); build_env $nb "$@"; launch_node >$WORK/out.$OUTN 2>$WORK/err.$OUTN; RC=$?; }
 guard_run --no-bin
 [[ $RC -eq 1 && $(last_log) == *'FAIL stage=preflight reason="production run not confirmed (set BACKUP_CONFIRM_PROD=1)"'* ]] && pass "no flag, real-binary path -> refused" || fail "no flag refused (rc=$RC $(last_log))"
 [[ ! -e $WORK/shadow.calls && ! -f $WORK/fake.pid ]] && pass "no flag: railway never invoked, tunnel never started" || fail "no flag: railway was invoked"
 guard_run --no-bin BACKUP_CONFIRM_PROD=true
 [[ $RC -eq 1 && $(last_log) == *"production run not confirmed"* && ! -e $WORK/shadow.calls ]] && pass "BACKUP_CONFIRM_PROD=true (not 1) -> refused, railway not invoked" || fail "CONFIRM_PROD=true not refused"
+# ambient BACKUP_* in the drill's own shell must not leak into a run (shadow only, never the real CLI)
+export BACKUP_RAILWAY_BIN=$SHADOW/railway BACKUP_CONFIRM_PROD=1
+guard_run --no-bin
+unset BACKUP_RAILWAY_BIN BACKUP_CONFIRM_PROD
+[[ $RC -eq 1 && $(last_log) == *"production run not confirmed"* && ! -e $WORK/shadow.calls ]] && pass "ambient BACKUP_RAILWAY_BIN + BACKUP_CONFIRM_PROD=1 in the caller's env are not inherited -> refused, shadow not invoked" || fail "ambient env leaked into a run (rc=$RC $(last_log))"
 guard_run BACKUP_RAILWAY_BIN=$SHADOW/railway
 [[ $RC -eq 1 && $(last_log) == *"production run not confirmed"* && ! -e $WORK/shadow.calls ]] && pass "binary named railway by absolute path, no flag -> refused" || fail "named-railway bin not refused"
 guard_run BACKUP_RAILWAY_BIN=$SHADOW/railway BACKUP_CONFIRM_PROD=1
@@ -218,7 +229,7 @@ rm -f $WORK/fake.pid
 ( DBN=backup_test psql_src -c "BEGIN; LOCK TABLE teams IN ACCESS EXCLUSIVE MODE; SELECT pg_sleep(60);" >/dev/null 2>&1 ) & LOCKPID=$!
 sleep 1.5
 OUTN=$((OUTN+1))
-build_env; env $LE node scripts/backup-db.mjs >$WORK/out.$OUTN 2>$WORK/err.$OUTN & BPID=$!
+build_env; ( exec $LAUNCH $LE node scripts/backup-db.mjs ) >$WORK/out.$OUTN 2>$WORK/err.$OUTN & BPID=$!
 for i in {1..100}; do pgrep -f "pg_dump -h 127.0.0.1 -p $TP" >/dev/null && break; sleep 0.2; done
 pgrep -f "pg_dump -h 127.0.0.1 -p $TP" >/dev/null && pass "pg_dump is running (blocked on lock)" || fail "pg_dump never started"
 kill -TERM $BPID
@@ -239,7 +250,7 @@ rm -f $WORK/fake.pid
 ( DBN=backup_test psql_src -c "BEGIN; LOCK TABLE teams IN ACCESS EXCLUSIVE MODE; SELECT pg_sleep(60);" >/dev/null 2>&1 ) & LOCKPID=$!
 sleep 1.5
 OUTN=$((OUTN+1))
-build_env; env $LE node scripts/backup-db.mjs >$WORK/out.$OUTN 2>$WORK/err.$OUTN & BPID=$!
+build_env; ( exec $LAUNCH $LE node scripts/backup-db.mjs ) >$WORK/out.$OUTN 2>$WORK/err.$OUTN & BPID=$!
 for i in {1..100}; do pgrep -f "pg_dump -h 127.0.0.1 -p $TP" >/dev/null && break; sleep 0.2; done
 kill -KILL $BPID; wait $BPID 2>/dev/null
 OLDFAKE=$(cat $WORK/fake.pid 2>/dev/null)

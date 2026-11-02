@@ -24,6 +24,7 @@ const intIn = (name, raw, dflt, min, max) => {
 
 export function loadConfig(env = process.env, { home = os.homedir() } = {}) {
   const volume = env.BACKUP_VOLUME || '/Volumes/DB-Backups';
+  if (env.BACKUP_RAILWAY_BIN && !path.isAbsolute(env.BACKUP_RAILWAY_BIN)) throw new Error('BACKUP_RAILWAY_BIN must be an absolute path');
   const logPath = env.BACKUP_LOG || path.join(home, 'Library/Logs/chalk-that-nba/backup.log');
   return {
     volume,

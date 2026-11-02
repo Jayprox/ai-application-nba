@@ -105,8 +105,9 @@ test('loadConfig defaults and validation', () => {
   assert.equal(c.dumpTimeoutS, 1800);
   assert.equal(c.pgBinDir, '/opt/homebrew/opt/libpq/bin');
   assert.equal(loadConfig({ BACKUP_VOLUME: '/v' }).dir, '/v/db-backups');
+  assert.equal(loadConfig({ BACKUP_RAILWAY_BIN: '/x/fake-railway.sh' }).railwayBin, '/x/fake-railway.sh');
   for (const bad of [{ BACKUP_KEEP: '0' }, { BACKUP_KEEP: 'x' }, { BACKUP_KEEP: '1.5' }, { BACKUP_TUNNEL_PORT: '80' },
-    { BACKUP_TUNNEL_PORT: '99999' }, { BACKUP_TUNNEL_PORT: 'abc' }, { BACKUP_DUMP_TIMEOUT_S: '0' }]) {
+    { BACKUP_TUNNEL_PORT: '99999' }, { BACKUP_RAILWAY_BIN: 'railway' }, { BACKUP_RAILWAY_BIN: './fake-railway.sh' }, { BACKUP_TUNNEL_PORT: 'abc' }, { BACKUP_DUMP_TIMEOUT_S: '0' }]) {
     assert.throws(() => loadConfig(bad), undefined, JSON.stringify(bad));
   }
 });

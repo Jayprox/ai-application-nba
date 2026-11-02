@@ -59,8 +59,8 @@ Press Ctrl+C to close the tunnel.
 (`~/Library/Logs/chalk-that-nba/backup.log`), `BACKUP_PG_SERVICE` (`Postgres`),
 `BACKUP_RAILWAY_ENV` (`production`), `BACKUP_TUNNEL_PORT` (55432),
 `BACKUP_TUNNEL_TIMEOUT_S` (60), `BACKUP_DUMP_TIMEOUT_S` (1800),
-`BACKUP_PG_BIN_DIR`, `BACKUP_RAILWAY_BIN` (test seam; the drill points it at a
-fake), `BACKUP_NOTIFY=0` (no macOS notification; the drill sets it), `BACKUP_CONFIRM_PROD=1` (required for real runs, see above).
+`BACKUP_PG_BIN_DIR`, `BACKUP_RAILWAY_BIN` (test seam; must be an absolute path, and the script
+runs its realpath, the file the guard approved; the drill points it at a fake), `BACKUP_NOTIFY=0` (no macOS notification; the drill sets it), `BACKUP_CONFIRM_PROD=1` (required for real runs, see above).
 
 ### Reading the log
 

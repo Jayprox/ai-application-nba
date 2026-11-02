@@ -56,3 +56,25 @@ PA skipped: requirements are concrete and owner-specified.
 
 ### Blockers
 - (none)
+
+## Mission M2-fix: redact Railway Postgres proxy host from docs (2026-11-01)
+**Mission:** Replace the real Railway public proxy host:port at `docs/architecture.md:698` with `<railway-public-host>:<port>`. Docs only. PR notes the public proxy was removed and the DB password rotated (owner-reported).
+**Path:** Small change (Dev -> QA), plus Security because the change redacts infra exposure.
+**Tasks**
+- [x] T1 Dev: branch `fix/redact-railway-proxy-host`, edit line 698, PR #3 (commit `31c78eb`)
+- [x] T2 QA + Sec review (both READY WITH CONDITIONS)
+- [x] T3 Coordinator readiness report
+
+**Fix cycle 1 of 3:** PR #3 body rewritten (removed stray backslash escapes and a grep line that quoted the old host fragment and port). `docs/reviews/M2-fix/qa.md` and `security.md` redacted by their authors (both had quoted the old value). Coordinator verified: tree, PR body, and PR comments have zero hits for the old host or port.
+
+### Readiness report — PR #3
+**What changed:** `docs/architecture.md` §8 backfill paragraph: real Postgres public proxy host:port replaced with `<railway-public-host>:<port>`; text now says the proxy was removed on 2026-11-01, the password rotated, and a proxy must be re-added in Railway before backfills. Plus this STATUS entry and `docs/reviews/M2-fix/`.
+**CI:** run 41396852799 green (root, frontend, worker, backend).
+**Verdicts:** QA READY WITH CONDITIONS · Security READY WITH CONDITIONS. Repo-side conditions closed (PR body, review-file redaction). No open Blocker or Major findings. No Lead review (small-change path).
+**Remaining conditions (owner):**
+1. Confirm in the Railway dashboard that the Postgres public TCP proxy is gone and the password was rotated. Reviewers could not verify this; the PR's safety argument depends on it.
+**Risks / notes:**
+- The old host:port stays in git history (commit `dd58399` on `main`). Security recommends no history rewrite: only a bare host:port was exposed (never a connection string with the password), and a force-push to `main` would break cited SHAs without clearing GitHub caches or forks.
+- Local-only branch `chore/hardwood-agent-setup` (commit `8830918`): `dbguard.test.js` uses the same port as the old proxy. Redact before that branch is ever pushed.
+**Reviewer disagreements:** none.
+**Recommendation:** Ready to merge, conditional on owner confirmation of item 1.

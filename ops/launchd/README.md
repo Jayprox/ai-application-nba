@@ -39,3 +39,45 @@ launchctl load ~/Library/LaunchAgents/com.chalkthat.nba.weekly.plist
 To stop: the `unload` line alone. If the Mac is asleep at the scheduled
 time, launchd runs the job at the next wake; if it's off, that week is
 skipped (run `npm run db:weekly` by hand).
+
+---
+
+# Daily Postgres backup (launchd)
+
+`scripts/backup-db.sh` runs `scripts/backup-db.mjs` daily at 03:17: it dumps the
+production Postgres through the Railway CLI SSH tunnel to the `DB-Backups`
+drive and keeps the 14 newest dumps. How it works and how to restore:
+`docs/backup-restore.md`. Log: `~/Library/Logs/chalk-that-nba/backup.log`.
+
+Run by hand (production): `BACKUP_CONFIRM_PROD=1 npm run db:backup`. Without
+`BACKUP_CONFIRM_PROD=1` the script refuses with
+`FAIL stage=preflight reason="production run not confirmed (set BACKUP_CONFIRM_PROD=1)"`
+before any Railway CLI call. The plist sets it, because the job is meant to hit
+production. Do the first run by hand, with the drive mounted, before installing
+the plist. Only one Mac should have it loaded.
+
+## Install (once, after the first good manual run)
+
+```
+cp ops/launchd/com.chalkthat.nba.backup.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.chalkthat.nba.backup.plist
+```
+
+Test: `launchctl start com.chalkthat.nba.backup`, then read `backup.log`.
+Stop: `launchctl unload ~/Library/LaunchAgents/com.chalkthat.nba.backup.plist`.
+
+## Things that make it fail
+
+- **PATH.** launchd's PATH is minimal. `zsh -l` loads the login PATH (for `node`
+  and `railway`); the script uses absolute paths for libpq
+  (`/opt/homebrew/opt/libpq/bin`, from `brew install libpq`).
+- **Railway session.** The job uses your `railway login` session and the repo
+  directory's `railway link`. If the session expires, runs log
+  `FAIL stage=preflight reason="railway CLI not logged in"` and show a
+  notification until you run `railway login` again. Check `backup.log` weekly.
+- **macOS privacy.** Background access to `/Volumes/...` and `~/Documents` is
+  blocked without a prompt. Full Disk Access for `/bin/zsh` (already granted for
+  the weekly job) fixes it. `Operation not permitted` on the volume in the log
+  means this.
+- **Drive not mounted.** The run logs `FAIL stage=preflight` and stops before
+  contacting Railway.

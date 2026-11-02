@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- Daily Postgres backup (scripts/backup-db.sh -> scripts/backup-db.mjs): 03:17 local time.
      If the Mac is asleep then, launchd runs it at the next wake; if off, that day is skipped.
-     Holds no secrets; defaults cover all settings. Install: ops/launchd/README.md -->
+     Holds no secrets; BACKUP_CONFIRM_PROD=1 is the production opt-in, defaults cover the rest. Install: ops/launchd/README.md -->
 <plist version="1.0">
 <dict>
   <key>Label</key>
@@ -13,6 +13,12 @@
     <string>-l</string>
     <string>/Users/jayprox_pro/Documents/Projects/git/ai-application-nba/scripts/backup-db.sh</string>
   </array>
+  <!-- Production opt-in (see scripts/lib/backup.mjs prodGuard). Not a secret. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>BACKUP_CONFIRM_PROD</key>
+    <string>1</string>
+  </dict>
   <key>StartCalendarInterval</key>
   <dict>
     <key>Hour</key>

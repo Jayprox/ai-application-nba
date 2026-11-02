@@ -13,7 +13,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   loadConfig, dumpName, DUMP_RE, PARTIAL_RE, selectForDeletion, parseTunnelOutput, hasUrlToken,
-  redact, buildPgEnv, isMountPoint, assertSafeBackupDir,
+  redact, buildPgEnv, isMountPoint, assertSafeBackupDir, prodGuard,
 } from './lib/backup.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -155,6 +155,10 @@ function resolveRailway() {
 }
 
 async function preflight() {
+  // 0. Production guard: before the drive check, the lock, and any CLI call.
+  const blocked = prodGuard(process.env);
+  if (blocked) throw new Fail('preflight', blocked);
+
   // 1. Drive: real mount point, safe path. Nothing touches the network before this.
   let dir;
   try {

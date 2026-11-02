@@ -49,8 +49,12 @@ production Postgres through the Railway CLI SSH tunnel to the `DB-Backups`
 drive and keeps the 14 newest dumps. How it works and how to restore:
 `docs/backup-restore.md`. Log: `~/Library/Logs/chalk-that-nba/backup.log`.
 
-Run by hand: `npm run db:backup`. Do the first run by hand, with the drive
-mounted, before installing the plist. Only one Mac should have it loaded.
+Run by hand (production): `BACKUP_CONFIRM_PROD=1 npm run db:backup`. Without
+`BACKUP_CONFIRM_PROD=1` the script refuses with
+`FAIL stage=preflight reason="production run not confirmed (set BACKUP_CONFIRM_PROD=1)"`
+before any Railway CLI call. The plist sets it, because the job is meant to hit
+production. Do the first run by hand, with the drive mounted, before installing
+the plist. Only one Mac should have it loaded.
 
 ## Install (once, after the first good manual run)
 

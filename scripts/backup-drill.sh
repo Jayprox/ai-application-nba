@@ -172,6 +172,19 @@ expect_fail "wrong password" dump FAKE_RAILWAY_PASSWORD=$WRONG
 expect_fail "database without teams table" validate FAKE_RAILWAY_DB=empty_test
 secret_scan "all failure-case logs/output" $LOG $WORK/out.* $WORK/err.*
 
+print "== Production guard (PATH-shadowed fake named railway; the real CLI is never reachable) =="
+SHADOW=$WORK/shadow; mkdir -p $SHADOW
+printf '#!/bin/sh\necho invoked >> %s/shadow.calls\nexit 1\n' $WORK > $SHADOW/railway; chmod +x $SHADOW/railway
+guard_run() { rm -f $WORK/shadow.calls $WORK/fake.pid; OUTN=$((OUTN+1)); env ${BENV:#BACKUP_RAILWAY_BIN=*} PATH=$SHADOW:$PATH "$@" node scripts/backup-db.mjs >$WORK/out.$OUTN 2>$WORK/err.$OUTN; RC=$?; }
+guard_run
+[[ $RC -eq 1 && $(last_log) == *'FAIL stage=preflight reason="production run not confirmed (set BACKUP_CONFIRM_PROD=1)"'* ]] && pass "no flag, real-binary path -> refused" || fail "no flag refused (rc=$RC $(last_log))"
+[[ ! -e $WORK/shadow.calls && ! -f $WORK/fake.pid ]] && pass "no flag: railway never invoked, tunnel never started" || fail "no flag: railway was invoked"
+guard_run BACKUP_CONFIRM_PROD=true
+[[ $RC -eq 1 && $(last_log) == *"production run not confirmed"* && ! -e $WORK/shadow.calls ]] && pass "BACKUP_CONFIRM_PROD=true (not 1) -> refused, railway not invoked" || fail "CONFIRM_PROD=true not refused"
+guard_run BACKUP_CONFIRM_PROD=1
+[[ -e $WORK/shadow.calls && $(last_log) == *"railway CLI not logged in"* ]] && pass "with flag the guard lets the (shadow) CLI be called" || fail "flag did not unlock: $(last_log)"
+[[ "$(dumps)" == "$BEFORE" ]] && pass "guard cases: dumps unchanged" || fail "guard cases changed dumps"
+
 print "== SIGTERM during dump =="
 rm -f $WORK/fake.pid
 ( DBN=backup_test psql_src -c "BEGIN; LOCK TABLE teams IN ACCESS EXCLUSIVE MODE; SELECT pg_sleep(60);" >/dev/null 2>&1 ) & LOCKPID=$!

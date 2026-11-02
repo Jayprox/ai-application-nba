@@ -18,7 +18,15 @@ production database, plus how to restore them.
 
 ## How it runs
 
-`npm run db:backup` (or daily 03:17 via launchd, `ops/launchd/README.md`):
+`BACKUP_CONFIRM_PROD=1 npm run db:backup` (or daily 03:17 via launchd, whose
+plist sets the flag; `ops/launchd/README.md`):
+
+0. **Production guard.** Using the real Railway CLI requires
+   `BACKUP_CONFIRM_PROD=1` (exactly `1`). The only exemption is
+   `BACKUP_RAILWAY_BIN` pointing at an executable not named `railway` (the
+   drill's fake; symlinks are resolved). Otherwise the run stops with
+   `FAIL stage=preflight reason="production run not confirmed (set BACKUP_CONFIRM_PROD=1)"`
+   before any CLI call. A bare `npm run db:backup` therefore can't reach production.
 
 1. Checks the drive is a real mount point and the path is safe. If not: `FAIL stage=preflight`, and Railway is never contacted.
 2. Checks `pg_dump` is version 18+ (Homebrew libpq), the Railway CLI is logged in, and the local tunnel port (default 55432) is free.
@@ -52,7 +60,7 @@ Press Ctrl+C to close the tunnel.
 `BACKUP_RAILWAY_ENV` (`production`), `BACKUP_TUNNEL_PORT` (55432),
 `BACKUP_TUNNEL_TIMEOUT_S` (60), `BACKUP_DUMP_TIMEOUT_S` (1800),
 `BACKUP_PG_BIN_DIR`, `BACKUP_RAILWAY_BIN` (test seam; the drill points it at a
-fake), `BACKUP_NOTIFY=0` (no macOS notification; the drill sets it).
+fake), `BACKUP_NOTIFY=0` (no macOS notification; the drill sets it), `BACKUP_CONFIRM_PROD=1` (required for real runs, see above).
 
 ### Reading the log
 

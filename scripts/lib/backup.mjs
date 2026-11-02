@@ -111,6 +111,24 @@ export function buildPgEnv(password, base = process.env) {
   };
 }
 
+// Production guard (fix cycle 1 after the M3 incident). Returns null when the
+// run may proceed, else a fixed reason string. Rule, fail-closed: the run is
+// "test mode" only when BACKUP_RAILWAY_BIN is set to an executable whose name
+// (and whose symlink target's name) is not `railway`. Anything else (unset,
+// empty, or pointing at a binary called `railway`) targets the real CLI and
+// needs BACKUP_CONFIRM_PROD to be exactly "1".
+export function prodGuard(env = process.env) {
+  const bin = env.BACKUP_RAILWAY_BIN || '';
+  let testBin = false;
+  if (bin) {
+    let real = bin;
+    try { real = fs.realpathSync(bin); } catch { /* keep the given name */ }
+    testBin = path.basename(bin) !== 'railway' && path.basename(real) !== 'railway';
+  }
+  if (testBin || env.BACKUP_CONFIRM_PROD === '1') return null;
+  return 'production run not confirmed (set BACKUP_CONFIRM_PROD=1)';
+}
+
 export function isMountPoint(p, statFn = fs.statSync) {
   const a = statFn(p);
   if (!a.isDirectory()) return false;

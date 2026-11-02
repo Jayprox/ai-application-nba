@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   loadConfig, dumpName, DUMP_RE, selectForDeletion, parseTunnelOutput, hasUrlToken,
-  redact, buildPgEnv, assertSafeBackupDir, isMountPoint,
+  redact, buildPgEnv, assertSafeBackupDir, isMountPoint, prodGuard,
 } from './backup.mjs';
 
 // Fake password with the characters that need percent-encoding in a URL.
@@ -141,5 +141,26 @@ test('isMountPoint is false for a plain subdirectory', () => {
     assert.equal(isMountPoint('/'), false); // root's parent is itself
     const fake = (p) => ({ isDirectory: () => true, dev: p === '/m' ? 2 : 1 });
     assert.equal(isMountPoint('/m', fake), true);
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('prodGuard: real CLI needs BACKUP_CONFIRM_PROD=1 exactly; a non-railway test binary does not', () => {
+  const msg = 'production run not confirmed (set BACKUP_CONFIRM_PROD=1)';
+  assert.equal(prodGuard({}), msg);
+  assert.equal(prodGuard({ BACKUP_RAILWAY_BIN: '' }), msg);
+  for (const v of ['0', 'true', 'yes', '', ' 1', '11']) assert.equal(prodGuard({ BACKUP_CONFIRM_PROD: v }), msg, v);
+  assert.equal(prodGuard({ BACKUP_CONFIRM_PROD: '1' }), null);
+  // pointing the seam at something called railway is still the real CLI
+  assert.equal(prodGuard({ BACKUP_RAILWAY_BIN: '/opt/homebrew/bin/railway' }), msg);
+  assert.equal(prodGuard({ BACKUP_RAILWAY_BIN: '/opt/homebrew/bin/railway', BACKUP_CONFIRM_PROD: '1' }), null);
+  assert.equal(prodGuard({ BACKUP_RAILWAY_BIN: '/x/fake-railway.sh' }), null);
+});
+
+test('prodGuard: a differently named symlink to a binary called railway is still guarded', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bkg-'));
+  try {
+    fs.writeFileSync(path.join(tmp, 'railway'), '');
+    fs.symlinkSync(path.join(tmp, 'railway'), path.join(tmp, 'harmless'));
+    assert.match(prodGuard({ BACKUP_RAILWAY_BIN: path.join(tmp, 'harmless') }), /not confirmed/);
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });

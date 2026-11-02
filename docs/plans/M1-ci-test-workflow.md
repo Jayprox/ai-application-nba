@@ -86,7 +86,7 @@ jobs:
 
 | # | Task | Files | Definition of done |
 |---|---|---|---|
-| T1 | Fix the broken worker fixture: give the `'final'` games scores (for example `home_score, away_score` = `100, 90`) in `mk()`. | `worker/test/players.test.js` (lines 31-32) | `WORKER_TEST_DATABASE_URL=postgres://...@localhost:<port>/worker_test npm test` in `worker/`: 23/23 pass, 0 skip. Assertions unchanged. |
+| T1 | Fix the broken worker fixture: give the `'final'` games scores (for example `home_score, away_score` = `100, 90`) in `mk()`. Also move the fixture's stat rows from HOU to MEM: with HOU rows the player lands in the team pool and matches `name+team+date`, so the `name+recent_inactive` path was never exercised. | `worker/test/players.test.js` (lines 31-32) | `WORKER_TEST_DATABASE_URL=postgres://...@localhost:<port>/worker_test npm test` in `worker/`: 23/23 pass, 0 skip. Assertions unchanged. |
 | T2 | Add `.github/workflows/test.yml` as in §3, with the backend file list from D1. | `.github/workflows/test.yml` (new) | YAML is valid; on the PR, all four jobs run and pass; worker job log shows 0 skipped; backend job log shows `Constraint tests: PASSED`. |
 | T3 | Docs: replace "CI: none yet" in `docs/architecture.md` §9.3 with a pointer to the workflow and what it does *not* cover (D1). Add one line to the README "Tests" section. Commit the onboarding docs (`docs/architecture.md` §9, `docs/STANDARDS.md`, this plan). | `docs/architecture.md`, `README.md`, `docs/STANDARDS.md`, `docs/plans/M1-ci-test-workflow.md` | Docs match the merged workflow. Existing sections 1-8 are unchanged. |
 

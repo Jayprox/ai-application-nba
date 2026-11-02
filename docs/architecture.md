@@ -782,7 +782,10 @@ Details:
 - **Fixed (M1, T1):** `worker/test/players.test.js` used to insert a
   `final` game without scores, which `games_check6` (`db/schema.sql:152`)
   rejects. It only showed when `WORKER_TEST_DATABASE_URL` was set. The
-  fixture now sets `home_score`/`away_score`.
+  fixture now sets `home_score`/`away_score`. The fixture's stat rows
+  also moved from HOU to MEM: with HOU rows the player landed in the
+  team pool and matched `name+team+date`, so the `name+recent_inactive`
+  path (f0e6dd3) was never exercised.
 - **Model eval** (`cd backend && npm run ask:eval`) calls Claude for real
   and needs `ANTHROPIC_API_KEY`. It is not part of `npm test`.
 - **No lint or formatter** is configured in any package.

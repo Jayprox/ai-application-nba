@@ -74,7 +74,7 @@ is in `docs/api.md`. Those files are not repeated here.
   `fix/*`, so pushing a `chore/*` branch prompts for approval.
 - One PR per plan task or a small group of related tasks. The PR
   description links the requirement and plan ids.
-- Merging requires CI green (once CI exists) and owner approval
+- Merging requires CI green and owner approval
   (CLAUDE.md rules 6-7).
 
 ## 4. Commits

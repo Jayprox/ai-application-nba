@@ -59,6 +59,9 @@ is in `docs/api.md`. Those files are not repeated here.
   - worker: only against a localhost database whose name contains `test`
     (`WORKER_TEST_DATABASE_URL`); otherwise skipped with a reason.
 - How to run each suite and what it needs: `docs/architecture.md` §9.3.
+- The backend CI job runs an explicit file list (`.github/workflows/test.yml`),
+  so a new backend test file must be added to that list, or to the documented
+  local-only list in `docs/architecture.md` §9.3.
 - Every change keeps all four suites green. A bug fix comes with a test that
   would have caught it (see `scripts/lib/sources.test.mjs` for an example).
 - No lint step exists yet. Do not add one as a side effect of other work.

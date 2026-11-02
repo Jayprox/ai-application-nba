@@ -7,26 +7,52 @@
 **Path:** Existing app, first run (Lead onboard) -> Small change + Security (CI config) -> QA + Sec -> Lead review -> readiness report.
 PA skipped: requirements are concrete and owner-specified.
 
-**Branch:** `chore/ci-workflow` (one PR for onboarding docs + workflow).
+**Branch:** `chore/ci-workflow`, **PR #2** (https://github.com/Jayprox/ai-application-nba/pull/2).
 
 **Note:** `docs/architecture.md` already exists; on macOS's case-insensitive FS it *is* `docs/ARCHITECTURE.md`. It is extended in place, not replaced.
 
 ### Tasks
-- [x] T1 Lead: onboard — extended `docs/architecture.md` (+89 lines, §9, nothing removed), created `docs/STANDARDS.md`, plan `docs/plans/M1-ci-test-workflow.md`
-- [ ] T2 Dev: plan tasks T1 (fix broken worker test fixture), T2 (workflow), T3 (docs); open PR, get CI green
-- [ ] T3 QA review
-- [ ] T4 Security review
-- [ ] T5 Lead review
-- [ ] T6 Readiness report -> GATE 2 (owner merge approval)
+- [x] T1 Lead: onboard — extended `docs/architecture.md` (§9 added, §1-8 unchanged), created `docs/STANDARDS.md`, plan `docs/plans/M1-ci-test-workflow.md`
+- [x] T2 Dev: worker fixture fix, `.github/workflows/test.yml`, docs; PR #2 opened, CI green first run
+- [x] T3 QA review — READY (after fix cycle 1)
+- [x] T4 Security review — READY
+- [x] T5 Lead review — READY WITH CONDITIONS; conditions closed in fix cycle 2
+- [x] T6 Readiness report (below) -> **GATE 2: waiting on owner merge approval**
 
 ### Approvals
 - 2026-11-01 — Owner: mission text accepted as the requirement (no PA).
 - 2026-11-01 — Owner: **D1 = Option A** (backend CI runs schema apply + constraint tests + empty-DB-safe files league/names/rankings/ratelimit). Fixture DB (B) deferred to a future M2.
 - 2026-11-01 — Owner: fix the broken worker test fixture (plan T1) in this PR.
 
+### Fix cycles (limit 3)
+1. QA Minors: docs record the fixture stat-row move (HOU -> MEM); drop stale "once CI exists" in STANDARDS. Head `36f71c3`, CI green, QA re-verified READY.
+2. Lead Minors: architecture §9.3 worker row updated to 23/0; STANDARDS bullet on the explicit backend CI file list; review files committed. Head `202073f`, CI green. Coordinator verified the doc-only diff (Lead said no reviewer re-run needed).
+
+### Readiness report — PR #2 at `202073f`
+**What changed**
+- `.github/workflows/test.yml`: 4 parallel jobs (root, frontend, worker, backend) on `pull_request` and push to `main`. Node 22.x, `postgres:18` service only on worker and backend (separate DBs), `permissions: contents: read`, `persist-credentials: false`, actions pinned to full SHAs (checkout v7.0.1, setup-node v7.1.0), no secrets, no lint.
+- `worker/test/players.test.js`: fixture-only fix (final games get scores; stat rows moved HOU -> MEM so the test exercises the path it's named for). Assertions unchanged.
+- Docs: `docs/architecture.md` §9 (run/test), `docs/STANDARDS.md`, plan, reviews, README test note.
+
+**CI:** run 41385352723 green. root 31/31, frontend 32/32, worker 23/23 (0 skipped), backend constraint tests PASSED + 12 pass / 3 skip.
+
+**Verdicts:** QA READY · Security READY · Lead READY WITH CONDITIONS (both conditions closed and verified). No open Blocker or Major findings.
+
+**Known limits / risks**
+- Backend CI covers only 4 of 9 test files (owner decision D1-A). Auth, browse, query, props, ask need real NBA data and run locally only. M2 (fixture DB) would close this.
+- The explicit backend file list must be maintained (now documented in STANDARDS).
+- `postgres:18` is pinned by tag, not digest (Note).
+
+**Reviewer disagreements:** none.
+
+**Recommendation:** **Ready to merge.**
+
+### Follow-ups for the owner (not part of PR #2)
+1. **Security, urgent-ish (pre-existing on `main`):** `docs/architecture.md:698` names the production Railway Postgres public proxy host:port in a public repo. Real fix is on Railway: rotate or disable the public proxy, confirm a strong password. Then a `fix/` PR to redact the doc line (history keeps the old value).
+2. **Probable bug (worker):** on the `name+team+date` match path the worker doesn't set `is_active = true`, so an inactive player who re-signs with the same team stays off the roster and the props pool until the next roster seed (`worker/src/players.js:34-38,49`). Bug-fix path.
+3. **M2:** committed fixture DB so the full backend suite runs in CI.
+4. Existing `npm audit` findings: backend runtime (`body-parser`, `qs`), frontend dev tooling (`vite`, `vitest`, `undici`, `source-map-js`).
+5. After merge: in GitHub, enable branch protection "require status checks" for the four Tests jobs; keep "require approval for first-time contributors".
+
 ### Blockers
 - (none)
-- ~~**D1:**~~ resolved, Option A. the backend test suite needs real NBA.com data, which CI can't load. Plan recommends Option A (run only the backend test files that are valid on an empty DB) now, and Option B (a committed fixture DB) as follow-up mission M2.
-
-### Findings from onboarding
-- `worker/test/players.test.js:31-32` is already broken on `main` (violates `games_check6`). It's hidden locally because the DB suite skips without `WORKER_TEST_DATABASE_URL`. Plan T1 fixes the fixture only.

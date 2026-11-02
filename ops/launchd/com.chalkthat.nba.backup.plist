@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Daily Postgres backup (scripts/backup-db.sh -> scripts/backup-db.mjs): 03:17 local time.
+     If the Mac is asleep then, launchd runs it at the next wake; if off, that day is skipped.
+     Holds no secrets; defaults cover all settings. Install: ops/launchd/README.md -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.chalkthat.nba.backup</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-l</string>
+    <string>/Users/jayprox_pro/Documents/Projects/git/ai-application-nba/scripts/backup-db.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>3</integer>
+    <key>Minute</key>
+    <integer>17</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/jayprox_pro/Library/Logs/chalk-that-nba/backup.launchd.out</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/jayprox_pro/Library/Logs/chalk-that-nba/backup.launchd.err</string>
+</dict>
+</plist>

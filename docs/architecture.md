@@ -702,6 +702,15 @@ backfills via `DATABASE_PUBLIC_URL`, re-add a public TCP proxy in Railway
 added by hand with Railway's standard reference definition — the template
 only creates it when a proxy exists at creation time.
 
+**Backups (M3, 2026-11-01).** `npm run db:backup` (daily 03:17 via launchd,
+`ops/launchd/`) runs `pg_dump` against the Postgres service through the
+Railway CLI SSH tunnel (`railway connect --tunnel-only`; no public proxy
+needed) and keeps the 14 newest dumps on the `DB-Backups` drive. Credentials
+are read from the tunnel output in memory and reach only `pg_dump`'s
+environment. Details, restore steps and the production-restore rule:
+`docs/backup-restore.md`. Native Railway backups/PITR are a Pro-plan feature
+and are not on the current plan.
+
 
 ## 9. How to run and how to test (onboarding map, added 2026-11-01)
 
@@ -756,6 +765,7 @@ Install per package: `npm ci` (or `npm install`) in `/`, `backend/`,
 | root (schema) | `npm run db:apply` | SQL constraint tests | Yes, empty DB | `DATABASE_PUBLIC_URL` | PASSED |
 | backend | `npm test` | `node --test --test-concurrency=1 'test/*.test.js'` | **Yes, with real loaded data** | `TEST_DATABASE_URL` (falls back to `DATABASE_URL`); `JWT_SECRET` is generated if unset | 21 pass / 44 fail / 3 skip (see below) |
 | worker | `npm test` | `node --test --test-concurrency=1 'test/*.test.js'` | Optional | `WORKER_TEST_DATABASE_URL` | without it: 17 pass, 6 skip. With it: 23 pass, 0 skip |
+| root (backup drill) | `npm run db:backup:drill` | zsh harness | Docker (two throwaway `postgres:18`), macOS `hdiutil`, Homebrew libpq | none (generates its own random passwords) | 46 PASS; local only (CI has no hdiutil), not in `npm test` |
 | frontend | `npm test` | `vitest run` (jsdom) | No | none (`fetch` mocked) | 32/32 pass |
 
 Details:

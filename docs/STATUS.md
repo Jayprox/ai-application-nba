@@ -78,3 +78,32 @@ PA skipped: requirements are concrete and owner-specified.
 - Local-only branch `chore/hardwood-agent-setup` (commit `8830918`): `dbguard.test.js` uses the same port as the old proxy. Redact before that branch is ever pushed.
 **Reviewer disagreements:** none.
 **Recommendation:** Ready to merge, conditional on owner confirmation of item 1.
+
+## Mission M3-backup: off-Railway Postgres backups + restore drill (2026-11-01)
+**Mission:** Add `scripts/` backup routine: `pg_dump` of production Postgres through the Railway CLI SSH tunnel (no public proxy), timestamped compressed dump saved outside the repo, keep the most recent N, log success/failure. No credentials in the repo. Restore procedure in docs, tested only against a throwaway local Postgres container. Nothing runs against production without owner approval.
+**Path:** Feature (new script + docs). Proposed: mission text as the requirement (no PA), pending owner confirmation at Gate 1.
+
+**Intake findings (Railway CLI 5.71.0 + docs.railway.com, checked 2026-11-01)**
+- Tunnel: `railway connect <postgres-service> --tunnel-only [-P <local-port>]` (implies `--ssh`; holds the tunnel until Ctrl+C). It prints host/port/user/password/full URL to stdout, so the script must never log that output.
+- Prod is Postgres 18; local machine has no `pg_dump`/`psql`. Need a v18 client (`brew install libpq` or Docker `postgres:18`). Docker is installed.
+- Railway docs now describe native volume backups (daily/weekly/monthly schedules) and PITR (`railway postgres pitr ...`). This conflicts with the mission premise "no built-in backups". Escalated to owner. Native backups are deleted with the volume, so an off-platform dump remains useful either way.
+
+**Tasks**
+- [x] T0 Gate 1: owner confirms requirements, storage location, retention/schedule, native-backup decision
+- [x] T1 Lead plan (`docs/plans/M3-backup.md`): Node script + Homebrew libpq 18, creds parsed in memory from tunnel stdout -> PGPASSWORD, mount-point check, fake-tunnel drill. Security review required. No architecture change needing owner approval.
+- [ ] T2 Dev: script + docs + local restore drill, PR
+- [ ] T3 QA + Sec review
+- [ ] T4 Lead review
+- [ ] T5 Readiness report
+- [ ] T6 (separate owner approval) first run against production
+
+### Approvals
+- 2026-11-01 — Owner (Gate 1): mission text approved as requirements, no PA. Restore test only against a throwaway local postgres:18 container.
+- 2026-11-01 — Owner: storage = external drive `/Volumes/TM-Prism/db-backups`; if the drive isn't mounted, log a failure and stop; never write into Time Machine's own folders.
+- 2026-11-01 — Owner: native Railway backups/PITR are not on the current plan (Backups tab says upgrade to Pro). Dump routine only; one-line doc note that a plan upgrade adds native backups + PITR.
+- 2026-11-01 — Owner: Developer may `brew install libpq` on this Mac for the drill.
+- 2026-11-01 — Owner: keep 14 dumps; daily launchd job (plist in repo, owner installs it); verify the script manually first.
+
+### Blockers
+- `/Volumes/TM-Prism` is the Time Machine destination volume itself (`tmutil destinationinfo`). Listing it fails with "Operation not permitted". APFS Time Machine volumes are dedicated to TM, so `db-backups` there would be inside a TM-managed volume. Escalated to owner; nothing written to the drive.
+  - Resolved 2026-11-01 — Owner: create a new APFS volume `DB-Backups` on the same drive (owner runs `diskutil apfs addVolume` themselves). Script target is `/Volumes/DB-Backups/db-backups`. TM-Prism is not touched.

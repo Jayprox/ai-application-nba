@@ -150,6 +150,8 @@ Fill in `DATABASE_PUBLIC_URL`, `HIGHLIGHTLY_API_KEY`, `ODDS_API_KEY` and `ANTHRO
 | When | Command (repo root unless noted) |
 |---|---|
 | Weekly during the season | `npm run db:weekly` (runs by itself Monday mornings via launchd, see `ops/launchd/`): schedule refresh + `db:backfill -- --season 2026-27` (NBA.com overwrites live data and reports any rows that differed) + `db:status` |
+| Daily Postgres backup (off-Railway dump, keeps 14) | `npm run db:backup` (daily via launchd, see `ops/launchd/`; restore steps in `docs/backup-restore.md`) |
+| Test the backup + restore end to end (throwaway containers, no Railway) | `npm run db:backup:drill` |
 | Injury source check (preseason) | `cd worker && npm run injuries-probe -- --date 2026-10-03` |
 | NBA changes the schedule (Cup knockouts, postponements) | `npm run db:schedule` |
 | Official standings rank (also written by the backfill) | `npm run db:standings` |

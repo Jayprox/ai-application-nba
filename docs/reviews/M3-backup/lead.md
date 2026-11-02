@@ -174,3 +174,96 @@ The implementation meets the approved mission, the owner's opt-in and the plan, 
 - **Open questions:**
   - Owner, before T6: Railway SSH keys and resources after the incident, `DB-Backups` encryption and ownership, the `Postgres` service name, and the T6 approval.
 - **Recommended next role:** Dev for fix cycle 3 (items A–C), then QA (drill and `npm test`) and Security (delta), then Lead delta check, then the Coordinator readiness report.
+
+---
+
+# Final check (81113b9 + 2d1e654)
+
+`VERDICT: READY WITH CONDITIONS`
+
+The one condition is procedural: CI must be green on the PR head, `2d1e654`, before merge is recommended (CLAUDE.md rule 7). The code needs no further fixes.
+
+## F1. Scope and evidence
+
+- **Code delta:** `git diff 1f3a027..81113b9`, 5 files, +25/−8. I read all of it.
+- **Docs commit:** `git show --stat 2d1e654` has parent `81113b9`.
+- **Root tests:** `npm test` at HEAD `2d1e654` gives `tests 47, pass 47, fail 0`.
+- **CI on the code head:** `gh run view 41485969944` reports headSha `81113b9…`, `success`, and all four jobs (root, backend, worker, frontend) passed.
+- **CI on the PR head:** `gh pr view 4` reports headRefOid `2d1e654…`. When I checked, `gh pr checks 4` (run 41487783978) showed frontend and worker passed, and root and backend still pending.
+- **Other reviews:** I read the cycle 3 sections of `qa.md` (final `VERDICT: READY`, drill 60/0) and `security.md` (final `VERDICT: READY`, Notes C3.1 to C3.3), the `docs/STATUS.md` delta and the current PR body.
+- **Not run:** the real `railway`, `db:backup` and the drill (hard rules). The drill result is QA's.
+
+## F2. Fix cycle 3 scope
+
+| Item | Result | Evidence |
+|---|---|---|
+| **A.** Drill launches can't inherit the caller's environment | **Met.** One deviation is accepted, see C3.2 | `LAUNCH=(env -i HOME=… PATH=… TMPDIR=… LANG=…)` (`scripts/backup-drill.sh:106`). `grep -n backup-db.mjs` shows exactly three launch sites, all through `$LAUNCH`: `:107` (`launch_node`, used by `run_backup` and `guard_run`), `:232` and `:253` (the `exec` subshells, so `$!` stays node's PID). `env -i` is stricter than the `-u` list in the scope. The new regression case (diff hunk at `@@ -201`) exports `BACKUP_RAILWAY_BIN=$SHADOW/railway` and `BACKUP_CONFIRM_PROD=1`, runs `guard_run --no-bin`, unsets both, and asserts refusal with no `shadow.calls`. It only ever uses the shadow. QA reports the drill at 60/0. The "pass `PGBIN` explicitly" part was not done (C3.2). |
+| **B.** Spawn exactly what the guard approved | **Met.** C3.1 remains as a residual Note | `loadConfig` rejects a non-absolute `BACKUP_RAILWAY_BIN` with a fixed message (`scripts/lib/backup.mjs:27`). Unit test cases `'railway'` and `'./fake-railway.sh'` are rejected and an absolute path is accepted (`backup.test.mjs`, `loadConfig` test). `resolveRailway()` returns `fs.realpathSync(cfg.railwayBin)`, and on failure gives a fixed `preflight` message (`scripts/backup-db.mjs:168-177`). It is resolved once (`:212`), and both `whoami` (`:213`) and `connect` (`:222`) spawn that string. The unset production path is unchanged (`which`, then the Homebrew default). `docs/backup-restore.md:62` now says "must be an absolute path … runs its realpath". |
+| **C.** PR description rewritten | **Met** | The PR body now has a "Production guard (current state)" section describing the realpath allow-list and the absolute-path and realpath spawn. The fixture text explains that it does not `exec`. The results section shows drill 60/0. The service name is recorded as owner-confirmed, matching STATUS. |
+
+No other source changes are in the delta, and nothing was added outside the cycle 3 scope.
+
+## F3. `2d1e654` is docs-only: confirmed
+
+- `git diff 81113b9..2d1e654 --name-only | grep -vc '^docs/'` returns `0`.
+- **Files changed:**
+  - `docs/STATUS.md`;
+  - `docs/architecture.md`, one line at `:770`, changing `59 PASS` to `60 PASS`;
+  - `docs/reviews/M3-backup/{lead,qa,security}.md`.
+- **The STATUS delta** records:
+  - the stderr correction;
+  - T1 to T3 checked;
+  - the owner attestations: SSH keys clean, `DB-Backups` encrypted with ownership enabled, service name `Postgres`;
+  - the incident;
+  - the three fix cycles.
+- **Two things for the Coordinator:**
+  - T4 (Lead review) can now be checked.
+  - Because of this commit, the PR head is `2d1e654`, not `81113b9`, so CI on `2d1e654` has to finish green.
+
+## F4. New Notes: both go on the follow-up list
+
+- **C3.1 (Note, follow-up).** The guard resolves with `realpathSync.native` (`backup.mjs:133`), and `resolveRailway` resolves again later with `realpathSync` (`backup-db.mjs:172`).
+  - The window between the two only matters to a same-user actor while `BACKUP_RAILWAY_BIN` is set. That is the accepted risk in Sec finding 7, and production leaves the variable unset.
+  - Follow-up: resolve once, in the guard or in `loadConfig`, and spawn that exact string.
+- **C3.2 (Note, follow-up).**
+  - The drill reads `PGBIN` from `BACKUP_PG_BIN_DIR` (`backup-drill.sh:11`) but doesn't add `BACKUP_PG_BIN_DIR=$PGBIN` to `BENV` (`:73-75`). `env -i` therefore drops it, and the script falls back to `/opt/homebrew/opt/libpq/bin`.
+  - This partly misses item A's instruction. It is functional only: the run fails closed with "pg_dump 18 or newer required", and the setting only matters on hosts where libpq is not at the default path. That does not apply to this Mac.
+  - Not worth another cycle, and the charter allows no 4th cycle. Follow-up: add `BACKUP_PG_BIN_DIR=$PGBIN` to `BENV`.
+
+## F5. Follow-up list (for STATUS, after merge)
+
+1. C3.1: resolve `BACKUP_RAILWAY_BIN` once and spawn that exact string.
+2. C3.2: forward `BACKUP_PG_BIN_DIR` in the drill's `BENV`.
+3. Sec R3.4: tighten the reaper's argv match (`-P <port>`, or a start-time check).
+4. QA R5.2: add a drill case for the reaper's negative path (a decoy PGID survives).
+5. Remove the `pg_restore --list` 256 KB capture cap (`backup-db.mjs:105`, `:265`).
+6. Sec finding 8: document how to clear a stale lock. Sec §3: pin the `postgres:18` drill image by digest.
+
+## F6. Owner items
+
+- **Done, by owner attestation in STATUS** (the Coordinator verified the drive settings read-only):
+  - Sec finding 5 / AC14: Railway SSH keys clean.
+  - Sec finding 6: `DB-Backups` encrypted with ownership enabled.
+  - Plan §9.2: service name `Postgres`.
+- **Still owner-gated:**
+  - Merge approval.
+  - The separate T6 approval for the first production run (`BACKUP_CONFIRM_PROD=1 npm run db:backup` by hand), then installing the plist.
+
+## F7. Final verdict
+
+`VERDICT: READY WITH CONDITIONS`
+
+- Fix cycle 3 met items A to C.
+- QA and Security are both READY.
+- Root tests pass 47/47, and the drill passes 60/0 (QA).
+- CI is green on the code head `81113b9`.
+- `2d1e654` changes docs only.
+
+**Condition:** CI run 41487783978, or a later run, must be green on the PR head `2d1e654` before the Coordinator recommends merge. After that, this is READY for the owner's merge decision.
+
+## Handoff (final check)
+
+- **Done:** verified items A to C against `1f3a027..81113b9`; confirmed `2d1e654` changes docs only; root `npm test` 47/47 at `2d1e654`; checked CI by SHA; added C3.1 and C3.2 to the follow-up list. No source edits and no commit. The real `railway`, the backup and the drill were not run.
+- **Files touched:** `docs/reviews/M3-backup/lead.md` (this section appended; uncommitted).
+- **Open questions:** none for Lead. Owner: merge approval, then a separate T6 approval.
+- **Recommended next role:** Coordinator. Confirm CI is green on `2d1e654`, check T4 in STATUS, record the F5 follow-ups, and send the readiness report to the owner.

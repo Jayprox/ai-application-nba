@@ -93,8 +93,8 @@ PA skipped: requirements are concrete and owner-specified.
 - [x] T1 Lead plan (`docs/plans/M3-backup.md`): Node script + Homebrew libpq 18, creds parsed in memory from tunnel output -> PGPASSWORD, mount-point check, fake-tunnel drill. Security review required. No architecture change needing owner approval.
 - [x] T2 Dev: PR #4 (`feat/db-backup`)
 - [x] T3 QA + Sec review (3 fix cycles; final QA READY, Security READY at `81113b9`)
-- [ ] T4 Lead review
-- [ ] T5 Readiness report
+- [x] T4 Lead review (READY WITH CONDITIONS; condition = CI green on `2d1e654`, met by run 41487783978)
+- [x] T5 Readiness report
 - [ ] T6 (separate owner approval) first run against production
 
 ### Approvals
@@ -124,4 +124,23 @@ PA skipped: requirements are concrete and owner-specified.
 2. Sec Major (drill could fall through to the real CLI with the flag set) + QA/Sec Minors: realpath-allowlist guard, TM-Prism device + firmlink deny, restore-doc step (b), README/architecture, orphaned-tunnel reaper. Head `1f3a027`, CI 41480681670 green, drill 59/0.
 3. Lead-scoped: drill launches via `env -i` (Sec R3.1), absolute `BACKUP_RAILWAY_BIN` + run the approved realpath (R3.2/R3.3), PR body rewrite. Head `81113b9`, CI 41485969944 green, drill 60/0, root tests 47/47.
 - Coordinator doc-only follow-up (no reviewer re-run needed): `docs/architecture.md` drill count 59 -> 60 (QA Minor), this STATUS entry, review files committed.
+
+### Readiness report — PR #4
+**What changed:** https://github.com/Jayprox/ai-application-nba/pull/4 (`feat/db-backup`)
+- `scripts/backup-db.mjs` (+ `scripts/lib/backup.mjs`, unit tests): `pg_dump` of production through `railway connect Postgres --tunnel-only` (SSH, no public proxy). Credentials parsed in memory and passed via `PGPASSWORD` only. Dump `chalk-that-nba_<UTC>.dump` (custom format, compressed, 0600) to `/Volumes/DB-Backups/db-backups`, written as `.partial`, validated (`pg_restore --list`, `teams` present), renamed atomically, then rotated to the 14 newest. One log line per run in `~/Library/Logs/chalk-that-nba/backup.log`, macOS notification on failure.
+- Safety: production opt-in `BACKUP_CONFIRM_PROD=1` checked before any CLI call (only the repo's fake is exempt, by realpath); real mount-point check; TM-Prism denied by path and device; single-run lock; tunnel always killed, orphan reaper after SIGKILL.
+- `scripts/backup-drill.sh` (`npm run db:backup:drill`): local-only end-to-end test with a fake tunnel, a disk image and two throwaway `postgres:18` containers.
+- `ops/launchd/com.chalkthat.nba.backup.plist` (daily, sets the opt-in; owner installs), `docs/backup-restore.md` (restore procedure + Pro-plan note), README / architecture updates.
+
+**CI:** run 41487783978 green on `2d1e654` (root, frontend, worker, backend). Root tests 47/47. Drill 60/0 (QA run).
+**Verdicts:** QA READY · Security READY · Lead READY WITH CONDITIONS (condition met). No open Blocker/Major/Minor.
+**Risks / notes**
+- The real `--tunnel-only` output format was built from the CLI source, not observed. It fails closed without printing secrets; the first approved run confirms it.
+- Pre-guard incident (above): one real tunnel open, no data accessed; owner verified Railway keys.
+- Dumps contain user emails and password hashes; volume is encrypted.
+- The launchd job needs an active `railway login` session; an expired session shows up as a logged failure.
+**Reviewer disagreements:** none.
+**Follow-ups (after merge, Lead F5):** (1) resolve `BACKUP_RAILWAY_BIN` once and spawn that string; (2) forward `BACKUP_PG_BIN_DIR` in the drill; (3) stricter reaper argv match; (4) drill case for the reaper's negative path; (5) drop the 256 KB `pg_restore --list` capture cap; (6) document stale-lock cleanup and pin the drill `postgres:18` image by digest.
+**Recommendation:** Ready to merge.
+**Still owner-gated:** merge approval (Gate 2); then a separate T6 approval for the first production run (`BACKUP_CONFIRM_PROD=1 npm run db:backup`, by hand), then installing the plist.
 

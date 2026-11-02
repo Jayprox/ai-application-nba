@@ -84,15 +84,15 @@ PA skipped: requirements are concrete and owner-specified.
 **Path:** Feature (new script + docs). Proposed: mission text as the requirement (no PA), pending owner confirmation at Gate 1.
 
 **Intake findings (Railway CLI 5.71.0 + docs.railway.com, checked 2026-11-01)**
-- Tunnel: `railway connect <postgres-service> --tunnel-only [-P <local-port>]` (implies `--ssh`; holds the tunnel until Ctrl+C). It prints host/port/user/password/full URL to stdout, so the script must never log that output.
+- Tunnel: `railway connect <postgres-service> --tunnel-only [-P <local-port>]` (implies `--ssh`; holds the tunnel until Ctrl+C). It prints host/port/user/password/full URL (on stderr, per connect.rs v5.71.0), so the script must never log that output.
 - Prod is Postgres 18; local machine has no `pg_dump`/`psql`. Need a v18 client (`brew install libpq` or Docker `postgres:18`). Docker is installed.
 - Railway docs now describe native volume backups (daily/weekly/monthly schedules) and PITR (`railway postgres pitr ...`). This conflicts with the mission premise "no built-in backups". Escalated to owner. Native backups are deleted with the volume, so an off-platform dump remains useful either way.
 
 **Tasks**
 - [x] T0 Gate 1: owner confirms requirements, storage location, retention/schedule, native-backup decision
-- [x] T1 Lead plan (`docs/plans/M3-backup.md`): Node script + Homebrew libpq 18, creds parsed in memory from tunnel stdout -> PGPASSWORD, mount-point check, fake-tunnel drill. Security review required. No architecture change needing owner approval.
-- [ ] T2 Dev: script + docs + local restore drill, PR
-- [ ] T3 QA + Sec review
+- [x] T1 Lead plan (`docs/plans/M3-backup.md`): Node script + Homebrew libpq 18, creds parsed in memory from tunnel output -> PGPASSWORD, mount-point check, fake-tunnel drill. Security review required. No architecture change needing owner approval.
+- [x] T2 Dev: PR #4 (`feat/db-backup`)
+- [x] T3 QA + Sec review (3 fix cycles; final QA READY, Security READY at `81113b9`)
 - [ ] T4 Lead review
 - [ ] T5 Readiness report
 - [ ] T6 (separate owner approval) first run against production
@@ -102,8 +102,26 @@ PA skipped: requirements are concrete and owner-specified.
 - 2026-11-01 — Owner: storage = external drive `/Volumes/TM-Prism/db-backups`; if the drive isn't mounted, log a failure and stop; never write into Time Machine's own folders.
 - 2026-11-01 — Owner: native Railway backups/PITR are not on the current plan (Backups tab says upgrade to Pro). Dump routine only; one-line doc note that a plan upgrade adds native backups + PITR.
 - 2026-11-01 — Owner: Developer may `brew install libpq` on this Mac for the drill.
+- 2026-11-02 — Owner: after the incident, add a production opt-in guard (`BACKUP_CONFIRM_PROD=1`) and continue reviews.
+- 2026-11-02 — Owner: Railway account SSH keys checked, clean (only the owner's GitHub-synced key).
+- 2026-11-02 — Owner: `DB-Backups` encrypted, ownership enabled; `/Volumes/DB-Backups/db-backups` owned by owner, mode 700. Coordinator verified read-only (`diskutil info`: FileVault Yes, Owners Enabled; `drwx------`).
+- 2026-11-02 — Owner: Railway Postgres service name confirmed as `Postgres` (matches `BACKUP_PG_SERVICE` default).
 - 2026-11-01 — Owner: keep 14 dumps; daily launchd job (plist in repo, owner installs it); verify the script manually first.
 
 ### Blockers
-- `/Volumes/TM-Prism` is the Time Machine destination volume itself (`tmutil destinationinfo`). Listing it fails with "Operation not permitted". APFS Time Machine volumes are dedicated to TM, so `db-backups` there would be inside a TM-managed volume. Escalated to owner; nothing written to the drive.
+- (none open)
+- Resolved: `/Volumes/TM-Prism` is the Time Machine destination volume itself (`tmutil destinationinfo`). Listing it fails with "Operation not permitted". APFS Time Machine volumes are dedicated to TM, so `db-backups` there would be inside a TM-managed volume. Escalated to owner; nothing written to the drive.
   - Resolved 2026-11-01 — Owner: create a new APFS volume `DB-Backups` on the same drive (owner runs `diskutil apfs addVolume` themselves). Script target is `/Volumes/DB-Backups/db-backups`. TM-Prism is not touched.
+
+### Incident (2026-11-02, hard rule "nothing against production without owner approval")
+- 06:54:22Z: while testing the "drive not mounted" case, Dev ran `node scripts/backup-db.mjs` with default config. The owner had already created `/Volumes/DB-Backups`, so preflight passed and the real CLI ran `railway whoami` then `railway connect Postgres --tunnel-only -P 55432 -e production`. The tunnel exited after ~1s: `FAIL stage=tunnel reason="railway tunnel process exited early (output withheld)"`. No `pg_dump`, no DB connection, CLI output never read or logged. Disclosed in the PR #4 body.
+- Coordinator verified locally: no railway/ssh/pg_dump process left; one real-run line in `~/Library/Logs/chalk-that-nba/backup.log`; `~/.ssh` unchanged; `~/.railway` only got two empty lock files. Side effect: empty `/Volumes/DB-Backups/db-backups`.
+- Owner checked Railway SSH keys: clean. Closed.
+- Remedy: production opt-in guard (`BACKUP_CONFIRM_PROD=1`, realpath allowlist for the test fake), drill env scrubbing. The production log still holds only the incident line after all three cycles.
+
+### Fix cycles (limit 3, all used)
+1. Owner-directed production guard. Head `20b7b59`, CI 41476164011 green, drill 51/0.
+2. Sec Major (drill could fall through to the real CLI with the flag set) + QA/Sec Minors: realpath-allowlist guard, TM-Prism device + firmlink deny, restore-doc step (b), README/architecture, orphaned-tunnel reaper. Head `1f3a027`, CI 41480681670 green, drill 59/0.
+3. Lead-scoped: drill launches via `env -i` (Sec R3.1), absolute `BACKUP_RAILWAY_BIN` + run the approved realpath (R3.2/R3.3), PR body rewrite. Head `81113b9`, CI 41485969944 green, drill 60/0, root tests 47/47.
+- Coordinator doc-only follow-up (no reviewer re-run needed): `docs/architecture.md` drill count 59 -> 60 (QA Minor), this STATUS entry, review files committed.
+

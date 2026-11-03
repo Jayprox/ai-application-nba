@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Weekly NBA.com run (scripts/weekly.sh): Mondays 9:07 am local time.
-     If the Mac is asleep then, launchd runs it at the next wake. Install: ops/launchd/README.md -->
+<!-- Weekly NBA.com run (scripts/weekly.sh -> scripts/weekly.mjs): Mondays 9:07 am local time.
+     If the Mac is asleep then, launchd runs it at the next wake. It reaches the database through the
+     Railway CLI tunnel (port 55434), holds no database URL or secret, and needs the DB-Backups drive
+     (it takes or reuses a backup first). Install after the first good manual run: ops/launchd/README.md -->
 <plist version="1.0">
 <dict>
   <key>Label</key>
@@ -12,6 +14,14 @@
     <string>-l</string>
     <string>/Users/jayprox_pro/Documents/Projects/git/ai-application-nba/scripts/weekly.sh</string>
   </array>
+  <!-- Production opt-ins (see scripts/lib/weekly.mjs weeklyGuard). Both are needed; neither is a secret. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>WEEKLY_CONFIRM_PROD</key>
+    <string>1</string>
+    <key>BACKUP_CONFIRM_PROD</key>
+    <string>1</string>
+  </dict>
   <key>StartCalendarInterval</key>
   <dict>
     <key>Weekday</key>
@@ -22,8 +32,8 @@
     <integer>7</integer>
   </dict>
   <key>StandardOutPath</key>
-  <string>/tmp/chalk-that-nba-weekly.out</string>
+  <string>/Users/jayprox_pro/Library/Logs/chalk-that-nba/weekly.launchd.out</string>
   <key>StandardErrorPath</key>
-  <string>/tmp/chalk-that-nba-weekly.err</string>
+  <string>/Users/jayprox_pro/Library/Logs/chalk-that-nba/weekly.launchd.err</string>
 </dict>
 </plist>

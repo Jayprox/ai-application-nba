@@ -125,9 +125,9 @@ export const FAKE_RAILWAY_REL = 'scripts/fixtures/fake-railway.sh';
 // missing file) needs BACKUP_CONFIRM_PROD to be exactly "1". The drill's
 // PATH-shadow cases need no exemption: the no-flag cases are refused before any
 // lookup, and the flag=1 case points BACKUP_RAILWAY_BIN at a verified shadow.
-export function prodGuard(env = process.env, { repoRoot = LIB_REPO_ROOT } = {}) {
-  if (env.BACKUP_CONFIRM_PROD === '1') return null;
-  const bin = env.BACKUP_RAILWAY_BIN || '';
+export function confirmGuard(env, flagName, binVar, message, { repoRoot = LIB_REPO_ROOT } = {}) {
+  if (env[flagName] === '1') return null;
+  const bin = env[binVar] || '';
   if (bin) {
     try {
       const real = fs.realpathSync.native(bin);
@@ -135,7 +135,11 @@ export function prodGuard(env = process.env, { repoRoot = LIB_REPO_ROOT } = {}) 
       if (real === fake) return null;
     } catch { /* missing or unresolvable: not exempt */ }
   }
-  return 'production run not confirmed (set BACKUP_CONFIRM_PROD=1)';
+  return message;
+}
+
+export function prodGuard(env = process.env, opts = {}) {
+  return confirmGuard(env, 'BACKUP_CONFIRM_PROD', 'BACKUP_RAILWAY_BIN', 'production run not confirmed (set BACKUP_CONFIRM_PROD=1)', opts);
 }
 
 // Devices of any Time Machine destination mount point (stat of the mount point

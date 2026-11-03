@@ -180,3 +180,54 @@ PA skipped: requirements are concrete and owner-specified.
 - Orphan cleanup can stop a manual tunnel on 55432 whose `railway connect` already exited (live-parent tunnels are never touched). Use another `-P` port for manual sessions.
 **Reviewer disagreements:** none.
 **Recommendation:** Ready to merge, with the post-merge owner check: `BACKUP_CONFIRM_PROD=1 npm run db:backup`, then `lsof -nP -iTCP:55432 -sTCP:LISTEN` and `pgrep -fl 'ssh .*-L 127.0.0.1:55432'` both print nothing.
+
+
+## Mission M5 — Weekly job via Railway CLI tunnel (opened 2026-11-03)
+
+**Mission (owner):** Update `scripts/weekly.sh` and `ops/launchd/com.chalkthat.nba.weekly.plist` to reach the Railway DB through the Railway CLI tunnel instead of `DATABASE_PUBLIC_URL` (public proxy removed). Reuse `scripts/lib/backup.mjs` tunnel handling, including closing railway and its ssh child on every exit path. Tunnel on a local port other than 55432/55433; run `db:schedule`, `db:backfill -- --season 2026-27`, `db:status` against it; close on exit even on failure. Production writes need an explicit opt-in flag (like `BACKUP_CONFIRM_PROD`), off by default. Test only against a throwaway local Postgres container and the fake railway. Never run against production; owner does the first real run by hand.
+
+**Path:** Feature, mission text as requirement (no PA) -> Gate 1 (owner answers open questions) -> Lead plan -> Dev (branch + PR) -> CI -> QA + Sec (process control, prod guard, config) -> Lead review -> readiness report -> Gate 2.
+
+### Tasks
+- [x] T0 Gate 1: owner answers recorded (see Approvals)
+- [x] T1 Lead: plan `docs/plans/M5-weekly-tunnel.md` (shared `scripts/lib/tunnel.mjs` extracted from backup as a pure-refactor first commit; `WEEKLY_TUNNEL_PORT` default 55434; `WEEKLY_CONFIRM_PROD=1` guard; node orchestrator `scripts/weekly.mjs` behind `weekly.sh`; drill-only `WEEKLY_STEP_FIXTURE`; Sec needed). No significant architecture change. Owner items for Gate 2: two prod flags (plist sets both), weekly now depends on the DB-Backups drive, daily backup may notify "lock held" when weekly's backup runs first (follow-up), concurrent tunnels + refactored backup unverified on real CLI.
+- [x] T2 Dev: PR #6 (`feat/weekly-tunnel`, head `b49fcc3`), CI 41683723531 green, root 76/76, backup drill 108/0, weekly drill 153/0 (W1-W24). Open: `.env.example` not updated (session permissions deny reading it). Negative check (no-op tunnel kill) went red but cascaded via the backup step, not isolated to weekly close.
+- [x] T3 QA review — READY WITH CONDITIONS (`docs/reviews/M5/qa.md`). All requirements traced to passing tests; weekly-only mutants (incl. backup-reused path) caught by W5/W6/W14 — the suspected coverage gap is not real. Minors: `.env.example` not updated; drill cascades after one broken close. Condition: owner's first manual run is the real check (incl. notification).
+- [x] T4 Security review — READY WITH CONDITIONS (`docs/reviews/M5/security.md`). Condition = Minor 1: refuse a real weekly run (prod flags) whose backup railway is the fake (prod writes with a fake "backup"). Minors 2-4: fake-mode backup in the real folder could be reused as fresh; redactor can split a secret at its 64 KB line cap; port check only sees the weekly env's BACKUP_TUNNEL_PORT. Notes 5-9.
+- [x] T5 Lead review — NOT READY (`docs/reviews/M5/lead.md`): fix cycle 1 = (1) Sec 1 raised to Major: refuse prod run if `BACKUP_RAILWAY_BIN` is set at all; (2) refuse fake weekly run pointing at real backup volume/log; (3) redactor drops overlong lines with a marker; (4) docs on port settings. `.env.example` -> owner at Gate 2; drill cascade + Sec notes 5/6/8 -> follow-ups.
+
+### Fix cycles (limit 3)
+1. Lead/Sec: findings 1-4 above. Head `dac36c3`, CI 41709082436 green, root 80/80, weekly drill 155/0 (new W25), backup drill 108/0. Deviation: W23 now hits the new guard first, so the step-fixture realpath check is no longer reached by the drill. Re-checks: QA READY WITH CONDITIONS (80/0, 155/0, 108/0; mutants confirm tests catch findings 1-3; Notes R-1 fixture branch unit-test-only, R-2 single-chunk redactor test is weak). Sec READY WITH CONDITIONS (findings 1 and 3 closed, 2 closed weekly side; new Minor R3-1: isolation check compares path strings, case-insensitive disk lets `/volumes/db-backups` past it -> follow-up; W23 -> follow-up unit test via `stepFixtureError`, no drill variant). Lead final pass: READY WITH CONDITIONS, no fix cycle 2 (R3-1 and W23 accepted as follow-ups).
+- [x] T6 Readiness report (below) -> **GATE 2: waiting on owner merge approval**
+
+### Follow-ups (after merge; bundle with open M4 hardening items)
+1. Backup side of Sec finding 2 + R3-1: tag fake-mode backup OK lines (`src=fake`) and have `findFreshBackup` reject them; optionally realpath + case-insensitive path compare.
+2. Enforce the backup/weekly port reservation in code (finding 4).
+3. Extract `stepFixtureError` in `scripts/lib/weekly.mjs` and unit-test it (W23 / Sec R4).
+4. Sec notes 5, 6, 8: stale reaper trusts recorded port; lock-takeover race; `logs/weekly.log` permissions.
+5. Drill cascade after one broken close (reap and assert ports free between cases).
+6. QA R-2: make the single-chunk redactor test fail on the old code.
+7. Daily backup's "another backup is running" alert when the weekly backup takes the lock first at wake.
+
+### Readiness report — PR #6
+**What changed:** https://github.com/Jayprox/ai-application-nba/pull/6 (`feat/weekly-tunnel`, head `dac36c3`)
+- `scripts/lib/tunnel.mjs`: M4 tunnel open/close, ssh-child kill and orphan reaper moved out of the backup unchanged (pure refactor commit, backup drill 108/0 before and after).
+- `scripts/weekly.mjs` (new orchestrator, called by `scripts/weekly.sh`): guard `WEEKLY_CONFIRM_PROD=1` (exactly "1", refuses before any lock, CLI call or backup; also refuses if `BACKUP_RAILWAY_BIN` is set) -> pre-write backup (reuse a validated dump under 24 h, else wait up to 10 min on a held lock, else run `db:backup`; abort with no writes on failure) -> tunnel on `WEEKLY_TUNNEL_PORT` (default 55434; 55432/55433/backup port refused) -> schedule -> positions -> backfill `--season 2026-27` -> status -> close railway and its ssh child on every exit path, then verify the port is free. Tunnel URL only in each step's child env; output redacted; log and notification kept.
+- Weekly plist sets `WEEKLY_CONFIRM_PROD=1` and `BACKUP_CONFIRM_PROD=1`; launchd logs moved out of `/tmp`. Not installed or loaded.
+- Weekly drill (`npm run db:weekly:drill`, local only, throwaway `postgres:18` + fake railway), unit tests, docs.
+**CI:** run 41709082436 green on `dac36c3`. Root 80/80. Weekly drill 155/0. Backup drill 108/0. Reproduced independently by QA and Sec.
+**Verdicts:** QA READY WITH CONDITIONS · Security READY WITH CONDITIONS · Lead READY WITH CONDITIONS. One fix cycle (Sec 1 raised to Major and fixed). No open Blocker/Major.
+**Risks / notes**
+- Nothing has run on the real Railway CLI: real tunnel, two tunnels at once, refactored backup on the real CLI and the notification are verified only by the owner's first manual run.
+- A real weekly run now needs the DB-Backups drive mounted, and needs both prod flags.
+- A fake-mode backup written into the real folder by hand could be reused as "fresh" for 24 h until follow-up 1 lands.
+**Reviewer disagreements:** none.
+**Recommendation:** Ready to merge, with conditions: (1) owner adds the `.env.example` lines (agents can't read it; text in `docs/reviews/M5/lead.md` finding 5); (2) owner's first real run by hand before installing the plist: `WEEKLY_CONFIRM_PROD=1 BACKUP_CONFIRM_PROD=1 npm run db:weekly`, then check `logs/weekly.log`, the notification, and that `pgrep -fl 'ssh .*-L 127.0.0.1:5543'` and `pgrep -fl 'railway connect'` print nothing.
+**Still owner-gated:** merge approval (Gate 2); first real run; installing/reloading the weekly plist.
+- [ ] T6 Readiness report -> Gate 2
+
+### Approvals
+- 2026-11-03 — Owner (Gate 1): mission text accepted as the requirement, plus:
+  1. **Pre-write backup: yes, abort the weekly run if it fails.** If a *validated* backup from the last 24 hours already exists, use it instead of taking a new one. If a backup run is in progress (lock held), wait up to 10 minutes for it to finish instead of failing. (Context: the Mac is often asleep at 03:17, so the daily backup and the Monday 09:07 weekly job can both fire at wake.)
+  2. **Keep `db:positions`**: order schedule -> positions -> backfill -> status.
+  3. **Weekly plist sets the production opt-in flag** (like the backup plist). Team does not install/reload the plist; owner does that after the manual first run.

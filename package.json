@@ -17,6 +17,7 @@
     "db:schedule": "node scripts/load-schedule.mjs",
     "db:standings": "node scripts/load-standings.mjs",
     "db:weekly": "zsh scripts/weekly.sh",
+    "db:weekly:drill": "zsh scripts/weekly-drill.sh",
     "db:positions": "node scripts/load-positions.mjs",
     "db:review": "node scripts/review-players.mjs",
     "db:backup": "node scripts/backup-db.mjs",

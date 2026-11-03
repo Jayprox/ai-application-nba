@@ -1,6 +1,10 @@
 // Off-Railway Postgres backup (M3, docs/plans/M3-backup.md, docs/backup-restore.md).
 // `npm run db:backup`, or daily via ops/launchd/com.chalkthat.nba.backup.plist.
 //
+// M4: railway starts its `ssh -N -L` child in its OWN process group and only stops it on a
+// graceful Ctrl+C, so every exit path here finds that ssh child (while railway is still its
+// parent), signals it explicitly, then checks the port is free (docs/plans/M4-backup-ssh-child.md).
+//
 // Opens the Railway CLI SSH tunnel (`railway connect --tunnel-only`), reads the
 // credentials from the CLI's output IN MEMORY, runs pg_dump with the password
 // in the child's env only, validates the dump, renames it into place and
@@ -14,7 +18,8 @@ import { fileURLToPath } from 'node:url';
 import {
   loadConfig, dumpName, DUMP_RE, PARTIAL_RE, selectForDeletion, parseTunnelOutput, hasUrlToken,
   redact, buildPgEnv, isMountPoint, assertSafeBackupDir, prodGuard,
-  timeMachineDevices,
+  timeMachineDevices, isRailwaySshForward, isRailwayTunnelCmd, descendantsOf, psSnapshot, listenerPids,
+  reapDecision, parseTunnelRecord,
 } from './lib/backup.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -30,7 +35,10 @@ process.umask(0o077);
 const started = Date.now();
 let cfg;
 let stage = 'preflight';
-let tunnel = null;       // { child, pid }
+let tunnel = null;       // { child, pid, ssh: [{pid, lstart}] }
+let killing = null;      // promise of the kill in progress, so a signal mid-kill waits for it
+let portStillHeld = false;
+const myUid = process.getuid();
 let activeChild = null;  // pg_dump / pg_restore
 let partialPath = null;
 let lockHeld = false;
@@ -55,13 +63,92 @@ function notify(msg) {
 }
 
 function groupAlive(pid) { try { process.kill(-pid, 0); return true; } catch { return false; } }
-async function killTunnel() {
-  if (!tunnel) return;
-  const { pid } = tunnel;
+function procAlive(pid) { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } }
+async function waitUntil(pred, ms) { for (let i = 0; i < ms / 100 && !pred(); i++) await sleep(100); return pred(); }
+
+// ssh processes we may signal for a tunnel on `port`: descendants of the railway pid (found
+// while railway is still their parent) plus the ones recorded earlier (same start time), all
+// ours (uid) and with the CLI's exact forward argv. Anything else is never returned.
+function sshTargets(rows, railwayPid, recorded, port) {
+  if (!rows) return [];
+  const ok = (r) => r && r.pid > 1 && r.pid !== process.pid && r.uid === myUid && isRailwaySshForward(r.args, port);
+  const out = new Map();
+  for (const r of descendantsOf(rows, railwayPid)) if (ok(r)) out.set(r.pid, r);
+  for (const s of recorded || []) {
+    const r = rows.find((x) => x.pid === s.pid);
+    if (ok(r) && s.lstart && s.lstart === r.lstart) out.set(r.pid, r);
+  }
+  return [...out.values()];
+}
+// The real CLI's ssh is its own group leader (also covers a ProxyCommand child); else only the pid.
+const sigProc = (r, sig) => { try { process.kill(r.pgid === r.pid ? -r.pid : r.pid, sig); } catch { /* gone */ } };
+// SIGTERM, wait up to 5 s, then SIGKILL anything that is still the same verified process.
+async function stopSsh(targets, port) {
+  for (const r of targets) sigProc(r, 'SIGTERM');
+  await waitUntil(() => !targets.some((r) => procAlive(r.pid)), 5000);
+  const left = targets.filter((r) => procAlive(r.pid));
+  if (!left.length) return;
+  const rows = psSnapshot();
+  for (const r of left) {
+    const now = rows && rows.find((x) => x.pid === r.pid);
+    if (now && now.lstart === r.lstart && now.uid === myUid && isRailwaySshForward(now.args, port)) sigProc(now, 'SIGKILL');
+  }
+  await waitUntil(() => !left.some((r) => procAlive(r.pid)), 2000);
+}
+async function waitPortFree(port, tries = 6) {
+  for (let i = 0; i < tries; i++) { if (await checkPortFree(port)) return true; await sleep(500); }
+  return false;
+}
+
+// An ssh forwarder on `port` whose railway parent is gone (PPID 1, or the verified railway of a
+// stale lock). reapDecision (pure, unit-tested) is the only gate; anything failing it is untouched.
+async function reapOrphanedSsh(port, { recordedRailwayPid = null, recorded = [] } = {}) {
+  const rows = psSnapshot();
+  if (!rows) return 0;
+  const lp = listenerPids(port);
+  const targets = [];
+  for (const pid of lp) {
+    const row = rows.find((r) => r.pid === pid);
+    const rec = recorded.find((x) => x.pid === pid);
+    if (row && reapDecision({ row, myUid, port, listenerPids: lp, recordedRailwayPid, expectedLstart: rec?.lstart ?? null }).kill) targets.push(row);
+  }
+  if (targets.length) await stopSsh(targets, port);
+  return targets.length;
+}
+
+function killTunnel() {
+  if (killing) return killing;
+  if (!tunnel) return Promise.resolve();
+  const t = tunnel;
   tunnel = null;
-  try { process.kill(-pid, 'SIGTERM'); } catch { return; }
-  for (let i = 0; i < 50 && groupAlive(pid); i++) await sleep(100);
-  if (groupAlive(pid)) { try { process.kill(-pid, 'SIGKILL'); } catch { /* gone */ } }
+  killing = doKillTunnel(t);
+  return killing;
+}
+async function doKillTunnel(t) {
+  const port = cfg.port;
+  // 1. Find ssh NOW, while railway is still its parent.
+  const targets = sshTargets(psSnapshot(), t.pid, t.ssh, port);
+  // 2. ssh first, then railway by its own stop path (SIGINT), escalating on its group.
+  for (const r of targets) sigProc(r, 'SIGTERM');
+  try { process.kill(-t.pid, 'SIGINT'); } catch { /* already gone */ }
+  if (!(await waitUntil(() => !groupAlive(t.pid), 2000))) {
+    try { process.kill(-t.pid, 'SIGTERM'); } catch { /* gone */ }
+    if (!(await waitUntil(() => !groupAlive(t.pid), 3000))) { try { process.kill(-t.pid, 'SIGKILL'); } catch { /* gone */ } }
+  }
+  await stopSsh(targets, port);
+  // 3. The port must be free now; one orphan sweep, then it is a reported failure.
+  let free = await waitPortFree(port);
+  if (!free) { await reapOrphanedSsh(port); free = await waitPortFree(port, 4); }
+  if (!free) portStillHeld = true;
+}
+
+function writeTunnelRecord() {
+  if (!tunnel) return;
+  try {
+    fs.writeFileSync(path.join(cfg.lockDir, 'tunnel.json'),
+      JSON.stringify({ railwayPid: tunnel.pid, port: cfg.port, railwayBin: cfg.railway, ssh: tunnel.ssh.map(({ pid, lstart }) => ({ pid, lstart })) }),
+      { mode: 0o600 });
+  } catch { /* best effort */ }
 }
 
 function removePartial() { if (partialPath) { try { fs.rmSync(partialPath, { force: true }); } catch { /* ignore */ } } }
@@ -76,7 +163,11 @@ async function cleanup() {
 }
 // Last resort, synchronous.
 process.on('exit', () => {
-  if (tunnel) { try { process.kill(-tunnel.pid, 'SIGKILL'); } catch { /* gone */ } }
+  if (tunnel) {
+    // ssh first (found while railway is still its parent), then railway's group.
+    try { for (const r of sshTargets(psSnapshot(), tunnel.pid, tunnel.ssh, cfg.port)) sigProc(r, 'SIGKILL'); } catch { /* best effort */ }
+    try { process.kill(-tunnel.pid, 'SIGKILL'); } catch { /* gone */ }
+  }
   if (activeChild) { try { activeChild.kill('SIGKILL'); } catch { /* gone */ } }
   removePartial();
   if (cfg) releaseLock();
@@ -86,6 +177,7 @@ async function finishFail(f) {
   if (finishing) return;
   finishing = true;
   await cleanup();
+  if (portStillHeld && f.stage !== 'cleanup') f.reason += `; tunnel port ${cfg.port} still in use after cleanup`;
   const line = `${iso()} FAIL stage=${f.stage} reason="${oneLine(f.reason)}" duration=${duration()}`;
   logLine(line);
   console.error(line);
@@ -127,20 +219,29 @@ function canConnect(port) {
   });
 }
 
-// A SIGKILLed run leaves its tunnel (own process group) alive. Its PGID is kept
-// in the lock dir; a later run kills that group, but only if the group leader
-// still looks like `railway connect ... --tunnel-only`.
+// A SIGKILLed run leaves its tunnel (railway in its own group, plus railway's ssh child in
+// another). tunnel.json in the lock dir records them. A later run kills railway's group only if
+// the recorded pid still runs exactly `<railwayBin> connect ... --tunnel-only -P <port>`, stops the
+// ssh children (descendants and recorded pids, verified), then sweeps orphaned ssh listeners.
 async function reapStaleTunnel() {
-  let pgid = 0;
-  try { pgid = Number(fs.readFileSync(path.join(cfg.lockDir, 'tunnel.pgid'), 'utf8')); } catch { return false; }
-  if (!(pgid > 1) || pgid === process.pid || !groupAlive(pgid)) return false;
-  const r = spawnSync('/bin/ps', ['-p', String(pgid), '-o', 'command='], { encoding: 'utf8' });
-  const cmd = r.status === 0 ? r.stdout : '';
-  if (!/railway/i.test(cmd) || !/\bconnect\b/.test(cmd) || !/--tunnel-only/.test(cmd)) return false;
-  try { process.kill(-pgid, 'SIGTERM'); } catch { return false; }
-  for (let i = 0; i < 50 && groupAlive(pgid); i++) await sleep(100);
-  if (groupAlive(pgid)) { try { process.kill(-pgid, 'SIGKILL'); } catch { /* gone */ } }
-  return true;
+  let rec = null;
+  try { rec = parseTunnelRecord(fs.readFileSync(path.join(cfg.lockDir, 'tunnel.json'), 'utf8')); } catch { /* none */ }
+  if (!rec) return false;
+  let did = false;
+  const rows = psSnapshot();
+  const rw = rows && rows.find((r) => r.pid === rec.railwayPid);
+  let verified = null;
+  if (rw && rw.pid !== process.pid && rw.uid === myUid && isRailwayTunnelCmd(rw.args, rec.port, rec.railwayBin)) {
+    verified = rw.pid;
+    await stopSsh(sshTargets(rows, rw.pid, rec.ssh, rec.port), rec.port);
+    const sig = (s) => { try { process.kill(rw.pgid === rw.pid ? -rw.pid : rw.pid, s); } catch { /* gone */ } };
+    const dead = () => !(rw.pgid === rw.pid ? groupAlive(rw.pid) : procAlive(rw.pid));
+    sig('SIGTERM');
+    if (!(await waitUntil(dead, 5000))) sig('SIGKILL');
+    did = true;
+  }
+  if ((await reapOrphanedSsh(rec.port, { recordedRailwayPid: verified, recorded: rec.ssh })) > 0) did = true;
+  return did;
 }
 
 async function takeLock() {
@@ -214,7 +315,12 @@ async function preflight() {
   if (w.code !== 0) throw new Fail('preflight', 'railway CLI not logged in');
 
   // 4. Port must be free, or the readiness probe could hit some other database.
-  if (!(await checkPortFree(cfg.port))) throw new Fail('preflight', `tunnel port ${cfg.port} is already in use`);
+  //    An ssh forwarder left by an earlier run (railway gone) is reaped; anything else is not touched.
+  if (!(await checkPortFree(cfg.port))) {
+    const n = await reapOrphanedSsh(cfg.port);
+    if (n > 0 && (await waitPortFree(cfg.port, 4))) logLine(`${iso()} NOTE reaped an orphaned ssh tunnel on port ${cfg.port}`);
+    else throw new Fail('preflight', `tunnel port ${cfg.port} is already in use`);
+  }
 }
 
 async function openTunnel() {
@@ -228,8 +334,8 @@ async function openTunnel() {
   child.on('exit', () => { exited = true; });
   const spawnErr = new Promise((r) => child.once('error', () => r(true)));
   if (!child.pid) { await spawnErr; throw new Fail('tunnel', 'could not start railway CLI'); }
-  tunnel = { child, pid: child.pid };
-  try { fs.writeFileSync(path.join(cfg.lockDir, 'tunnel.pgid'), String(child.pid)); } catch { /* best effort */ }
+  tunnel = { child, pid: child.pid, ssh: [] };
+  writeTunnelRecord();
 
   const deadline = Date.now() + cfg.tunnelTimeoutS * 1000;
   let creds = null;
@@ -241,7 +347,12 @@ async function openTunnel() {
       secrets = [creds.password];
       buf = ''; // drop the raw output
     }
-    if (creds && (await canConnect(cfg.port))) return creds;
+    if (creds && (await canConnect(cfg.port))) {
+      // The URL is printed only after ssh is ready: record it while railway is still its parent.
+      tunnel.ssh = sshTargets(psSnapshot(), tunnel.pid, [], cfg.port).map((r) => ({ pid: r.pid, lstart: r.lstart }));
+      writeTunnelRecord();
+      return creds;
+    }
     if (exited) throw new Fail('tunnel', 'railway tunnel process exited early (output withheld)');
     await sleep(creds ? 500 : 200);
   }
@@ -310,6 +421,8 @@ async function main() {
   const size = await validate();
   commit(finalName);
   const { deleted, kept } = rotate(finalName);
+  // Same convention as rotate: the good dump is already committed; the leaked port is reported.
+  if (portStillHeld) throw new Fail('cleanup', `tunnel port ${cfg.port} still in use after run`, 2);
   const line = `${iso()} OK   file=${finalName} size=${(size / 1048576).toFixed(1)}MB kept=${kept} deleted=${deleted} duration=${duration()}`;
   logLine(line);
   console.log(line);

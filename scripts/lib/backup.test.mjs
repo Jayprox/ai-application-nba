@@ -6,6 +6,8 @@ import path from 'node:path';
 import {
   loadConfig, dumpName, DUMP_RE, selectForDeletion, parseTunnelOutput, hasUrlToken,
   redact, buildPgEnv, assertSafeBackupDir, isMountPoint, prodGuard, timeMachineDevices,
+  isRailwaySshForward, isRailwayTunnelCmd, parsePsRows, descendantsOf, parseLsofPids, parseLsofListeners,
+  reapDecision, parseTunnelRecord,
 } from './backup.mjs';
 
 // Fake password with the characters that need percent-encoding in a URL.
@@ -201,4 +203,105 @@ test('timeMachineDevices reads tmutil mount points by stat only', () => {
     assert.ok(timeMachineDevices(run).has(fs.statSync(tmp).dev));
     assert.doesNotThrow(() => timeMachineDevices(() => { throw new Error('no tmutil'); }));
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+// ---- M4: ssh child of `railway connect --tunnel-only` ----
+// Argv as built by base_ssh_command + apply_forward_options in railwayapp/cli v5.71.0
+// src/commands/ssh/native.rs (key path and target are placeholders).
+const sshArgs = (port = 55432, { target = 'svc-id:inst@ssh.railway.com', pre = '', extra = '' } = {}) =>
+  `ssh ${pre}-i /Users/x/.railway/ssh/id_ed25519 -N -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes ` +
+  `-o ServerAliveInterval=30 -o ServerAliveCountMax=3 ${extra}-L 127.0.0.1:${port}:127.0.0.1:5432 ${target}`;
+
+test('isRailwaySshForward accepts the v5.71.0 argv (also -p 2222 and ssh.railway-develop.com) and the drill fixture argv', () => {
+  assert.ok(isRailwaySshForward(sshArgs(), 55432));
+  assert.ok(isRailwaySshForward(sshArgs(55432, { pre: '-p 2222 ', target: 'a:b@ssh.railway-develop.com' }), 55432));
+  assert.ok(isRailwaySshForward('ssh /repo/scripts/fixtures/fake-ssh-forward.mjs -i /t/fake_key -N -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L 127.0.0.1:55432:127.0.0.1:61000 service:fake@ssh.railway.com', 55432));
+  assert.ok(isRailwaySshForward('/usr/bin/ssh ' + sshArgs().slice(4), 55432));
+});
+
+test('isRailwaySshForward rejects other ports (exact number, not substring), binds, and shapes', () => {
+  for (const p of [5543, 554321, 155432]) assert.ok(!isRailwaySshForward(sshArgs(p), 55432), `port ${p}`);
+  assert.ok(!isRailwaySshForward(sshArgs(55432), 5543));
+  assert.ok(!isRailwaySshForward(sshArgs(55432).replace('127.0.0.1:55432', '0.0.0.0:55432'), 55432));
+  assert.ok(!isRailwaySshForward(sshArgs(55432).replace('-L 127.0.0.1:55432', '-L localhost:55432'), 55432));
+  assert.ok(!isRailwaySshForward(sshArgs(55432, { extra: '-L 127.0.0.1:1:127.0.0.1:2 ' }), 55432));
+  assert.ok(!isRailwaySshForward(sshArgs(55432, { extra: '-R 9:127.0.0.1:22 ' }), 55432));
+  assert.ok(!isRailwaySshForward(sshArgs(55432, { extra: '-D 1080 ' }), 55432));
+  assert.ok(!isRailwaySshForward(sshArgs().replace(' -N', ''), 55432));
+  assert.ok(!isRailwaySshForward(sshArgs().replace('ExitOnForwardFailure=yes', 'ExitOnForwardFailure=no'), 55432));
+  assert.ok(!isRailwaySshForward(sshArgs(55432, { target: 'user@example.com' }), 55432));
+  assert.ok(!isRailwaySshForward(sshArgs(55432, { target: 'u@ssh.railway.com.evil.net' }), 55432));
+  for (const a0 of ['sshd', 'autossh', '/usr/bin/ssh-agent', 'grep', 'node']) {
+    assert.ok(!isRailwaySshForward(sshArgs().replace(/^ssh/, a0), 55432), a0);
+  }
+  assert.ok(!isRailwaySshForward('', 55432));
+});
+
+test('isRailwayTunnelCmd matches the exact tunnel-only command, directly or via /bin/sh', () => {
+  const bin = '/opt/homebrew/bin/railway';
+  assert.ok(isRailwayTunnelCmd(`${bin} connect Postgres --tunnel-only -P 55432 -e production`, 55432, bin));
+  const fake = '/repo/scripts/fixtures/fake-railway.sh';
+  assert.ok(isRailwayTunnelCmd(`/bin/sh ${fake} connect Postgres --tunnel-only -P 55432 -e production`, 55432, fake));
+  assert.ok(!isRailwayTunnelCmd(`${bin} connect Postgres --tunnel-only -P 55433 -e production`, 55432, bin));
+  assert.ok(!isRailwayTunnelCmd(`${bin} connect Postgres --tunnel-only -e production`, 55432, bin));
+  assert.ok(!isRailwayTunnelCmd(`${bin} connect Postgres -P 55432 -e production`, 55432, bin));
+  assert.ok(!isRailwayTunnelCmd(`/usr/local/bin/railway connect Postgres --tunnel-only -P 55432`, 55432, bin));
+  assert.ok(!isRailwayTunnelCmd(`vim railway connect --tunnel-only -P 55432`, 55432, bin));
+  assert.ok(!isRailwayTunnelCmd(`${bin} whoami`, 55432, bin));
+  assert.ok(!isRailwayTunnelCmd(`${bin} connect Postgres --tunnel-only -P 55432`, 55432, ''));
+});
+
+const PS = [
+  '  100     1   100   501 Mon Nov  2 22:59:25 2026 /sbin/launchd',
+  '  200   100   200   501 Mon Nov  2 22:59:26 2026 /bin/sh /x/fake railway.sh connect Postgres --tunnel-only -P 55432',
+  '  300   200   300   501 Mon Nov  2 22:59:27 2026 ssh -N -L 127.0.0.1:55432:127.0.0.1:1 a@ssh.railway.com',
+  '  400   300   400   501 Mon Nov  2 22:59:28 2026 child-of-ssh',
+  'garbage line',
+].join('\n');
+
+test('parsePsRows handles leading spaces, lstart and args with spaces', () => {
+  const rows = parsePsRows(PS);
+  assert.equal(rows.length, 4);
+  assert.deepEqual(rows[1], { pid: 200, ppid: 100, pgid: 200, uid: 501, lstart: 'Mon Nov 2 22:59:26 2026', args: '/bin/sh /x/fake railway.sh connect Postgres --tunnel-only -P 55432' });
+  assert.deepEqual(parsePsRows(''), []);
+});
+
+test('descendantsOf walks several levels, excludes the root and survives cycles', () => {
+  const rows = parsePsRows(PS);
+  assert.deepEqual(descendantsOf(rows, 200).map((r) => r.pid), [300, 400]);
+  assert.deepEqual(descendantsOf(rows, 400), []);
+  const cyc = [{ pid: 1, ppid: 2 }, { pid: 2, ppid: 1 }];
+  assert.deepEqual(descendantsOf(cyc, 1).map((r) => r.pid), [2]);
+});
+
+test('parseLsofPids and parseLsofListeners read -F output and ignore garbage', () => {
+  assert.deepEqual(parseLsofPids('p123\nf4\n'), [123]);
+  assert.deepEqual(parseLsofPids('what\npx\n'), []);
+  assert.deepEqual(parseLsofListeners('p123\nf12\nn127.0.0.1:55432\np9\nn*:55432\np7\nn127.0.0.1:55433\n', 55432), [123]);
+  assert.deepEqual(parseLsofListeners('', 55432), []);
+});
+
+test('reapDecision kills only when every rule holds, with one negative per rule', () => {
+  const row = { pid: 500, ppid: 1, pgid: 500, uid: 501, lstart: 'Mon Nov 2 22:59:27 2026', args: sshArgs() };
+  const ok = { row, myUid: 501, port: 55432, listenerPids: [500], selfPid: 1 };
+  assert.deepEqual(reapDecision(ok), { kill: true, reason: 'orphaned-railway-ssh' });
+  assert.equal(reapDecision({ ...ok, row: { ...row, ppid: 777 }, recordedRailwayPid: 777 }).kill, true);
+  assert.equal(reapDecision({ ...ok, expectedLstart: row.lstart }).kill, true);
+  assert.equal(reapDecision({ ...ok, row: { ...row, uid: 0 } }).reason, 'wrong-uid');
+  assert.equal(reapDecision({ ...ok, row: { ...row, ppid: 777 } }).reason, 'parent-alive');
+  assert.equal(reapDecision({ ...ok, row: { ...row, ppid: 777 }, recordedRailwayPid: 778 }).reason, 'parent-alive');
+  assert.equal(reapDecision({ ...ok, row: { ...row, args: sshArgs(55433) } }).reason, 'argv-mismatch');
+  assert.equal(reapDecision({ ...ok, listenerPids: [501] }).reason, 'not-listener');
+  assert.equal(reapDecision({ ...ok, expectedLstart: 'Mon Nov 2 01:00:00 2026' }).reason, 'pid-reused');
+  assert.equal(reapDecision({ ...ok, row: { ...row, pid: 1 }, listenerPids: [1] }).reason, 'bad-pid');
+  assert.equal(reapDecision({ ...ok, selfPid: 500 }).reason, 'bad-pid');
+  assert.equal(reapDecision({ ...ok, listenerPids: undefined }).kill, false);
+});
+
+test('parseTunnelRecord validates what was read back from the lock dir', () => {
+  const good = { railwayPid: 10, port: 55432, railwayBin: '/x/railway', ssh: [{ pid: 11, lstart: 'a' }, { pid: 'x' }, { pid: 1 }] };
+  assert.deepEqual(parseTunnelRecord(JSON.stringify(good)), { railwayPid: 10, port: 55432, railwayBin: '/x/railway', ssh: [{ pid: 11, lstart: 'a' }] });
+  for (const bad of ['', 'nope', '{}', JSON.stringify({ ...good, railwayPid: 1 }), JSON.stringify({ ...good, port: 0 }), JSON.stringify({ ...good, railwayBin: '' })]) {
+    assert.equal(parseTunnelRecord(bad), null);
+  }
 });

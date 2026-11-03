@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, dumpName, prodGuard } from './backup.mjs';
 import {
-  loadWeeklyConfig, weeklyGuard, WEEKLY_GUARD_MSG, findFreshBackup, backupLockState,
+  loadWeeklyConfig, weeklyGuard, WEEKLY_GUARD_MSG, BACKUP_BIN_SET_MSG, FAKE_ISOLATION_MSG, LONG_LINE_MARKER, fakeIsolationError, findFreshBackup, backupLockState,
   buildTunnelUrl, stepEnv, stepArgv, lineRedactor, STEPS, BACKUP_BUSY_LINE,
 } from './weekly.mjs';
 import { parseTunnelOutput } from './backup.mjs';
@@ -61,6 +61,39 @@ test('weeklyGuard: the weekly flag must be exactly 1 and the backup flag is need
   assert.equal(weeklyGuard({ WEEKLY_CONFIRM_PROD: '1' }), WEEKLY_GUARD_MSG, 'weekly flag without the backup flag');
   assert.equal(weeklyGuard({ BACKUP_CONFIRM_PROD: '1' }), WEEKLY_GUARD_MSG, 'backup flag without the weekly flag');
   assert.equal(weeklyGuard({ WEEKLY_CONFIRM_PROD: '1', BACKUP_CONFIRM_PROD: 'true' }), WEEKLY_GUARD_MSG);
+});
+
+test('weeklyGuard: a production run refuses any BACKUP_RAILWAY_BIN', () => {
+  const both = { WEEKLY_CONFIRM_PROD: '1', BACKUP_CONFIRM_PROD: '1' };
+  assert.equal(weeklyGuard({ ...both, BACKUP_RAILWAY_BIN: FAKE_BIN }), BACKUP_BIN_SET_MSG, 'fake backup bin');
+  assert.equal(weeklyGuard({ ...both, BACKUP_RAILWAY_BIN: '/usr/local/bin/railway' }), BACKUP_BIN_SET_MSG, 'other absolute path');
+  assert.equal(weeklyGuard({ ...both, WEEKLY_RAILWAY_BIN: '/opt/homebrew/bin/railway', BACKUP_RAILWAY_BIN: FAKE_BIN }), BACKUP_BIN_SET_MSG);
+  assert.equal(weeklyGuard({ ...both }), null, 'unset still passes');
+  assert.equal(weeklyGuard({ ...both, BACKUP_RAILWAY_BIN: '' }), null, 'empty counts as unset');
+});
+
+test('fakeIsolationError: a fake run may not point the backup at the real volume, folder or log', () => {
+  const home = path.join(tmp, 'home');
+  const W = path.join(tmp, 'iso');
+  const fake = { WEEKLY_RAILWAY_BIN: FAKE_BIN, BACKUP_RAILWAY_BIN: FAKE_BIN };
+  const iso = { BACKUP_VOLUME: W, BACKUP_DIR: path.join(W, 'b'), BACKUP_LOG: path.join(W, 'backup.log') };
+  const err = (extra) => {
+    const env = { ...fake, ...iso, ...extra };
+    return fakeIsolationError(loadWeeklyConfig(env, { home }), env, { home });
+  };
+  assert.equal(err({}), null, 'drill-style paths are accepted');
+  // defaults (no BACKUP_* overrides at all)
+  const envD = { ...fake };
+  assert.equal(fakeIsolationError(loadWeeklyConfig(envD, { home }), envD, { home }), FAKE_ISOLATION_MSG, 'defaults');
+  assert.equal(err({ BACKUP_VOLUME: '/Volumes/DB-Backups' }), FAKE_ISOLATION_MSG, 'volume');
+  assert.equal(err({ BACKUP_VOLUME: '/Volumes/DB-Backups/' }), FAKE_ISOLATION_MSG, 'volume, trailing slash');
+  assert.equal(err({ BACKUP_DIR: '/Volumes/DB-Backups' }), FAKE_ISOLATION_MSG, 'dir equal');
+  assert.equal(err({ BACKUP_DIR: '/Volumes/DB-Backups/sub/../x' }), FAKE_ISOLATION_MSG, 'dir under');
+  assert.equal(err({ BACKUP_LOG: path.join(home, 'Library/Logs/chalk-that-nba/backup.log') }), FAKE_ISOLATION_MSG, 'log');
+  assert.equal(err({ BACKUP_DIR: '/Volumes/DB-Backups-other/x' }), null, 'a sibling name is not the real folder');
+  // a real (non-fake) weekly is not this check's business
+  const real = { WEEKLY_CONFIRM_PROD: '1', BACKUP_CONFIRM_PROD: '1' };
+  assert.equal(fakeIsolationError(loadWeeklyConfig(real, { home }), real, { home }), null);
 });
 
 test('weeklyGuard: only the repo fake (by realpath) is exempt, and only with a fake backup bin', () => {
@@ -207,6 +240,36 @@ test('lineRedactor masks the percent-encoded form too', () => {
   const r = lineRedactor(['p@ss'], (l) => out.push(l));
   r.push('x p%40ss y\n');
   assert.deepEqual(out, ['x [redacted] y']);
+});
+
+test('lineRedactor never writes part of a secret when a line passes 64 KB', () => {
+  const secret = 'Zq8-very-secret-pw-91';
+  const out = [];
+  const r = lineRedactor([secret], (l) => out.push(l));
+  r.push('a'.repeat(65000) + secret + 'b'.repeat(1012) + '\nnext\n');
+  r.flush();
+  const all = out.join('\n');
+  for (let i = 0; i + 4 <= secret.length; i++) assert.ok(!all.includes(secret.slice(i, i + 4)), secret.slice(i, i + 4));
+  assert.ok(out.includes(LONG_LINE_MARKER));
+  assert.ok(out.includes('next'));
+});
+
+test('lineRedactor drops an over-long line across pushes and resumes at the next newline', () => {
+  const secret = 'Zq8-very-secret-pw-91';
+  const out = [];
+  const r = lineRedactor([secret], (l) => out.push(l));
+  r.push('a'.repeat(65000) + secret.slice(0, 9));
+  r.push(secret.slice(9) + 'b'.repeat(2000)); // pushes it over the cap; the secret straddles the cut
+  r.push('c'.repeat(500) + secret);           // still the same line: dropped
+  r.push('\nnext ' + secret + '\nlast');
+  r.flush();
+  assert.deepEqual(out, [LONG_LINE_MARKER, 'next [redacted]', 'last']);
+  // a line that ends while still being dropped writes nothing on flush
+  const out2 = [];
+  const r2 = lineRedactor([secret], (l) => out2.push(l));
+  r2.push('x'.repeat(70000));
+  r2.flush();
+  assert.deepEqual(out2, [LONG_LINE_MARKER]);
 });
 
 // ---- steps ----

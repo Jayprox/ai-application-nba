@@ -10,6 +10,9 @@ import { loadConfig, confirmGuard, prodGuard, isMountPoint, DUMP_RE, redact, FAK
 const LIB_REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const DAY_MS = 24 * 3600 * 1000;
 export const WEEKLY_GUARD_MSG = 'production run not confirmed (set WEEKLY_CONFIRM_PROD=1 and BACKUP_CONFIRM_PROD=1)';
+export const BACKUP_BIN_SET_MSG = 'BACKUP_RAILWAY_BIN must not be set for a production run';
+export const FAKE_ISOLATION_MSG = 'a fake run must not use the real backup volume, folder or log (set BACKUP_VOLUME, BACKUP_DIR and BACKUP_LOG)';
+export const LONG_LINE_MARKER = '[output line over 64 KB truncated]';
 export const RESERVED_PORTS = [55432, 55433];
 export const BACKUP_BUSY_LINE = /FAIL stage=preflight reason="another backup is running" duration=\d+s\s*$/;
 
@@ -77,7 +80,23 @@ export function weeklyGuard(env = process.env, { repoRoot = LIB_REPO_ROOT } = {}
     const { BACKUP_CONFIRM_PROD: _drop, ...noFlag } = env;
     return prodGuard(noFlag, { repoRoot }) === null ? null : WEEKLY_GUARD_MSG;
   }
-  return env.BACKUP_CONFIRM_PROD === '1' ? null : WEEKLY_GUARD_MSG;
+  if (env.BACKUP_CONFIRM_PROD !== '1') return WEEKLY_GUARD_MSG;
+  // The real backup resolves railway from PATH only when BACKUP_RAILWAY_BIN is unset; any value
+  // (fake or not) could make the "backup" come from somewhere other than production.
+  return env.BACKUP_RAILWAY_BIN ? BACKUP_BIN_SET_MSG : null;
+}
+
+// A fake-exempt run must not touch the real backup locations, or its throwaway dump and OK line
+// could later be reused as a fresh production backup. Returns a fixed reason or null.
+export function fakeIsolationError(cfg, env = process.env, { home = os.homedir(), repoRoot = LIB_REPO_ROOT } = {}) {
+  if (!isFakeBin(env, 'WEEKLY_RAILWAY_BIN', { repoRoot })) return null;
+  const REAL_VOL = '/Volumes/DB-Backups';
+  const REAL_LOG = path.join(home, 'Library/Logs/chalk-that-nba/backup.log');
+  const dir = path.resolve(cfg.backup.dir);
+  const bad = path.resolve(cfg.backup.volume) === REAL_VOL
+    || dir === REAL_VOL || dir.startsWith(REAL_VOL + path.sep)
+    || path.resolve(cfg.backup.logPath) === path.resolve(REAL_LOG);
+  return bad ? FAKE_ISOLATION_MSG : null;
 }
 
 const STAMP_RE = /^chalk-that-nba_(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z\.dump$/;
@@ -153,14 +172,27 @@ export function stepArgv(step, season, { fixture = false } = {}) {
 // complete lines are written. `write(line)` gets the redacted text without the newline.
 export function lineRedactor(secrets, write) {
   let buf = '';
+  let dropping = false; // true while discarding the rest of an over-long line
   const out = (line) => write(redact(line, secrets));
   return {
     push(chunk) {
-      buf += String(chunk);
-      let i;
-      while ((i = buf.indexOf('\n')) >= 0) { out(buf.slice(0, i)); buf = buf.slice(i + 1); }
-      if (buf.length > 65536) { out(buf.slice(0, buf.length - 1024)); buf = buf.slice(-1024); }
+      let rest = String(chunk);
+      for (;;) {
+        const nl = rest.indexOf('\n');
+        if (dropping) {
+          if (nl < 0) return;
+          dropping = false; rest = rest.slice(nl + 1); continue;
+        }
+        if (nl < 0) {
+          buf += rest;
+          if (buf.length > 65536) { write(LONG_LINE_MARKER); buf = ''; dropping = true; }
+          return;
+        }
+        buf += rest.slice(0, nl); rest = rest.slice(nl + 1);
+        if (buf.length > 65536) write(LONG_LINE_MARKER); else out(buf);
+        buf = '';
+      }
     },
-    flush() { if (buf) { out(buf); buf = ''; } },
+    flush() { if (buf && !dropping) out(buf); buf = ''; },
   };
 }

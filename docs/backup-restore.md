@@ -23,7 +23,8 @@ production. It reuses a validated dump under 24 h old (the dump exists under its
 and `backup.log` has its `OK` line), waits up to 10 minutes if a backup is running (the lock is
 held), and otherwise runs `scripts/backup-db.mjs` itself. If that fails the weekly run aborts
 before opening its own tunnel. It uses a different tunnel port (55434) and lock (`weekly.lock`),
-so neither job can reap the other's tunnel.
+so neither job can reap the other's tunnel. A production weekly run refuses to start if
+`BACKUP_RAILWAY_BIN` is set (to anything), so its backup always comes from the real CLI.
 
 ## How it runs
 

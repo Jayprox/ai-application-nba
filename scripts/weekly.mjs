@@ -14,7 +14,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createTunnel, TunnelError } from './lib/tunnel.mjs';
 import {
-  loadWeeklyConfig, weeklyGuard, isFakeBin, findFreshBackup, backupLockState, buildTunnelUrl,
+  loadWeeklyConfig, weeklyGuard, fakeIsolationError, isFakeBin, findFreshBackup, backupLockState, buildTunnelUrl,
   stepEnv, stepArgv, lineRedactor, STEPS, BACKUP_BUSY_LINE,
 } from './lib/weekly.mjs';
 
@@ -240,6 +240,8 @@ async function main() {
   // Production guard: first, before the lock, the backup, any CLI call or any child.
   const blocked = weeklyGuard(process.env);
   if (blocked) throw new Fail('preflight', blocked);
+  const notIsolated = fakeIsolationError(cfg, process.env);
+  if (notIsolated) throw new Fail('preflight', notIsolated);
   if (cfg.stepFixture && !isFakeBin(process.env, 'WEEKLY_RAILWAY_BIN')) throw new Fail('preflight', 'step fixture requires the fake railway');
 
   tunnel = createTunnel({

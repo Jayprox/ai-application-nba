@@ -420,7 +420,7 @@ common "W22"
 print "== W23 Test hook outside fake mode =="
 rm -f $WORK/shadow.calls; clear_marks
 run_weekly --shadow-wbin WEEKLY_RAILWAY_BIN=$SHADOW/railway WEEKLY_CONFIRM_PROD=1 BACKUP_CONFIRM_PROD=1
-expect_wfail "WEEKLY_STEP_FIXTURE=1 with a non-fake bin" preflight "step fixture requires the fake railway"
+expect_wfail "WEEKLY_STEP_FIXTURE=1 with a non-fake bin (the guard now refuses first)" preflight "BACKUP_RAILWAY_BIN must not be set for a production run"
 [[ ! -e $WORK/shadow.calls && $(nmarks) -eq 0 ]] && wlock_gone && pass "  shadow never called, no lock, 0 marks" || fail "  something ran"
 
 print "== W24 Plist =="
@@ -428,6 +428,14 @@ PL=ops/launchd/com.chalkthat.nba.weekly.plist
 plutil -lint $PL >/dev/null && pass "plutil -lint passes" || fail "plutil -lint"
 [[ "$(plutil -extract EnvironmentVariables.WEEKLY_CONFIRM_PROD raw -o - $PL 2>/dev/null)" == 1 && "$(plutil -extract EnvironmentVariables.BACKUP_CONFIRM_PROD raw -o - $PL 2>/dev/null)" == 1 ]] && pass "both opt-in flags are exactly 1" || fail "plist flags"
 grep -q "DATABASE_PUBLIC_URL" $PL && fail "plist mentions DATABASE_PUBLIC_URL" || pass "plist holds no database URL"
+
+print "== W25 Production flags with a fake BACKUP_RAILWAY_BIN =="
+mk_fresh_backup; BL=$(blines); D0=$(ndumps)
+rm -f $WORK/shadow.calls; clear_marks
+run_weekly --shadow-wbin WEEKLY_RAILWAY_BIN=$SHADOW/railway WEEKLY_CONFIRM_PROD=1 BACKUP_CONFIRM_PROD=1
+expect_wfail "both flags + fake BACKUP_RAILWAY_BIN" preflight "BACKUP_RAILWAY_BIN must not be set for a production run"
+[[ ! -e $WORK/shadow.calls && $(nmarks) -eq 0 ]] && wlock_gone && [[ $(blines) == $BL && $(ndumps) == $D0 ]] \
+  && pass "  shadow never called, no lock, no new dump or backup log line, 0 marks" || fail "  something ran after the refusal"
 
 print "== Summary: $PASS passed, $FAILN failed =="
 [[ $FAILN -eq 0 ]] && exit 0 || exit 1

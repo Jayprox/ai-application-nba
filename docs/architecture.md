@@ -790,7 +790,7 @@ Install per package: `npm ci` (or `npm install`) in `/`, `backend/`,
 | backend | `npm test` | `node --test --test-concurrency=1 'test/*.test.js'` | **Yes, with real loaded data** | `TEST_DATABASE_URL` (falls back to `DATABASE_URL`); `JWT_SECRET` is generated if unset | 21 pass / 44 fail / 3 skip (see below) |
 | worker | `npm test` | `node --test --test-concurrency=1 'test/*.test.js'` | Optional | `WORKER_TEST_DATABASE_URL` | without it: 17 pass, 6 skip. With it: 23 pass, 0 skip |
 | root (backup drill) | `npm run db:backup:drill` | zsh harness | Docker (two throwaway `postgres:18`), macOS `hdiutil`, Homebrew libpq | none (generates its own random passwords) | 108 PASS; local only (CI has no hdiutil), not in `npm test` |
-| root (weekly drill) | `npm run db:weekly:drill` | zsh harness | Docker (one throwaway `postgres:18`), macOS `hdiutil`, Homebrew libpq | none (random passwords and ports; fake Railway CLI) | 153 PASS; local only (CI has no hdiutil), not in `npm test` |
+| root (weekly drill) | `npm run db:weekly:drill` | zsh harness | Docker (one throwaway `postgres:18`), macOS `hdiutil`, Homebrew libpq | none (random passwords and ports; fake Railway CLI) | 155 PASS; local only (CI has no hdiutil), not in `npm test` |
 | frontend | `npm test` | `vitest run` (jsdom) | No | none (`fetch` mocked) | 32/32 pass |
 
 Details:

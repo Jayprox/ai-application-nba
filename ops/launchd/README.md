@@ -65,6 +65,8 @@ skipped (run `npm run db:weekly` by hand).
   `FAIL stage=backup reason="db:backup failed (exit 1)"` (see `backup.log` for the cause). Nothing is written to the database.
 - **Port 55434 in use.** `FAIL stage=preflight reason="tunnel port 55434 is already in use"`. A leftover weekly tunnel is
   cleaned up automatically; anything else is left alone. Do not use 55432-55434 for manual tunnels.
+  If `BACKUP_TUNNEL_PORT` or `WEEKLY_TUNNEL_PORT` is set in either plist, the two must differ and neither may be 55432 or 55433
+  (the weekly job only checks this against its own environment).
 - **Another backup is running** for more than 10 minutes: `FAIL stage=backup reason="backup still running after 600s"`.
 - **Known noise at wake.** If the Mac wakes with both jobs due and the weekly job's backup takes the lock first, the daily
   backup logs `FAIL stage=preflight reason="another backup is running"` and notifies, even though a backup was taken.

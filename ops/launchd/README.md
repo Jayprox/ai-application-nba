@@ -1,14 +1,32 @@
 # Weekly NBA.com run on JD's Mac (launchd)
 
-NBA.com blocks cloud IPs, so the weekly reconcile runs from the Mac:
-`scripts/weekly.sh` = `db:schedule` + `db:backfill -- --season 2026-27` +
-`db:status`, logged to `logs/weekly.log`, with a macOS notification.
+NBA.com blocks cloud IPs, so the weekly reconcile runs from the Mac. Since M5
+(`docs/plans/M5-weekly-tunnel.md`) `scripts/weekly.sh` hands over to
+`scripts/weekly.mjs`, which reaches the database through the Railway CLI tunnel
+(local port 55434, set `WEEKLY_TUNNEL_PORT` to change) instead of
+`DATABASE_PUBLIC_URL`. In order:
 
-Run it by hand any time: `npm run db:weekly`
+1. Production guard: `WEEKLY_CONFIRM_PROD=1` and `BACKUP_CONFIRM_PROD=1` are both needed.
+2. Backup first (the run aborts if it fails): a validated backup under 24 h old is
+   reused; if a backup is running (its lock is held) the weekly job waits up to
+   10 minutes; otherwise it runs `scripts/backup-db.mjs`.
+3. Open the tunnel, then `db:schedule` -> `db:positions` -> `db:backfill -- --season 2026-27`
+   -> `db:status`, stopping at the first failure, then close the tunnel (on every exit path,
+   including failure and a signal).
+
+Log: `logs/weekly.log` (+ a macOS notification). launchd's own output goes to
+`~/Library/Logs/chalk-that-nba/weekly.launchd.{out,err}`.
+
+Run it by hand any time: `WEEKLY_CONFIRM_PROD=1 BACKUP_CONFIRM_PROD=1 npm run db:weekly`.
+Without the flags it refuses before any Railway call. **Do the first run by hand (drive
+mounted, `railway login` current), look at `logs/weekly.log`, and only then install the plist.**
+If a run ends `FAIL stage=cleanup`, report it and do not retry.
 
 As of 2026-10-15 it runs on the MacBook Pro (the plist path is `/Users/jayprox_pro/...`). Only one Mac should have it loaded; on the Air run the `unload` line below and delete its copy in `~/Library/LaunchAgents/`. If you move it again, change the path in the plist first.
 
-## Install (once)
+## Install (once, after the first good manual run)
+
+The plist sets both opt-in flags (not secrets) and holds no database URL.
 
 ```
 cp ops/launchd/com.chalkthat.nba.weekly.plist ~/Library/LaunchAgents/
@@ -39,6 +57,17 @@ launchctl load ~/Library/LaunchAgents/com.chalkthat.nba.weekly.plist
 To stop: the `unload` line alone. If the Mac is asleep at the scheduled
 time, launchd runs the job at the next wake; if it's off, that week is
 skipped (run `npm run db:weekly` by hand).
+
+## Weekly: things that make it fail
+
+- **Railway session.** Not logged in: `FAIL stage=preflight reason="railway CLI not logged in"`. Run `railway login`.
+- **Drive not mounted.** With no fresh backup to reuse, the backup step fails and the run aborts with
+  `FAIL stage=backup reason="db:backup failed (exit 1)"` (see `backup.log` for the cause). Nothing is written to the database.
+- **Port 55434 in use.** `FAIL stage=preflight reason="tunnel port 55434 is already in use"`. A leftover weekly tunnel is
+  cleaned up automatically; anything else is left alone. Do not use 55432-55434 for manual tunnels.
+- **Another backup is running** for more than 10 minutes: `FAIL stage=backup reason="backup still running after 600s"`.
+- **Known noise at wake.** If the Mac wakes with both jobs due and the weekly job's backup takes the lock first, the daily
+  backup logs `FAIL stage=preflight reason="another backup is running"` and notifies, even though a backup was taken.
 
 ---
 

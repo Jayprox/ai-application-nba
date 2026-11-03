@@ -143,13 +143,14 @@ npm install
 npm run dev
 ```
 
-Fill in `DATABASE_PUBLIC_URL`, `HIGHLIGHTLY_API_KEY`, `ODDS_API_KEY` and `ANTHROPIC_API_KEY` in `.env` before running the scripts. `npm run db:backfill` with no arguments loads all 23 seasons (about 10 minutes). The frontend runs on http://localhost:5173.
+Fill in `HIGHLIGHTLY_API_KEY`, `ODDS_API_KEY` and `ANTHROPIC_API_KEY` in `.env` before running the scripts. `DATABASE_PUBLIC_URL` is only for manual one-off scripts through a hand-opened Railway CLI tunnel; the weekly job opens its own tunnel and does not need it. `npm run db:backfill` with no arguments loads all 23 seasons (about 10 minutes). The frontend runs on http://localhost:5173.
 
 ### Data operations
 
 | When | Command (repo root unless noted) |
 |---|---|
-| Weekly during the season | `npm run db:weekly` (runs by itself Monday mornings via launchd, see `ops/launchd/`): schedule refresh + `db:backfill -- --season 2026-27` (NBA.com overwrites live data and reports any rows that differed) + `db:status` |
+| Weekly during the season | `WEEKLY_CONFIRM_PROD=1 BACKUP_CONFIRM_PROD=1 npm run db:weekly` (without the flags it refuses; the launchd job sets them and runs Monday mornings, see `ops/launchd/`). It takes or reuses a backup first (a validated one under 24 h old, waiting up to 10 min for a running backup), opens its own Railway CLI tunnel on port 55434, then runs `db:schedule`, `db:positions`, `db:backfill -- --season 2026-27` (NBA.com overwrites live data and reports any rows that differed) and `db:status`, and closes the tunnel |
+| Test the weekly job end to end (throwaway container, fake Railway CLI, no production) | `npm run db:weekly:drill` |
 | Daily Postgres backup (off-Railway dump, keeps 14) | `BACKUP_CONFIRM_PROD=1 npm run db:backup` (without the flag it refuses; the launchd job sets it, see `ops/launchd/`; restore steps in `docs/backup-restore.md`) |
 | Test the backup + restore end to end (throwaway containers, no Railway) | `npm run db:backup:drill` |
 | Injury source check (preseason) | `cd worker && npm run injuries-probe -- --date 2026-10-03` |

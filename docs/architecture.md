@@ -539,9 +539,16 @@ Highlightly (§3.2). Decisions (JD, 2026-09-27):
 - **Weekly NBA.com run is automated on JD's Mac** (`scripts/weekly.sh`,
   `npm run db:weekly`; launchd job `ops/launchd/`, Mondays 09:07 local,
   runs at next wake if asleep): `db:schedule` (schedule/TV/Cup changes) +
-  `db:backfill -- --season 2026-27` (reconcile) + `db:status`, logged to
-  `logs/weekly.log`, macOS notification with the result. Still from the Mac
-  because NBA.com blocks cloud IPs.
+  `db:positions` + `db:backfill -- --season 2026-27` (reconcile) + `db:status`,
+  logged to `logs/weekly.log`, macOS notification with the result. Still from
+  the Mac because NBA.com blocks cloud IPs. **M5 (2026-11-03):** the job is now
+  `scripts/weekly.mjs` (behind `weekly.sh`). It needs `WEEKLY_CONFIRM_PROD=1`
+  and `BACKUP_CONFIRM_PROD=1` (the plist sets both), first takes or reuses a
+  validated backup under 24 h old (waits up to 10 min for a running one;
+  aborts if the backup fails), then opens the Railway CLI tunnel on port 55434
+  (`scripts/lib/tunnel.mjs`, shared with the backup, M4 close sequence) and
+  hands the URL to each step as `DATABASE_PUBLIC_URL` in the step's env only.
+  Plan: `docs/plans/M5-weekly-tunnel.md`.
 - Backfill's standings check now accepts 0-0 teams, so the weekly run
   works before opening night.
 - **Injury re-test tool**: `npm run injuries-probe -- --date D` (worker)
@@ -693,7 +700,17 @@ as chalk-that-nfl).
 | web | same repo, rootDirectory `/frontend`, `npm run build` then `npm start` (`server.js`: static dist/ + SPA fallback, zero deps), healthcheck `/health` | web-production-081bcf.up.railway.app → :8080 | VITE_API_URL = https://backend-api-production-f05a.up.railway.app (set before first build — PLATFORM.md §4 gotcha), PORT 8080, NODE_ENV |
 | ingestion-worker | same repo, rootDirectory `/worker`, `npm start`, restart ALWAYS | none (by design) | DATABASE_URL (ref), CURRENT_SEASON, NODE_ENV; **HIGHLIGHTLY_API_KEY set by JD**; **ODDS_API_KEY set by JD** (props; without it the worker skips props) |
 
-Backfill scripts run on JD's Mac against Postgres's public connection
+The weekly job (M5) reaches Postgres through the Railway CLI tunnel on local
+port 55434 and needs no public proxy. One-off root scripts (`db:seed`, a full
+`db:backfill`, `db:standings`, `db:review`, backend `create-user`) and
+`backend/scripts/dev.js` still read `DATABASE_PUBLIC_URL`; for a manual session
+open a tunnel by hand on another port (for example `railway connect Postgres
+--tunnel-only -P 55435`) and set `DATABASE_PUBLIC_URL` in that shell only. Never
+use 55432-55434: the backup and weekly reapers treat orphaned forwarders on
+those ports as theirs. Follow-up: `backend/scripts/dev.js` still falls back to
+`DATABASE_PUBLIC_URL`, which now needs such a manual tunnel.
+
+Other backfill scripts run on JD's Mac against Postgres's public connection
 string (`DATABASE_PUBLIC_URL`), since NBA.com blocks Railway IPs.
 Postgres public endpoint: the TCP proxy (`<railway-public-host>:<port>` ->
 5432) was removed on 2026-11-01 and the database password rotated. To run
@@ -753,7 +770,9 @@ Install per package: `npm ci` (or `npm install`) in `/`, `backend/`,
   databases created before a migration (it records them in
   `schema_migrations`). `npm run db:test` re-runs only the constraint tests.
 - **Connection for root scripts:** always `DATABASE_PUBLIC_URL`, read from
-  `.env` and overridden by the process environment (`scripts/lib/env.mjs`);
+  `.env` and overridden by the process environment (`scripts/lib/env.mjs`).
+  The weekly job sets it in each step's env from the Railway CLI tunnel (M5),
+  so a stale value in `.env` is ignored there;
   a `*.railway.internal` host is refused. TLS is off only for
   localhost/127.0.0.1.
 - **Connection for backend/worker:** `DATABASE_URL` (`src/db.js`); TLS off
@@ -766,11 +785,12 @@ Install per package: `npm ci` (or `npm install`) in `/`, `backend/`,
 
 | Package | Command | Runner | Needs Postgres? | Env vars | Result on an empty-schema DB |
 |---|---|---|---|---|---|
-| root | `npm test` | `node --test 'scripts/lib/*.test.mjs'` | No | none (`sources.test.mjs` stubs `fetch`, unsets `SEED_FIXTURES`) | 31/31 pass |
+| root | `npm test` | `node --test 'scripts/lib/*.test.mjs'` | No | none (`sources.test.mjs` stubs `fetch`, unsets `SEED_FIXTURES`) | 76/76 pass |
 | root (schema) | `npm run db:apply` | SQL constraint tests | Yes, empty DB | `DATABASE_PUBLIC_URL` | PASSED |
 | backend | `npm test` | `node --test --test-concurrency=1 'test/*.test.js'` | **Yes, with real loaded data** | `TEST_DATABASE_URL` (falls back to `DATABASE_URL`); `JWT_SECRET` is generated if unset | 21 pass / 44 fail / 3 skip (see below) |
 | worker | `npm test` | `node --test --test-concurrency=1 'test/*.test.js'` | Optional | `WORKER_TEST_DATABASE_URL` | without it: 17 pass, 6 skip. With it: 23 pass, 0 skip |
 | root (backup drill) | `npm run db:backup:drill` | zsh harness | Docker (two throwaway `postgres:18`), macOS `hdiutil`, Homebrew libpq | none (generates its own random passwords) | 108 PASS; local only (CI has no hdiutil), not in `npm test` |
+| root (weekly drill) | `npm run db:weekly:drill` | zsh harness | Docker (one throwaway `postgres:18`), macOS `hdiutil`, Homebrew libpq | none (random passwords and ports; fake Railway CLI) | 153 PASS; local only (CI has no hdiutil), not in `npm test` |
 | frontend | `npm test` | `vitest run` (jsdom) | No | none (`fetch` mocked) | 32/32 pass |
 
 Details:

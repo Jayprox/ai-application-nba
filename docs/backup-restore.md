@@ -16,6 +16,15 @@ production database, plus how to restore them.
   Rotation runs only after a new dump was validated and renamed into place, and
   touches only files with that exact name pattern.
 
+## The weekly job and backups
+
+Since M5 the weekly job (`scripts/weekly.mjs`) takes a backup before it writes to
+production. It reuses a validated dump under 24 h old (the dump exists under its final name
+and `backup.log` has its `OK` line), waits up to 10 minutes if a backup is running (the lock is
+held), and otherwise runs `scripts/backup-db.mjs` itself. If that fails the weekly run aborts
+before opening its own tunnel. It uses a different tunnel port (55434) and lock (`weekly.lock`),
+so neither job can reap the other's tunnel.
+
 ## How it runs
 
 `BACKUP_CONFIRM_PROD=1 npm run db:backup` (or daily 03:17 via launchd, whose

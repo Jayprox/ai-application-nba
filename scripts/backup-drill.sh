@@ -364,6 +364,24 @@ run_case
 alive $DECOY && pass "decoy process (not a railway tunnel) NOT killed" || fail "decoy was killed"
 kill $DECOY 2>/dev/null; DECOY=""
 secret_scan "negative-case output" $LOG $WORK/out.* $WORK/err.*
+
+print "== Port still held after the run (matcher miss): FAIL stage=cleanup, exit 2 =="
+# The run's own forwarder listens on $TP but its argv names another port, so the script cannot
+# verify it is railway's ssh and must leave it alone (fail-safe), then report the held port.
+LABELP=$(free_port)
+BEFORE4=$(dumps)
+run_case FAKE_RAILWAY_SSH_LABEL_PORT=$LABELP
+[[ $RC -eq 2 ]] && pass "exit 2 when the tunnel port stays held" || fail "cleanup case rc=$RC $(last_log)"
+[[ $(last_log) == *"FAIL stage=cleanup reason=\"tunnel port $TP still in use after run\""* ]] && pass "log: FAIL stage=cleanup, port still in use" || fail "cleanup log line: $(last_log)"
+[[ $(dumps | wc -l) -eq $(( $(echo "$BEFORE4" | grep -c .) + 1 )) ]] && pass "dump was committed despite the cleanup failure" || fail "dump not committed in the cleanup case"
+no_partial && pass "no .partial left" || fail "partial left in the cleanup case"
+[[ ! -e $WORK/backup.lock ]] && pass "lock released" || fail "lock still present after the cleanup failure"
+alive "$(cat $WORK/ssh.pid 2>/dev/null)" && pass "unverifiable forwarder NOT killed (fail-safe)" || fail "forwarder was killed although it could not be verified"
+port_free $TP && fail "port should still be held by the mismatched forwarder" || pass "tunnel port still held, as reported"
+secret_scan "cleanup-case output" $LOG $WORK/out.$OUTN $WORK/err.$OUTN
+kill "$(cat $WORK/ssh.pid 2>/dev/null)" 2>/dev/null; sleep 0.3
+port_free $TP && pass "tunnel port free after killing only the drill's own forwarder" || fail "tunnel port still held after the drill killed its forwarder"
+
 secret_scan "ps argv samples (final)" $WORK/ps.txt
 
 print "== Summary: $PASS passed, $FAILN failed =="

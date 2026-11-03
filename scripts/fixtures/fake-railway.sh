@@ -5,16 +5,35 @@
 # port to a local throwaway Postgres (FAKE_RAILWAY_TARGET_PORT).
 #
 # Env: FAKE_RAILWAY_PASSWORD / _USER / _DB / _TARGET_PORT / _PIDFILE
-#      FAKE_RAILWAY_MODE = silent | wrong-host | exit   (default: normal)
+#      FAKE_RAILWAY_SSH_PIDFILE (pid of the ssh-like forwarder)
+#      FAKE_RAILWAY_MODE = silent | silent-ssh | wrong-host | exit   (default: normal)
+#      FAKE_RAILWAY_SSH_LABEL_PORT: the -L port the forwarder's argv claims (drill negative case)
 if [ "$1" = "whoami" ]; then echo "fake-user"; exit 0; fi
 if [ "$1" != "connect" ]; then exit 2; fi
 PORT=""
 while [ $# -gt 0 ]; do [ "$1" = "-P" ] && PORT="$2"; shift; done
 [ -n "$PORT" ] || exit 2
 [ -n "$FAKE_RAILWAY_PIDFILE" ] && echo $$ > "$FAKE_RAILWAY_PIDFILE"
+# The real CLI starts `ssh -N -L ...` as its child with process_group(0) (CLI v5.71.0
+# native.rs) and only kills it on a graceful Ctrl+C. Model that: an ssh-like child
+# of this sh, in its OWN session and group, that holds the port (this sh holds none).
+# perl setsid + exec keeps the pid and lets argv0 be "ssh", as `ps` shows for the real one.
+HERE=$(cd "$(dirname "$0")" && pwd)
+start_ssh() {
+  KEY="$(dirname "${FAKE_RAILWAY_SSH_PIDFILE:-/tmp/x}")/fake_key"
+  LPORT="${FAKE_RAILWAY_SSH_LABEL_PORT:-$PORT}"
+  FAKE_SSH_LISTEN_PORT="$PORT" /usr/bin/perl -e 'use POSIX qw(setsid); setsid(); exec { $ARGV[0] } @ARGV[1..$#ARGV]' \
+    "$(command -v node)" ssh "$HERE/fake-ssh-forward.mjs" -i "$KEY" -N -o StrictHostKeyChecking=accept-new \
+    -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+    -L "127.0.0.1:$LPORT:127.0.0.1:$FAKE_RAILWAY_TARGET_PORT" service:fake@ssh.railway.com </dev/null >/dev/null 2>&1 &
+  [ -n "$FAKE_RAILWAY_SSH_PIDFILE" ] && echo $! > "$FAKE_RAILWAY_SSH_PIDFILE"
+}
+# Worst case for the caller: on TERM/INT/HUP this sh exits WITHOUT killing the ssh-like child.
+trap 'exit 143' TERM INT HUP
 case "$FAKE_RAILWAY_MODE" in
   exit) exit 1 ;;
   silent) exec sleep 600 ;;
+  silent-ssh) start_ssh; sleep 600 & wait ;;
 esac
 HOST=127.0.0.1
 [ "$FAKE_RAILWAY_MODE" = "wrong-host" ] && HOST=db.example.invalid
@@ -35,17 +54,5 @@ DB="${FAKE_RAILWAY_DB:-railway}"
   echo "Press Ctrl+C to close the tunnel."
   echo
 } >&2
-# Forward 127.0.0.1:PORT -> 127.0.0.1:TARGET. No exec: this sh stays the group leader
-# with `connect ... --tunnel-only` in its argv, like the real CLI, so the
-# stale-tunnel reaper can recognise it. A group kill takes the node child too.
-node -e '
-const net = require("net");
-const [lp, tp] = process.argv.slice(1).map(Number);
-net.createServer((c) => {
-  const t = net.connect(tp, "127.0.0.1");
-  c.pipe(t); t.pipe(c);
-  c.on("error", () => t.destroy()); t.on("error", () => c.destroy());
-}).listen(lp, "127.0.0.1");
-' "$PORT" "$FAKE_RAILWAY_TARGET_PORT" &
-trap 'kill $! 2>/dev/null; exit 143' TERM INT HUP
+start_ssh
 wait

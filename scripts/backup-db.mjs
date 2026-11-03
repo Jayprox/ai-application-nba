@@ -11,20 +11,17 @@
 // rotates old dumps. Credentials never touch the log, the console, a file or argv.
 // Deliberately does NOT import scripts/lib/env.mjs and never reads .env.
 import fs from 'node:fs';
-import net from 'node:net';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
-  loadConfig, dumpName, DUMP_RE, PARTIAL_RE, selectForDeletion, parseTunnelOutput, hasUrlToken,
-  redact, buildPgEnv, isMountPoint, assertSafeBackupDir, prodGuard,
-  timeMachineDevices, isRailwaySshForward, isRailwayTunnelCmd, descendantsOf, psSnapshot, listenerPids,
-  reapDecision, parseTunnelRecord,
+  loadConfig, dumpName, DUMP_RE, PARTIAL_RE, selectForDeletion,
+  redact, buildPgEnv, isMountPoint, assertSafeBackupDir, prodGuard, timeMachineDevices,
 } from './lib/backup.mjs';
+import { createTunnel, TunnelError, checkPortFree } from './lib/tunnel.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BUF_CAP = 64 * 1024;
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const iso = () => new Date().toISOString().replace(/\.\d+Z$/, 'Z');
 
 class Fail extends Error {
@@ -35,10 +32,7 @@ process.umask(0o077);
 const started = Date.now();
 let cfg;
 let stage = 'preflight';
-let tunnel = null;       // { child, pid, ssh: [{pid, lstart}] }
-let killing = null;      // promise of the kill in progress, so a signal mid-kill waits for it
-let portStillHeld = false;
-const myUid = process.getuid();
+let tunnel = null;       // scripts/lib/tunnel.mjs handle (created once cfg is loaded)
 let activeChild = null;  // pg_dump / pg_restore
 let partialPath = null;
 let lockHeld = false;
@@ -62,112 +56,19 @@ function notify(msg) {
   } catch { /* ignore */ }
 }
 
-function groupAlive(pid) { try { process.kill(-pid, 0); return true; } catch { return false; } }
-function procAlive(pid) { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } }
-async function waitUntil(pred, ms) { for (let i = 0; i < ms / 100 && !pred(); i++) await sleep(100); return pred(); }
-
-// ssh processes we may signal for a tunnel on `port`: descendants of the railway pid (found
-// while railway is still their parent) plus the ones recorded earlier (same start time), all
-// ours (uid) and with the CLI's exact forward argv. Anything else is never returned.
-function sshTargets(rows, railwayPid, recorded, port) {
-  if (!rows) return [];
-  const ok = (r) => r && r.pid > 1 && r.pid !== process.pid && r.uid === myUid && isRailwaySshForward(r.args, port);
-  const out = new Map();
-  for (const r of descendantsOf(rows, railwayPid)) if (ok(r)) out.set(r.pid, r);
-  for (const s of recorded || []) {
-    const r = rows.find((x) => x.pid === s.pid);
-    if (ok(r) && s.lstart && s.lstart === r.lstart) out.set(r.pid, r);
-  }
-  return [...out.values()];
-}
-// The real CLI's ssh is its own group leader (also covers a ProxyCommand child); else only the pid.
-const sigProc = (r, sig) => { try { process.kill(r.pgid === r.pid ? -r.pid : r.pid, sig); } catch { /* gone */ } };
-// SIGTERM, wait up to 5 s, then SIGKILL anything that is still the same verified process.
-async function stopSsh(targets, port) {
-  for (const r of targets) sigProc(r, 'SIGTERM');
-  await waitUntil(() => !targets.some((r) => procAlive(r.pid)), 5000);
-  const left = targets.filter((r) => procAlive(r.pid));
-  if (!left.length) return;
-  const rows = psSnapshot();
-  for (const r of left) {
-    const now = rows && rows.find((x) => x.pid === r.pid);
-    if (now && now.lstart === r.lstart && now.uid === myUid && isRailwaySshForward(now.args, port)) sigProc(now, 'SIGKILL');
-  }
-  await waitUntil(() => !left.some((r) => procAlive(r.pid)), 2000);
-}
-async function waitPortFree(port, tries = 6) {
-  for (let i = 0; i < tries; i++) { if (await checkPortFree(port)) return true; await sleep(500); }
-  return false;
-}
-
-// An ssh forwarder on `port` whose railway parent is gone (PPID 1, or the verified railway of a
-// stale lock). reapDecision (pure, unit-tested) is the only gate; anything failing it is untouched.
-async function reapOrphanedSsh(port, { recordedRailwayPid = null, recorded = [] } = {}) {
-  const rows = psSnapshot();
-  if (!rows) return 0;
-  const lp = listenerPids(port);
-  const targets = [];
-  for (const pid of lp) {
-    const row = rows.find((r) => r.pid === pid);
-    const rec = recorded.find((x) => x.pid === pid);
-    if (row && reapDecision({ row, myUid, port, listenerPids: lp, recordedRailwayPid, expectedLstart: rec?.lstart ?? null }).kill) targets.push(row);
-  }
-  if (targets.length) await stopSsh(targets, port);
-  return targets.length;
-}
-
-function killTunnel() {
-  if (killing) return killing;
-  if (!tunnel) return Promise.resolve();
-  const t = tunnel;
-  tunnel = null;
-  killing = doKillTunnel(t);
-  return killing;
-}
-async function doKillTunnel(t) {
-  const port = cfg.port;
-  // 1. Find ssh NOW, while railway is still its parent.
-  const targets = sshTargets(psSnapshot(), t.pid, t.ssh, port);
-  // 2. ssh first, then railway by its own stop path (SIGINT), escalating on its group.
-  for (const r of targets) sigProc(r, 'SIGTERM');
-  try { process.kill(-t.pid, 'SIGINT'); } catch { /* already gone */ }
-  if (!(await waitUntil(() => !groupAlive(t.pid), 2000))) {
-    try { process.kill(-t.pid, 'SIGTERM'); } catch { /* gone */ }
-    if (!(await waitUntil(() => !groupAlive(t.pid), 3000))) { try { process.kill(-t.pid, 'SIGKILL'); } catch { /* gone */ } }
-  }
-  await stopSsh(targets, port);
-  // 3. The port must be free now; one orphan sweep, then it is a reported failure.
-  let free = await waitPortFree(port);
-  if (!free) { await reapOrphanedSsh(port); free = await waitPortFree(port, 4); }
-  if (!free) portStillHeld = true;
-}
-
-function writeTunnelRecord() {
-  if (!tunnel) return;
-  try {
-    fs.writeFileSync(path.join(cfg.lockDir, 'tunnel.json'),
-      JSON.stringify({ railwayPid: tunnel.pid, port: cfg.port, railwayBin: cfg.railway, ssh: tunnel.ssh.map(({ pid, lstart }) => ({ pid, lstart })) }),
-      { mode: 0o600 });
-  } catch { /* best effort */ }
-}
-
 function removePartial() { if (partialPath) { try { fs.rmSync(partialPath, { force: true }); } catch { /* ignore */ } } }
 function releaseLock() { if (lockHeld) { try { fs.rmSync(cfg.lockDir, { recursive: true, force: true }); } catch { /* ignore */ } lockHeld = false; } }
 
 async function cleanup() {
   if (activeChild) { try { activeChild.kill('SIGKILL'); } catch { /* gone */ } activeChild = null; }
-  await killTunnel();
+  if (tunnel) await tunnel.kill();
   removePartial();
   releaseLock();
   secrets = [];
 }
 // Last resort, synchronous.
 process.on('exit', () => {
-  if (tunnel) {
-    // ssh first (found while railway is still its parent), then railway's group.
-    try { for (const r of sshTargets(psSnapshot(), tunnel.pid, tunnel.ssh, cfg.port)) sigProc(r, 'SIGKILL'); } catch { /* best effort */ }
-    try { process.kill(-tunnel.pid, 'SIGKILL'); } catch { /* gone */ }
-  }
+  if (tunnel) tunnel.killSync();
   if (activeChild) { try { activeChild.kill('SIGKILL'); } catch { /* gone */ } }
   removePartial();
   if (cfg) releaseLock();
@@ -177,7 +78,7 @@ async function finishFail(f) {
   if (finishing) return;
   finishing = true;
   await cleanup();
-  if (portStillHeld && f.stage !== 'cleanup') f.reason += `; tunnel port ${cfg.port} still in use after cleanup`;
+  if (tunnel?.portStillHeld && f.stage !== 'cleanup') f.reason += `; tunnel port ${cfg.port} still in use after cleanup`;
   const line = `${iso()} FAIL stage=${f.stage} reason="${oneLine(f.reason)}" duration=${duration()}`;
   logLine(line);
   console.error(line);
@@ -202,48 +103,6 @@ function runCapture(cmd, args, { env, timeoutMs = 60000, track = false } = {}) {
   });
 }
 
-function checkPortFree(port) {
-  return new Promise((resolve) => {
-    const s = net.createServer();
-    s.once('error', () => resolve(false));
-    s.listen(port, '127.0.0.1', () => s.close(() => resolve(true)));
-  });
-}
-function canConnect(port) {
-  return new Promise((resolve) => {
-    const s = net.connect({ host: '127.0.0.1', port });
-    const done = (v) => { s.destroy(); resolve(v); };
-    s.setTimeout(1000, () => done(false));
-    s.once('connect', () => done(true));
-    s.once('error', () => done(false));
-  });
-}
-
-// A SIGKILLed run leaves its tunnel (railway in its own group, plus railway's ssh child in
-// another). tunnel.json in the lock dir records them. A later run kills railway's group only if
-// the recorded pid still runs exactly `<railwayBin> connect ... --tunnel-only -P <port>`, stops the
-// ssh children (descendants and recorded pids, verified), then sweeps orphaned ssh listeners.
-async function reapStaleTunnel() {
-  let rec = null;
-  try { rec = parseTunnelRecord(fs.readFileSync(path.join(cfg.lockDir, 'tunnel.json'), 'utf8')); } catch { /* none */ }
-  if (!rec) return false;
-  let did = false;
-  const rows = psSnapshot();
-  const rw = rows && rows.find((r) => r.pid === rec.railwayPid);
-  let verified = null;
-  if (rw && rw.pid !== process.pid && rw.uid === myUid && isRailwayTunnelCmd(rw.args, rec.port, rec.railwayBin)) {
-    verified = rw.pid;
-    await stopSsh(sshTargets(rows, rw.pid, rec.ssh, rec.port), rec.port);
-    const sig = (s) => { try { process.kill(rw.pgid === rw.pid ? -rw.pid : rw.pid, s); } catch { /* gone */ } };
-    const dead = () => !(rw.pgid === rw.pid ? groupAlive(rw.pid) : procAlive(rw.pid));
-    sig('SIGTERM');
-    if (!(await waitUntil(dead, 5000))) sig('SIGKILL');
-    did = true;
-  }
-  if ((await reapOrphanedSsh(rec.port, { recordedRailwayPid: verified, recorded: rec.ssh })) > 0) did = true;
-  return did;
-}
-
 async function takeLock() {
   fs.mkdirSync(path.dirname(cfg.lockDir), { recursive: true, mode: 0o700 });
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -259,7 +118,7 @@ async function takeLock() {
       let alive = false;
       if (pid > 0) { try { process.kill(pid, 0); alive = true; } catch (er) { alive = er.code === 'EPERM'; } }
       if (alive) throw new Fail('preflight', 'another backup is running');
-      if (await reapStaleTunnel()) logLine(`${iso()} NOTE reaped an orphaned tunnel left by a crashed run`);
+      if (await tunnel.reapStale()) logLine(`${iso()} NOTE reaped an orphaned tunnel left by a crashed run`);
       fs.rmSync(cfg.lockDir, { recursive: true, force: true }); // stale
     }
   }
@@ -311,52 +170,17 @@ async function preflight() {
 
   // 3. Railway CLI session (local check only).
   cfg.railway = resolveRailway();
+  tunnel.setRailwayBin(cfg.railway);
   const w = await runCapture(cfg.railway, ['whoami'], { env: process.env, timeoutMs: 20000 });
   if (w.code !== 0) throw new Fail('preflight', 'railway CLI not logged in');
 
   // 4. Port must be free, or the readiness probe could hit some other database.
   //    An ssh forwarder left by an earlier run (railway gone) is reaped; anything else is not touched.
   if (!(await checkPortFree(cfg.port))) {
-    const n = await reapOrphanedSsh(cfg.port);
-    if (n > 0 && (await waitPortFree(cfg.port, 4))) logLine(`${iso()} NOTE reaped an orphaned ssh tunnel on port ${cfg.port}`);
+    const n = await tunnel.reapOrphans();
+    if (n > 0 && (await tunnel.waitPortFree(4))) logLine(`${iso()} NOTE reaped an orphaned ssh tunnel on port ${cfg.port}`);
     else throw new Fail('preflight', `tunnel port ${cfg.port} is already in use`);
   }
-}
-
-async function openTunnel() {
-  stage = 'tunnel';
-  const child = spawn(cfg.railway, ['connect', cfg.service, '--tunnel-only', '-P', String(cfg.port), '-e', cfg.railwayEnv],
-    { cwd: REPO_ROOT, detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: process.env });
-  let exited = false;
-  let buf = '';
-  const onData = (d) => { if (buf.length < BUF_CAP) buf += d; }; // keep draining after the cap
-  child.stdout.on('data', onData); child.stderr.on('data', onData);
-  child.on('exit', () => { exited = true; });
-  const spawnErr = new Promise((r) => child.once('error', () => r(true)));
-  if (!child.pid) { await spawnErr; throw new Fail('tunnel', 'could not start railway CLI'); }
-  tunnel = { child, pid: child.pid, ssh: [] };
-  writeTunnelRecord();
-
-  const deadline = Date.now() + cfg.tunnelTimeoutS * 1000;
-  let creds = null;
-  while (Date.now() < deadline) {
-    if (!creds && hasUrlToken(buf)) {
-      try { creds = parseTunnelOutput(buf, cfg.port); } catch (e) {
-        throw new Fail('tunnel', e.name === 'TunnelParseError' ? e.message : 'could not parse tunnel output (output withheld)');
-      }
-      secrets = [creds.password];
-      buf = ''; // drop the raw output
-    }
-    if (creds && (await canConnect(cfg.port))) {
-      // The URL is printed only after ssh is ready: record it while railway is still its parent.
-      tunnel.ssh = sshTargets(psSnapshot(), tunnel.pid, [], cfg.port).map((r) => ({ pid: r.pid, lstart: r.lstart }));
-      writeTunnelRecord();
-      return creds;
-    }
-    if (exited) throw new Fail('tunnel', 'railway tunnel process exited early (output withheld)');
-    await sleep(creds ? 500 : 200);
-  }
-  throw new Fail('tunnel', creds ? 'tunnel port never became reachable' : `no tunnel details within ${cfg.tunnelTimeoutS}s (output withheld)`);
 }
 
 async function runDump(creds, finalName) {
@@ -411,18 +235,28 @@ async function main() {
     cfg = loadConfig({ BACKUP_LOG: process.env.BACKUP_LOG });
     throw new Fail('preflight', `bad configuration: ${e.message}`);
   }
+  tunnel = createTunnel({
+    railwayBin: cfg.railway, service: cfg.service, railwayEnv: cfg.railwayEnv, port: cfg.port,
+    timeoutS: cfg.tunnelTimeoutS, lockDir: cfg.lockDir, cwd: REPO_ROOT, env: process.env, myUid: process.getuid(),
+  });
   await preflight();
   const finalName = dumpName(new Date());
-  let creds = await openTunnel();
+  stage = 'tunnel';
+  let creds;
+  try { creds = await tunnel.open(); } catch (e) {
+    if (e instanceof TunnelError) throw new Fail('tunnel', e.reason);
+    throw e;
+  }
+  secrets = [creds.password];
   try { await runDump(creds, finalName); } finally {
     creds = null; secrets = [];
-    await killTunnel();
+    await tunnel.kill();
   }
   const size = await validate();
   commit(finalName);
   const { deleted, kept } = rotate(finalName);
   // Same convention as rotate: the good dump is already committed; the leaked port is reported.
-  if (portStillHeld) throw new Fail('cleanup', `tunnel port ${cfg.port} still in use after run`, 2);
+  if (tunnel.portStillHeld) throw new Fail('cleanup', `tunnel port ${cfg.port} still in use after run`, 2);
   const line = `${iso()} OK   file=${finalName} size=${(size / 1048576).toFixed(1)}MB kept=${kept} deleted=${deleted} duration=${duration()}`;
   logLine(line);
   console.log(line);

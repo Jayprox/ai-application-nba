@@ -144,3 +144,39 @@ PA skipped: requirements are concrete and owner-specified.
 **Recommendation:** Ready to merge.
 **Still owner-gated:** merge approval (Gate 2); then a separate T6 approval for the first production run (`BACKUP_CONFIRM_PROD=1 npm run db:backup`, by hand), then installing the plist.
 
+
+## Mission M4 — Backup tunnel leaves ssh child running (opened 2026-11-02)
+
+**Mission (owner):** After a run, `railway connect --tunnel-only`'s separate `ssh -N -i ...` child stays alive listening on 127.0.0.1:55432, so the next run fails with "tunnel port already in use". Fix `scripts/backup-db.mjs` and `scripts/lib/backup.mjs` so every exit path (success, failure, timeout, signal) terminates the ssh child as well as railway, and the orphan reaper also handles an ssh tunnel on the backup port whose railway parent is gone. Make `scripts/fixtures/fake-railway.sh` spawn a detached ssh-like child so the drill catches it. Nothing runs against production; owner verifies with a real run.
+
+**Path:** Bug fix — Lead triage -> Dev -> QA + Sec (process termination / reaper matching) -> Lead review -> readiness report.
+
+### Tasks
+- [x] T1 Lead: triage note `docs/plans/M4-backup-ssh-child.md` (root cause: CLI puts ssh in its own process group; script only kills railway's group; Sec needed; F5(3)(4) folded in)
+- [x] T2 Dev: PR #5 (`fix/backup-ssh-child`, head `0e9c299`), CI 41583974979 green, root 55/55, drill red 70/33 on old code -> green 99/0
+- [x] T3 QA review — READY WITH CONDITIONS (cleanup-failure path not drilled; real CLI verified only by owner run). Pre-fix drill 58/45 reproduces the bug; branch 99/0.
+- [x] T4 Security review — READY (Minors: ssh matcher accepts extra forward options; reaper signals ssh process group)
+- [x] T5 Lead review — READY WITH CONDITIONS: drill the `stage=cleanup` path in this PR (fix cycle 1). Sec Minors 1-2, Sec note 6, perl prereq check -> one hardening follow-up. Perl launcher deviation accepted.
+- [x] T6 Readiness report (below) -> **GATE 2: waiting on owner merge approval**
+
+### Approvals
+- 2026-11-02 — Owner: mission text accepted as the requirement (bug fix, no PA). No production runs.
+
+### Fix cycles (limit 3)
+1. Lead/QA: add a drill case for `FAIL stage=cleanup` (drill-only, no source change). Head `a574414`, CI 41611129533 green, drill 108/0, root 55/55. QA re-verified (READY WITH CONDITIONS, condition = owner real run). Sec re-review not needed (no source/fixture change). Lead condition met.
+
+### Follow-ups (after merge)
+- Hardening: reject extra forward options in the ssh matcher (Sec 1); signal only the pid in the reaper path (Sec 2); scrub `lsof` env, absolute `osascript` (Sec note 6); drill prerequisite check for perl.
+
+### Readiness report — PR #5
+**What changed:** https://github.com/Jayprox/ai-application-nba/pull/5 (`fix/backup-ssh-child`)
+- Root cause: `railway connect --tunnel-only` runs `ssh -N -L 127.0.0.1:<port>:…` in its own process group and only stops it on SIGINT; the script killed railway's group with SIGTERM, so ssh survived every run.
+- `scripts/backup-db.mjs` / `scripts/lib/backup.mjs`: find railway's ssh child (strict argv match, exact port, same uid) while railway is alive; on every exit path kill ssh first, then railway; verify the port is free, else `FAIL stage=cleanup` (exit 2). Orphan reaper now also runs with no stale lock and kills only a same-uid, exact-argv ssh listening on `127.0.0.1:<port>` whose parent is gone.
+- `scripts/fixtures/fake-railway.sh`: spawns an own-session ssh-like forwarder (perl setsid) like the real CLI. `scripts/backup-drill.sh`: SIGINT, timeout, orphan-without-lock, cleanup-failure and four must-not-kill cases.
+**CI:** run 41611129533 green on `a574414`. Root 55/55. Drill 108/0 (pre-fix code: 58 pass / 45 fail, reproducing the bug).
+**Verdicts:** QA READY WITH CONDITIONS (owner real run) · Security READY · Lead READY WITH CONDITIONS (cleanup drill case — met). No open Blocker/Major.
+**Risks / notes**
+- Fixture models Railway CLI v5.71.0 argv; the real CLI is verified only by the owner's run. If that run ends `FAIL stage=cleanup`, the matcher missed the real ssh argv — report it, don't retry.
+- Orphan cleanup can stop a manual tunnel on 55432 whose `railway connect` already exited (live-parent tunnels are never touched). Use another `-P` port for manual sessions.
+**Reviewer disagreements:** none.
+**Recommendation:** Ready to merge, with the post-merge owner check: `BACKUP_CONFIRM_PROD=1 npm run db:backup`, then `lsof -nP -iTCP:55432 -sTCP:LISTEN` and `pgrep -fl 'ssh .*-L 127.0.0.1:55432'` both print nothing.

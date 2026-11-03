@@ -197,3 +197,119 @@ export function assertSafeBackupDir(dir, volume, { repoRoot, denyDevices } = {})
   if (repoRoot && within(rDir, realpathLoose(repoRoot))) throw new Error('backup dir is inside the repository');
   return { dir: rDir, volume: rVol };
 }
+
+// ---- M4: finding and safely signalling the ssh child (docs/plans/M4-backup-ssh-child.md) ----
+// The real CLI starts `ssh -N -L ...` in its OWN process group (CLI v5.71.0
+// native.rs process_group(0)) and kills it only on a graceful Ctrl+C. So the script
+// must find and kill the ssh child itself. Everything that decides "may we signal this
+// pid?" is a pure function here; backup-db.mjs only does the I/O. ps/lsof output and
+// argv are never logged.
+
+const tokens = (args) => String(args ?? '').trim().split(/\s+/).filter(Boolean);
+const SSH_TARGET_RE = /^[^@\s]+@ssh\.railway(-develop|-staging)?\.com$/;
+const FORWARD_RE = /^127\.0\.0\.1:(\d{1,5}):127\.0\.0\.1:(\d{1,5})$/;
+
+// True only for the exact forward the Railway CLI starts for `connect --tunnel-only -P <port>`:
+// argv0 basename `ssh`, -N, -o ExitOnForwardFailure=yes, exactly one -L 127.0.0.1:<port>:127.0.0.1:<n>,
+// no -R/-D, last token user@ssh.railway[-develop|-staging].com. Extra tokens are allowed
+// (the drill fixture has a script path). A path with spaces fails to match: the safe direction.
+export function isRailwaySshForward(args, port) {
+  const t = tokens(args);
+  if (t.length < 4 || path.basename(t[0]) !== 'ssh') return false;
+  if (!t.includes('-N')) return false;
+  if (!t.some((x, i) => x === '-o' && t[i + 1] === 'ExitOnForwardFailure=yes')) return false;
+  const ls = t.map((x, i) => (x === '-L' ? i : -1)).filter((i) => i >= 0);
+  if (ls.length !== 1) return false;
+  const m = FORWARD_RE.exec(t[ls[0] + 1] || '');
+  if (!m || m[1] !== String(port)) return false;
+  if (t.some((x) => x.startsWith('-R') || x.startsWith('-D'))) return false;
+  return SSH_TARGET_RE.test(t[t.length - 1]);
+}
+
+// True only for `<railwayBin> connect ... --tunnel-only -P <port> ...` (also via /bin/sh, so the
+// shell-script fixture matches). Replaces the loose regexes of the M3 reaper (Lead F5(3)).
+export function isRailwayTunnelCmd(args, port, railwayBin) {
+  if (!railwayBin) return false;
+  let t = tokens(args);
+  if ((t[0] === '/bin/sh' || t[0] === 'sh') && t[1] === railwayBin) t = t.slice(1);
+  if (t[0] !== railwayBin || t[1] !== 'connect') return false;
+  if (!t.includes('--tunnel-only')) return false;
+  return t.some((x, i) => x === '-P' && t[i + 1] === String(port));
+}
+
+// `ps -axww -o pid=,ppid=,pgid=,uid=,lstart=,args=` (run with LC_ALL=C: lstart is 5 tokens).
+export function parsePsRows(text) {
+  const rows = [];
+  for (const line of String(text ?? '').split('\n')) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+\s+\S+\s+\d+\s+[\d:]+\s+\d{4})\s+(.*\S)\s*$/.exec(line);
+    if (m) rows.push({ pid: +m[1], ppid: +m[2], pgid: +m[3], uid: +m[4], lstart: m[5].replace(/\s+/g, ' '), args: m[6] });
+  }
+  return rows;
+}
+
+// Every transitive child of rootPid (root excluded). Cycle-safe.
+export function descendantsOf(rows, rootPid) {
+  const out = []; const seen = new Set([rootPid]); const queue = [rootPid];
+  while (queue.length) {
+    const cur = queue.shift();
+    for (const r of rows) if (r.ppid === cur && !seen.has(r.pid)) { seen.add(r.pid); out.push(r); queue.push(r.pid); }
+  }
+  return out;
+}
+
+// `lsof -Fp` output: "p<pid>" lines.
+export function parseLsofPids(text) {
+  const pids = [];
+  for (const line of String(text ?? '').split('\n')) { const m = /^p(\d+)$/.exec(line.trim()); if (m) pids.push(+m[1]); }
+  return pids;
+}
+
+// The one place that decides whether an ssh process on the backup port may be reaped.
+// Kill only if EVERY rule holds. `recordedRailwayPid` is passed only when our own stale
+// tunnel.json named it and that process passed isRailwayTunnelCmd. `expectedLstart` is
+// the start time we recorded for this pid (PID-reuse guard), if any.
+export function reapDecision({ row, myUid, port, listenerPids, recordedRailwayPid = null, expectedLstart = null, selfPid = process.pid }) {
+  if (!row || !Number.isInteger(row.pid) || row.pid <= 1 || row.pid === selfPid) return { kill: false, reason: 'bad-pid' };
+  if (row.uid !== myUid) return { kill: false, reason: 'wrong-uid' };
+  if (expectedLstart && row.lstart !== expectedLstart) return { kill: false, reason: 'pid-reused' };
+  if (!isRailwaySshForward(row.args, port)) return { kill: false, reason: 'argv-mismatch' };
+  if (!Array.isArray(listenerPids) || !listenerPids.includes(row.pid)) return { kill: false, reason: 'not-listener' };
+  if (row.ppid !== 1 && !(recordedRailwayPid && row.ppid === recordedRailwayPid)) return { kill: false, reason: 'parent-alive' };
+  return { kill: true, reason: 'orphaned-railway-ssh' };
+}
+
+// Validates the lock dir's tunnel.json (written by us, but read back defensively).
+export function parseTunnelRecord(text) {
+  let j;
+  try { j = JSON.parse(String(text)); } catch { return null; }
+  const isPid = (n) => Number.isInteger(n) && n > 1;
+  if (!j || typeof j !== 'object' || !isPid(j.railwayPid) || !Number.isInteger(j.port) || j.port < 1 || j.port > 65535) return null;
+  if (typeof j.railwayBin !== 'string' || !j.railwayBin) return null;
+  const ssh = Array.isArray(j.ssh) ? j.ssh.filter((s) => s && isPid(s.pid)).map((s) => ({ pid: s.pid, lstart: typeof s.lstart === 'string' ? s.lstart : null })) : [];
+  return { railwayPid: j.railwayPid, port: j.port, railwayBin: j.railwayBin, ssh };
+}
+
+// I/O wrappers (absolute tool paths, timeouts). On any error: null / [] = "no match, no kill".
+export function psSnapshot(run = spawnSync) {
+  try {
+    const r = run('/bin/ps', ['-axww', '-o', 'pid=,ppid=,pgid=,uid=,lstart=,args='],
+      { encoding: 'utf8', timeout: 5000, maxBuffer: 16 * 1024 * 1024, env: { LC_ALL: 'C', PATH: '/usr/bin:/bin' } });
+    return r.status === 0 ? parsePsRows(r.stdout) : null;
+  } catch { return null; }
+}
+// Pids listening on exactly 127.0.0.1:<port> (lsof -Fpn: "p<pid>" then "n<name>" lines).
+export function parseLsofListeners(text, port) {
+  const pids = new Set(); let cur = null;
+  for (const line of String(text ?? '').split('\n')) {
+    const p = /^p(\d+)$/.exec(line.trim());
+    if (p) { cur = +p[1]; continue; }
+    if (cur && line.trim() === `n127.0.0.1:${port}`) pids.add(cur);
+  }
+  return [...pids];
+}
+export function listenerPids(port, run = spawnSync) {
+  try {
+    const r = run('/usr/sbin/lsof', ['-nP', `-iTCP:${Number(port)}`, '-sTCP:LISTEN', '-Fpn'], { encoding: 'utf8', timeout: 5000 });
+    return parseLsofListeners(r.stdout, Number(port));
+  } catch { return []; }
+}

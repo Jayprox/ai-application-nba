@@ -33,7 +33,7 @@
 - Installing `libpq` is a machine tool, not a repo dependency. It is listed for the owner in §9.
 
 **D-c. Credentials: parse the tunnel's stdout in memory, pass them by env to `pg_dump`.**
-1. Spawn `railway connect <service> --tunnel-only -P <port> -e <env>` with `stdio: ['ignore', 'pipe', 'pipe']`, `detached: true` (own process group, so the SSH child is killed too), cwd = repo root (where the project is linked).
+1. Spawn `railway connect <service> --tunnel-only -P <port> -e <env>` with `stdio: ['ignore', 'pipe', 'pipe']`, `detached: true` (own process group; **M4 correction:** this does NOT take the SSH child, which the CLI puts in its own group, see `docs/plans/M4-backup-ssh-child.md`), cwd = repo root (where the project is linked).
 2. Buffer stdout and stderr in memory only. **Never** write them to the log, the console, or a file, even on failure. Cap the buffer (64 KB) and keep draining the pipes after parsing, so the child never blocks on a full pipe.
 3. Parse the first `postgres://` or `postgresql://` token with `new URL()`. Take user, password (percent-decoded), and database. If the stdout shows the URL with a different shape, the Dev adapts the parser to what `connect.rs` at tag v5.71.0 prints (read the public source; do not run it). Write unit tests from that format. **Fail closed:** if parsing fails, log `FAIL stage=tunnel reason="could not parse tunnel output (output withheld)"`.
 4. **Identity check:** the parsed host must be `127.0.0.1` or `localhost`, and the parsed port must equal the requested `-P` port. Otherwise fail. This guarantees the dump never goes over some other route.

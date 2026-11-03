@@ -22,7 +22,7 @@ VOL=$WORK/vol
 DIR=$VOL/db-backups
 LOG=$WORK/backup.log
 PASS=0; FAILN=0
-SAMPLER=""; NCPID=""; LOCKPID=""
+SAMPLER=""; NCPID=""; LOCKPID=""; DECOY=""
 
 pass() { PASS=$((PASS+1)); print "PASS  $1"; }
 fail() { FAILN=$((FAILN+1)); print "FAIL  $1"; }
@@ -33,7 +33,9 @@ cleanup() {
   [[ -n $SAMPLER ]] && kill $SAMPLER 2>/dev/null
   [[ -n $NCPID ]] && kill $NCPID 2>/dev/null
   [[ -n $LOCKPID ]] && kill $LOCKPID 2>/dev/null
-  if [[ -f $WORK/fake.pid ]]; then kill $(cat $WORK/fake.pid) 2>/dev/null; fi
+  [[ -n $DECOY ]] && kill $DECOY 2>/dev/null
+  # Only pids this drill started (its own pidfiles): the fake tunnels and their ssh-like forwarders.
+  local f; for f in fake ssh m.fake m.ssh; do [[ -f $WORK/$f.pid ]] && kill $(cat $WORK/$f.pid) 2>/dev/null; done
   hdiutil detach $VOL -force >/dev/null 2>&1
   docker rm -fv $SRC $DST >/dev/null 2>&1
   rm -rf $WORK
@@ -72,7 +74,7 @@ hdiutil create -size 64m -fs APFS -volname DRILL $WORK/drive.dmg >/dev/null 2>&1
 # Always the fake tunnel; the real railway binary can never be reached from here.
 BENV=(BACKUP_VOLUME=$VOL BACKUP_DIR=$DIR BACKUP_LOG=$LOG BACKUP_RAILWAY_BIN=$FAKE BACKUP_TUNNEL_PORT=$TP
   BACKUP_NOTIFY=0 FAKE_RAILWAY_PASSWORD=$PW FAKE_RAILWAY_USER=postgres FAKE_RAILWAY_DB=backup_test
-  FAKE_RAILWAY_TARGET_PORT=$SP FAKE_RAILWAY_PIDFILE=$WORK/fake.pid)
+  FAKE_RAILWAY_TARGET_PORT=$SP FAKE_RAILWAY_PIDFILE=$WORK/fake.pid FAKE_RAILWAY_SSH_PIDFILE=$WORK/ssh.pid)
 
 # ---- Safety: the real railway CLI must be unreachable in EVERY case ----------
 # build_env [--no-bin] [VAR=val ...] fills LE (the complete env assignments for
@@ -109,10 +111,14 @@ launch_node() { $LAUNCH $LE node scripts/backup-db.mjs; }
 # node's own pid (a backgrounded function would add a subshell and signals would miss the script).
 run_backup() { build_env "$@"; launch_node; }
 OUTN=0
-run_case() { OUTN=$((OUTN+1)); rm -f $WORK/fake.pid; run_backup "$@" >$WORK/out.$OUTN 2>$WORK/err.$OUTN; RC=$?; }
+run_case() { OUTN=$((OUTN+1)); rm -f $WORK/fake.pid $WORK/ssh.pid; run_backup "$@" >$WORK/out.$OUTN 2>$WORK/err.$OUTN; RC=$?; }
 last_log() { tail -1 $LOG 2>/dev/null; }
 dumps() { ls $DIR 2>/dev/null | grep -E '^chalk-that-nba_[0-9]{8}T[0-9]{6}Z\.dump$'; }
 fake_dead() { [[ ! -f $WORK/fake.pid ]] || ! kill -0 $(cat $WORK/fake.pid) 2>/dev/null; }
+# The ssh-like forwarder (own session, holds the tunnel port) and the port itself (M4).
+ssh_dead() { [[ ! -f $WORK/ssh.pid ]] || ! kill -0 $(cat $WORK/ssh.pid) 2>/dev/null; }
+port_free() { [[ -z "$(lsof -nP -iTCP:$1 -sTCP:LISTEN 2>/dev/null)" ]]; }
+alive() { [[ -n $1 ]] && kill -0 $1 2>/dev/null; }
 no_partial() { [[ -z $(ls $DIR 2>/dev/null | grep '\.partial$' | grep -v '^chalk-that-nba_20200101') ]]; }
 
 print "== Happy path =="
@@ -127,6 +133,8 @@ D1=$(dumps | head -1)
 no_partial && pass "no .partial left" || fail "no .partial left"
 [[ $(last_log) == *" OK "* ]] && pass "log line is OK" || fail "log line is OK"
 fake_dead && pass "tunnel process dead" || fail "tunnel process dead"
+ssh_dead && pass "ssh-like forwarder dead after a successful run" || fail "ssh-like forwarder still alive after a successful run"
+port_free $TP && pass "tunnel port free after a successful run" || fail "tunnel port $TP still held after a successful run"
 check "pg_restore --list reads the dump" "$PGBIN/pg_restore" --list $DIR/$D1
 grep -q pg_dump $WORK/ps.txt && print "note  ps sampler saw pg_dump argv" || print "note  ps sampler did not catch pg_dump (too fast)"
 secret_scan() { # name file... ; $PW and $WRONG must be absent
@@ -183,8 +191,9 @@ expect_fail() { # name stage [env assignments...]
   [[ $(last_log) == *"FAIL stage=$stg "* ]] || okc=0
   [[ -z $SKIPDUMPS && "$(dumps)" != "$BEFORE" ]] && okc=0
   fake_dead || okc=0
+  ssh_dead || okc=0
   no_partial || okc=0
-  [[ $okc -eq 1 ]] && pass "$name -> exit $RC, FAIL stage=$stg, dumps unchanged, tunnel dead" || { fail "$name (rc=$RC log: $(last_log))"; }
+  [[ $okc -eq 1 ]] && pass "$name -> exit $RC, FAIL stage=$stg, dumps unchanged, tunnel and forwarder dead" || { fail "$name (rc=$RC log: $(last_log))"; }
 }
 
 hdiutil detach $VOL >/dev/null 2>&1
@@ -198,8 +207,11 @@ expect_fail "BACKUP_DIR under /Volumes/TM-Prism" preflight BACKUP_DIR=/Volumes/T
 nc -l 127.0.0.1 $P2 >/dev/null 2>&1 & NCPID=$!
 sleep 0.5
 expect_fail "tunnel port already in use" preflight BACKUP_TUNNEL_PORT=$P2
+alive $NCPID && pass "unrelated listener (nc) on the port was NOT killed" || fail "unrelated listener (nc) was killed"
 kill $NCPID 2>/dev/null; NCPID=""
 expect_fail "tunnel prints nothing (timeout 3s)" tunnel FAKE_RAILWAY_MODE=silent BACKUP_TUNNEL_TIMEOUT_S=3
+expect_fail "ssh started but tunnel prints nothing (timeout 3s)" tunnel FAKE_RAILWAY_MODE=silent-ssh BACKUP_TUNNEL_TIMEOUT_S=3
+[[ -s $WORK/ssh.pid ]] && port_free $TP && pass "silent-ssh: forwarder was started, port free afterwards" || fail "silent-ssh: forwarder not started or port still held"
 expect_fail "tunnel URL points at non-local host" tunnel FAKE_RAILWAY_MODE=wrong-host
 expect_fail "tunnel process exits at once" tunnel FAKE_RAILWAY_MODE=exit
 expect_fail "wrong password" dump FAKE_RAILWAY_PASSWORD=$WRONG
@@ -225,7 +237,7 @@ guard_run BACKUP_RAILWAY_BIN=$SHADOW/railway BACKUP_CONFIRM_PROD=1
 [[ "$(dumps)" == "$BEFORE" ]] && pass "guard cases: dumps unchanged" || fail "guard cases changed dumps"
 
 print "== SIGTERM during dump =="
-rm -f $WORK/fake.pid
+rm -f $WORK/fake.pid $WORK/ssh.pid
 ( DBN=backup_test psql_src -c "BEGIN; LOCK TABLE teams IN ACCESS EXCLUSIVE MODE; SELECT pg_sleep(60);" >/dev/null 2>&1 ) & LOCKPID=$!
 sleep 1.5
 OUTN=$((OUTN+1))
@@ -236,6 +248,8 @@ kill -TERM $BPID
 wait $BPID; RC=$?
 [[ $RC -eq 143 ]] && pass "SIGTERM -> exit 143" || fail "SIGTERM -> exit $RC"
 fake_dead && pass "SIGTERM: tunnel dead" || fail "SIGTERM: tunnel alive"
+ssh_dead && pass "SIGTERM: ssh-like forwarder dead" || fail "SIGTERM: ssh-like forwarder alive"
+port_free $TP && pass "SIGTERM: tunnel port free" || fail "SIGTERM: tunnel port still held"
 ! pgrep -f "pg_dump -h 127.0.0.1 -p $TP" >/dev/null && pass "SIGTERM: pg_dump dead" || fail "SIGTERM: pg_dump alive"
 no_partial && pass "SIGTERM: no .partial" || fail "SIGTERM: .partial left"
 [[ "$(dumps)" == "$BEFORE" ]] && pass "SIGTERM: dumps unchanged" || fail "SIGTERM: dumps changed"
@@ -245,27 +259,129 @@ kill $LOCKPID 2>/dev/null; LOCKPID=""
 DBN=postgres psql_src -c "select pg_terminate_backend(pid) from pg_stat_activity where query like '%pg_sleep(60)%' and pid <> pg_backend_pid()" >/dev/null 2>&1
 secret_scan "SIGTERM-case output" $LOG $WORK/out.$OUTN $WORK/err.$OUTN
 
+print "== SIGINT during dump (M4) =="
+rm -f $WORK/fake.pid $WORK/ssh.pid
+( DBN=backup_test psql_src -c "BEGIN; LOCK TABLE teams IN ACCESS EXCLUSIVE MODE; SELECT pg_sleep(60);" >/dev/null 2>&1 ) & LOCKPID=$!
+sleep 1.5
+OUTN=$((OUTN+1))
+build_env; ( exec $LAUNCH $LE node scripts/backup-db.mjs ) >$WORK/out.$OUTN 2>$WORK/err.$OUTN & BPID=$!
+for i in {1..100}; do pgrep -f "pg_dump -h 127.0.0.1 -p $TP" >/dev/null && break; sleep 0.2; done
+pgrep -f "pg_dump -h 127.0.0.1 -p $TP" >/dev/null && pass "pg_dump is running (blocked on lock)" || fail "pg_dump never started"
+kill -INT $BPID
+wait $BPID; RC=$?
+[[ $RC -eq 130 ]] && pass "SIGINT -> exit 130" || fail "SIGINT -> exit $RC"
+fake_dead && pass "SIGINT: tunnel dead" || fail "SIGINT: tunnel alive"
+ssh_dead && pass "SIGINT: ssh-like forwarder dead" || fail "SIGINT: ssh-like forwarder alive"
+port_free $TP && pass "SIGINT: tunnel port free" || fail "SIGINT: tunnel port still held"
+! pgrep -f "pg_dump -h 127.0.0.1 -p $TP" >/dev/null && pass "SIGINT: pg_dump dead" || fail "SIGINT: pg_dump alive"
+no_partial && pass "SIGINT: no .partial" || fail "SIGINT: .partial left"
+[[ ! -e $WORK/backup.lock ]] && pass "SIGINT: lock released" || fail "SIGINT: lock left behind"
+kill $LOCKPID 2>/dev/null; LOCKPID=""
+DBN=postgres psql_src -c "select pg_terminate_backend(pid) from pg_stat_activity where query like '%pg_sleep(60)%' and pid <> pg_backend_pid()" >/dev/null 2>&1
+secret_scan "SIGINT-case output" $LOG $WORK/out.$OUTN $WORK/err.$OUTN
+
 print "== SIGKILL of the script orphans the tunnel; the next run reaps it =="
-rm -f $WORK/fake.pid
+rm -f $WORK/fake.pid $WORK/ssh.pid
 ( DBN=backup_test psql_src -c "BEGIN; LOCK TABLE teams IN ACCESS EXCLUSIVE MODE; SELECT pg_sleep(60);" >/dev/null 2>&1 ) & LOCKPID=$!
 sleep 1.5
 OUTN=$((OUTN+1))
 build_env; ( exec $LAUNCH $LE node scripts/backup-db.mjs ) >$WORK/out.$OUTN 2>$WORK/err.$OUTN & BPID=$!
 for i in {1..100}; do pgrep -f "pg_dump -h 127.0.0.1 -p $TP" >/dev/null && break; sleep 0.2; done
 kill -KILL $BPID; wait $BPID 2>/dev/null
-OLDFAKE=$(cat $WORK/fake.pid 2>/dev/null)
+OLDFAKE=$(cat $WORK/fake.pid 2>/dev/null); OLDSSH=$(cat $WORK/ssh.pid 2>/dev/null)
 pkill -f "pg_dump -h 127.0.0.1 -p $TP" 2>/dev/null
 [[ -n $OLDFAKE ]] && kill -0 $OLDFAKE 2>/dev/null && pass "SIGKILL: tunnel is orphaned (expected: the script cannot clean up)" || fail "SIGKILL: tunnel not alive after kill -9"
-[[ -s $WORK/backup.lock/tunnel.pgid ]] && pass "tunnel PGID recorded in the lock dir" || fail "no tunnel.pgid in lock dir"
+alive $OLDSSH && pass "SIGKILL: ssh-like forwarder is orphaned too" || fail "SIGKILL: forwarder not alive after kill -9"
+[[ -s $WORK/backup.lock/tunnel.json ]] && pass "tunnel pids recorded in the lock dir" || fail "no tunnel.json in lock dir"
 kill $LOCKPID 2>/dev/null; LOCKPID=""
 DBN=postgres psql_src -c "select pg_terminate_backend(pid) from pg_stat_activity where query like '%pg_sleep(60)%' and pid <> pg_backend_pid()" >/dev/null 2>&1
 BEFORE2=$(dumps)
 run_case
 [[ $RC -eq 0 ]] && pass "next run succeeds (stale lock + orphan tunnel reaped)" || fail "next run rc=$RC $(last_log)"
 ! kill -0 $OLDFAKE 2>/dev/null && pass "orphaned tunnel was killed by the next run" || { fail "orphaned tunnel still alive"; kill $OLDFAKE 2>/dev/null; }
+! alive $OLDSSH && pass "orphaned ssh-like forwarder was killed by the next run" || { fail "orphaned forwarder still alive"; kill $OLDSSH 2>/dev/null; }
+port_free $TP && pass "tunnel port free after the reaping run" || fail "tunnel port still held after the reaping run"
 grep -q "NOTE reaped an orphaned tunnel" $LOG && pass "reap noted in the log" || fail "reap not logged"
 no_partial && pass "stale .partial gone" || fail "stale .partial left"
 secret_scan "SIGKILL-case output" $LOG $WORK/out.$OUTN $WORK/err.$OUTN
+
+# ---- M4: orphan reaper (no lock) and its negative paths. The fixtures here are started by
+# the drill itself (never railway), and only pids the drill started are ever signalled.
+start_fx() { # tag port [env assignments...] -> $WORK/<tag>.fake.pid / <tag>.ssh.pid (waits for the port)
+  local tag=$1 port=$2; shift 2
+  env -i HOME=$HOME PATH=$PATH FAKE_RAILWAY_PASSWORD=$PW FAKE_RAILWAY_TARGET_PORT=$SP \
+    FAKE_RAILWAY_PIDFILE=$WORK/$tag.fake.pid FAKE_RAILWAY_SSH_PIDFILE=$WORK/$tag.ssh.pid "$@" \
+    $FAKE connect Postgres --tunnel-only -P $port -e production >/dev/null 2>&1 &
+  for i in {1..50}; do port_free $port || return 0; sleep 0.2; done
+  return 1
+}
+ppid_of() { ps -o ppid= -p $1 2>/dev/null | tr -d ' '; }
+mfake() { cat $WORK/m.fake.pid 2>/dev/null; }
+mssh() { cat $WORK/m.ssh.pid 2>/dev/null; }
+
+print "== Orphaned ssh forwarder, lock released (the owner's M4 bug) =="
+rm -rf $WORK/backup.lock
+start_fx m $TP && pass "fixture tunnel up on the backup port" || fail "fixture tunnel did not come up"
+kill -KILL $(mfake)
+sleep 0.3
+alive $(mssh) && [[ $(ppid_of $(mssh)) == 1 ]] && pass "forwarder survives its railway (PPID 1), port held" || fail "forwarder not orphaned as expected"
+[[ ! -e $WORK/backup.lock ]] && pass "no lock present (clean-release situation)" || fail "unexpected lock present"
+run_case
+[[ $RC -eq 0 ]] && pass "next run exits 0" || fail "next run rc=$RC $(last_log)"
+! alive $(mssh) && pass "orphaned forwarder reaped" || { fail "orphaned forwarder still alive"; kill $(mssh); }
+grep -q "NOTE reaped an orphaned ssh tunnel" $LOG && pass "reap noted in the log" || fail "reap not logged"
+port_free $TP && pass "tunnel port free afterwards" || fail "tunnel port still held"
+secret_scan "orphan-reaper output" $LOG $WORK/out.$OUTN $WORK/err.$OUTN
+
+print "== Reaper negative: live parent (like a manual TablePlus tunnel) =="
+start_fx m $P2 && pass "manual-style tunnel up on another port" || fail "manual tunnel did not come up"
+BEFORE3=$(dumps)
+run_case BACKUP_TUNNEL_PORT=$P2
+[[ $RC -ne 0 && $(last_log) == *"FAIL stage=preflight reason=\"tunnel port $P2 is already in use\""* ]] && pass "refused: already in use" || fail "live-parent case rc=$RC $(last_log)"
+alive $(mfake) && alive $(mssh) && pass "live-parent tunnel and forwarder NOT killed" || fail "live-parent tunnel was killed"
+[[ "$(dumps)" == "$BEFORE3" ]] && pass "no dump made" || fail "dump made in refused case"
+kill $(mssh) $(mfake) 2>/dev/null; sleep 0.3
+
+print "== Reaper negative: argv does not name the port it listens on =="
+start_fx m $P2 FAKE_RAILWAY_SSH_LABEL_PORT=40000 && pass "mismatched forwarder up" || fail "mismatched forwarder did not come up"
+kill -KILL $(mfake); sleep 0.3
+alive $(mssh) && [[ $(ppid_of $(mssh)) == 1 ]] && pass "mismatched forwarder is orphaned (PPID 1)" || fail "mismatched forwarder not orphaned"
+run_case BACKUP_TUNNEL_PORT=$P2
+[[ $RC -ne 0 && $(last_log) == *"FAIL stage=preflight reason=\"tunnel port $P2 is already in use\""* ]] && pass "refused: already in use" || fail "argv-mismatch case rc=$RC $(last_log)"
+alive $(mssh) && pass "mismatched forwarder NOT killed" || fail "mismatched forwarder was killed"
+kill $(mssh) 2>/dev/null; sleep 0.3
+
+print "== Reaper negative: stale lock whose recorded pid is an unrelated live process in its own group =="
+/usr/bin/perl -e 'use POSIX qw(setsid); setsid(); exec "sleep", "600"' & DECOY=$!
+sleep 0.5
+sleep 0 & DEADPID=$!; wait $DEADPID
+mkdir -m 700 $WORK/backup.lock
+print -n $DEADPID > $WORK/backup.lock/pid
+print "{\"railwayPid\":$DECOY,\"port\":$TP,\"railwayBin\":\"$FAKE\",\"ssh\":[]}" > $WORK/backup.lock/tunnel.json
+[[ $(ps -o pgid= -p $DECOY | tr -d ' ') == $DECOY ]] && pass "decoy is its own group leader" || fail "decoy setup"
+run_case
+[[ $RC -eq 0 ]] && pass "run proceeds past the decoy stale lock" || fail "decoy case rc=$RC $(last_log)"
+alive $DECOY && pass "decoy process (not a railway tunnel) NOT killed" || fail "decoy was killed"
+kill $DECOY 2>/dev/null; DECOY=""
+secret_scan "negative-case output" $LOG $WORK/out.* $WORK/err.*
+
+print "== Port still held after the run (matcher miss): FAIL stage=cleanup, exit 2 =="
+# The run's own forwarder listens on $TP but its argv names another port, so the script cannot
+# verify it is railway's ssh and must leave it alone (fail-safe), then report the held port.
+LABELP=$(free_port)
+BEFORE4=$(dumps)
+run_case FAKE_RAILWAY_SSH_LABEL_PORT=$LABELP
+[[ $RC -eq 2 ]] && pass "exit 2 when the tunnel port stays held" || fail "cleanup case rc=$RC $(last_log)"
+[[ $(last_log) == *"FAIL stage=cleanup reason=\"tunnel port $TP still in use after run\""* ]] && pass "log: FAIL stage=cleanup, port still in use" || fail "cleanup log line: $(last_log)"
+[[ $(dumps | wc -l) -eq $(( $(echo "$BEFORE4" | grep -c .) + 1 )) ]] && pass "dump was committed despite the cleanup failure" || fail "dump not committed in the cleanup case"
+no_partial && pass "no .partial left" || fail "partial left in the cleanup case"
+[[ ! -e $WORK/backup.lock ]] && pass "lock released" || fail "lock still present after the cleanup failure"
+alive "$(cat $WORK/ssh.pid 2>/dev/null)" && pass "unverifiable forwarder NOT killed (fail-safe)" || fail "forwarder was killed although it could not be verified"
+port_free $TP && fail "port should still be held by the mismatched forwarder" || pass "tunnel port still held, as reported"
+secret_scan "cleanup-case output" $LOG $WORK/out.$OUTN $WORK/err.$OUTN
+kill "$(cat $WORK/ssh.pid 2>/dev/null)" 2>/dev/null; sleep 0.3
+port_free $TP && pass "tunnel port free after killing only the drill's own forwarder" || fail "tunnel port still held after the drill killed its forwarder"
+
 secret_scan "ps argv samples (final)" $WORK/ps.txt
 
 print "== Summary: $PASS passed, $FAILN failed =="

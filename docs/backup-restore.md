@@ -35,7 +35,7 @@ plist sets the flag; `ops/launchd/README.md`):
    output **in memory**, checks the host is `127.0.0.1` and the port is the
    requested one, and runs `pg_dump` with the password only in that process's
    environment. Credentials never go to the log, console, a file, or argv.
-4. Stops the tunnel, validates the dump (`pg_restore --list` works and contains
+4. Stops the tunnel (railway and its ssh child), validates the dump (`pg_restore --list` works and contains
    `public.teams`), renames it into place, then rotates.
 
 Tunnel output format (railway CLI v5.71.0, `src/commands/connect.rs`
@@ -71,8 +71,8 @@ One line per run in `backup.log`:
 2026-11-03T03:17:02Z FAIL stage=preflight reason="volume /Volumes/DB-Backups is not mounted" duration=0s
 ```
 
-Stages: `preflight | tunnel | dump | validate | rename | rotate`. A `rotate`
-failure exits 2 and keeps the new dump. Railway output is never logged.
+Stages: `preflight | tunnel | dump | validate | rename | rotate | cleanup`. A `rotate`
+or `cleanup` failure exits 2 and keeps the new dump. Railway output is never logged.
 
 ## Restore
 
@@ -110,22 +110,48 @@ path: restore into a new Railway Postgres service through its own
 
 A Railway Pro plan upgrade adds native volume backups (daily/weekly/monthly) and point-in-time recovery; they are deleted with the volume, so this off-platform dump stays useful.
 
-## If a run was killed hard (SIGKILL, power loss)
+## The ssh child, and if a run was killed hard (SIGKILL, power loss)
 
-A normal exit, any failure, a timeout and SIGINT/SIGTERM/SIGHUP all stop the
-tunnel. A SIGKILL can't be handled, so the tunnel (an authenticated forward to
-the production database on `127.0.0.1:55432`) may stay alive. The script
-records the tunnel's process group in `backup.lock/tunnel.pgid` next to the log;
-the next run finds the dead PID's stale lock and, if that group's leader is still
-a `railway connect ... --tunnel-only` process, kills it and logs
-`NOTE reaped an orphaned tunnel`. To clean up by hand:
+`railway connect --tunnel-only` (CLI v5.71.0) starts `ssh -N -L 127.0.0.1:55432:...`
+as a child in its **own process group** and stops it only on a graceful Ctrl+C. So
+killing railway's group is not enough: the ssh child would be left listening on
+`127.0.0.1:55432` and the next run would fail with `tunnel port ... is already in use`
+(the M4 bug). The script therefore finds the ssh child while railway is still its
+parent, and on every exit path (success, any failure, timeout, SIGINT/SIGTERM/SIGHUP):
+SIGTERMs the ssh child, SIGINTs railway (escalating to SIGTERM/SIGKILL), SIGKILLs a
+surviving ssh, then checks that the port is free. If it is still held, the run
+reports `FAIL stage=cleanup reason="tunnel port ... still in use after run"` (exit 2;
+a good dump is still saved and rotated first) and sends a notification.
+
+A SIGKILL can't be handled, so railway and ssh may both stay alive. The script records
+their pids in `backup.lock/tunnel.json` (pids, port and binary path only) next to the
+log. The next run reaps leftovers in two places, and signals a process only if every
+check passes:
+
+- Stale lock: kills railway's group only if the recorded pid still runs exactly
+  `<railway> connect ... --tunnel-only -P <port>`; stops the recorded ssh pids (same
+  start time) and railway's ssh descendants; logs `NOTE reaped an orphaned tunnel left by a crashed run`.
+- Port busy at preflight (no lock needed, which is the situation after a clean run that
+  leaked ssh): kills the listener on `127.0.0.1:<port>` only if it is yours, its argv is
+  exactly the CLI's forward (`ssh ... -N -o ExitOnForwardFailure=yes -L 127.0.0.1:<port>:127.0.0.1:<n> user@ssh.railway.com`),
+  and its parent is gone (PPID 1). Logs `NOTE reaped an orphaned ssh tunnel on port <port>`.
+  Anything else on the port (another database, a tunnel whose `railway` is still running)
+  is never touched and the run fails with `tunnel port ... is already in use`.
+
+Note: this also kills your own manual tunnel on 55432 if its `railway` is already gone.
+Use another `-P` for manual TablePlus sessions.
+
+To check or clean up by hand:
 
 ```
-pgrep -fl 'railway connect'      # look for a leftover tunnel
-pkill -f 'railway connect'       # then kill it (only if you are sure it is ours)
+lsof -nP -iTCP:55432 -sTCP:LISTEN          # who holds the port (empty = free)
+pgrep -fl 'ssh .*-L 127.0.0.1:55432'       # a leftover ssh child
+pgrep -fl 'railway connect'                # a leftover railway
 ```
 
-Runs fail with `tunnel port 55432 is already in use` while one is left over.
+Kill by PID only what you are sure is ours. A future CLI version that changes the ssh
+argv makes the matcher miss: nothing is killed wrongly, and the run reports
+`stage=cleanup` or `already in use` (the unit tests pin the v5.71.0 argv).
 
 ## Setup on a Mac
 

@@ -5,7 +5,7 @@
 # port to a local throwaway Postgres (FAKE_RAILWAY_TARGET_PORT).
 #
 # Env: FAKE_RAILWAY_PASSWORD / _USER / _DB / _TARGET_PORT / _PIDFILE
-#      FAKE_RAILWAY_SSH_PIDFILE (pid of the ssh-like forwarder)
+#      FAKE_RAILWAY_SSH_PIDFILE (pid of the ssh-like forwarder); both may contain %p (the -P port)
 #      FAKE_RAILWAY_MODE = silent | silent-ssh | wrong-host | exit   (default: normal)
 #      FAKE_RAILWAY_SSH_LABEL_PORT: the -L port the forwarder's argv claims (drill negative case)
 if [ "$1" = "whoami" ]; then echo "fake-user"; exit 0; fi
@@ -13,6 +13,11 @@ if [ "$1" != "connect" ]; then exit 2; fi
 PORT=""
 while [ $# -gt 0 ]; do [ "$1" = "-P" ] && PORT="$2"; shift; done
 [ -n "$PORT" ] || exit 2
+# `%p` in the pidfile paths is replaced by the -P port, so two tunnels (backup and weekly) can
+# run at once with separate pidfiles. A path without `%p` behaves as before.
+case "$PORT" in *[!0-9]*) exit 2 ;; esac
+FAKE_RAILWAY_PIDFILE=$(printf '%s' "$FAKE_RAILWAY_PIDFILE" | sed "s/%p/$PORT/g")
+FAKE_RAILWAY_SSH_PIDFILE=$(printf '%s' "$FAKE_RAILWAY_SSH_PIDFILE" | sed "s/%p/$PORT/g")
 [ -n "$FAKE_RAILWAY_PIDFILE" ] && echo $$ > "$FAKE_RAILWAY_PIDFILE"
 # The real CLI starts `ssh -N -L ...` as its child with process_group(0) (CLI v5.71.0
 # native.rs) and only kills it on a graceful Ctrl+C. Model that: an ssh-like child

@@ -75,6 +75,7 @@ function resolveWord(w, c, S) {
 function checkWords(c, S, F) {
   const B = S.B;
   const secretVar = S.secretVarRes;
+  const prodRe = S.prodRe;
   const words = arg(c);
   const touches = [];
   const treeWriter = B.tree_writers.includes(c.nm);
@@ -97,6 +98,15 @@ function checkWords(c, S, F) {
       if (k.envfile) add(F.deny, 'D-SECRET-ENVFILE');
       if (k.secret) add(F.deny, 'D-SECRET-PATH');
       if (k.protected || (k.protectedAncestor && treeWriter)) touches.push({ w, real });
+    }
+    if (w.heredocLiteral) {
+      // the literal body of "$(cat <<'EOF' ...)" is one argument, but its text still must not name a secret
+      for (const tok of w.text.split(/\s+/).filter(Boolean)) {
+        const ts = textSecret(expandHome(tok, S.pc.home) ?? tok);
+        if (ts.envfile) add(F.deny, 'D-SECRET-ENVFILE');
+        if (ts.secret) add(F.deny, 'D-SECRET-PATH');
+      }
+      if (prodRe.test(w.text)) add(F.deny, 'D-PROD-VARS');
     }
     if (inline) {
       const L = w.text.toLowerCase();
@@ -323,7 +333,7 @@ export function bashRules({ input, cwd, ctx }) {
   const S = {
     ctx, B, pc, cwdReal: cw.real,
     secretVarRes: B.secret_var_regex.map((r) => new RegExp(r, 'i')),
-    markers: pc.markers,
+    markers: pc.markers, prodRe: new RegExp(B.prod_vars.join('|'), 'i'),
   };
   const F = recordsFor(S);
   const prodRe = new RegExp(B.prod_vars.join('|'), 'i');

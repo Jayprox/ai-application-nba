@@ -398,3 +398,16 @@ test('Sec 1: git diff/log/show never read outside the repo (no-index fallback), 
   ['git diff HEAD~1 -- README.md', 'allow', 'L-GIT-READ'], ['git diff origin/main...HEAD', 'allow', 'L-GIT-READ'], ['git diff README.md docs/a.md', 'allow', 'L-GIT-READ'], ['git show HEAD:README.md', 'allow', 'L-GIT-READ'],
   ['git diff homelink/.config/gh/hosts.yml README.md', 'ask', 'K-DEFAULT'], ['git diff homelink', 'ask', 'K-DEFAULT'],
 ]));
+
+test('Sec 2 and 6: the literal $(cat <<EOF) exception needs double quotes and an unambiguous terminator', () => check([
+  ["gh pr create --title $(cat <<'EOF'\nx --body-file /etc/hosts\nEOF\n)", 'ask', 'K-DEFAULT'],
+  ["gh pr comment 5 --body $(cat <<'EOF'\nhi 99 --repo other/public\nEOF\n)", 'ask', 'K-DEFAULT'],
+  ["git commit -m $(cat <<'EOF'\nfix --amend --no-verify\nEOF\n)", 'ask', 'K-DEFAULT'],
+  ["git commit -m \"$(cat <<'EOF'\nhi\nEOF)\"\necho SMUGGLED\nEOF\n)\"", 'ask', 'K-DEFAULT'],
+  ["git commit -m \"$(cat <<'EOF'\nhi\nEOFX\nEOF\n)\"", 'ask', 'K-DEFAULT'],
+  ["git commit -m \"$(cat <<'EOF'\nsee .env for details\nEOF\n)\"", 'deny', 'D-SECRET-ENVFILE'],
+  ["git commit -m \"$(cat <<'EOF'\nread ~/.ssh/id_rsa\nEOF\n)\"", 'deny', 'D-SECRET-PATH'],
+  ["git commit -m \"$(cat <<'EOF'\nset WEEKLY_CONFIRM_PROD\nEOF\n)\"", 'deny', 'D-PROD-VARS'],
+  ["git commit -m \"$(cat <<'EOF'\nfine message\n\nbody\nEOF\n)\"", 'allow', 'L-GIT-COMMIT'],
+  ["gh pr create --title t --body \"$(cat <<'EOF'\n## Summary\nEOF\n)\"", 'allow', 'L-GH'],
+]));

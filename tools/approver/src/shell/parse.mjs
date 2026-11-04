@@ -243,7 +243,11 @@ class Parser {
         let nl = s.indexOf('\n', this.i); if (nl < 0) nl = s.length;
         let line = s.slice(this.i, nl);
         this.i = Math.min(nl + 1, s.length);
-        if ((p.strip ? line.replace(/^\t+/, '') : line) === p.delim) { found = true; break; }
+        const cmp = p.strip ? line.replace(/^\t+/, '') : line;
+        if (cmp === p.delim) { found = true; break; }
+        // bash 3.2 ends a here-doc inside $( ) at a line like `EOF)` where zsh does not: any body line that
+        // starts with the delimiter is ambiguous, so the command is not fully parsed (Sec 6).
+        if (p.delim && cmp.startsWith(p.delim)) this.err('heredoc_ambiguous_terminator');
         body += line + '\n';
       }
       if (!found) this.err('heredoc_unterminated');
@@ -323,9 +327,10 @@ class Parser {
       this.withKind('subst', () => this.parseSequence(')'));
       const sub = this.st.commands.slice(startIdx);
       // $(cat <<'EOF' ... EOF) is a literal string: the usual way to pass a multi-line commit message.
-      if (sub.length === 1 && sub[0].name === 'cat' && sub[0].words.length === 1 && sub[0].heredocs.length === 1
+      if (inDQ && sub.length === 1 && sub[0].name === 'cat' && sub[0].words.length === 1 && sub[0].heredocs.length === 1
         && sub[0].heredocs[0].quoted && sub[0].redirs.length === 1 && sub[0].assigns.length === 0) {
         w.text += sub[0].heredocs[0].body.replace(/\n+$/, '');
+        w.heredocLiteral = true;
         this.st.commands.splice(startIdx); // it is a string now, not a command
       } else w.dynamic = true;
       return;

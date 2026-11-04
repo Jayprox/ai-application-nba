@@ -13,7 +13,8 @@
 import pg from 'pg';
 import { randomUUID } from 'node:crypto';
 import { publicDbUrl } from './lib/env.mjs';
-import { nbaScheduleSeason } from './lib/sources.mjs';
+import { nbaScheduleSeason, enableBestEffort } from './lib/sources.mjs';
+import { SKIPPED, skipMessage, classifyError, weeklyLine } from './lib/nba-best-effort.mjs';
 import { upsertArena } from './lib/arenas.mjs';
 import { isNeutralSite, scheduleStatus, nationalTvTier, nationalBroadcasterList, cupStage, localGameDate, restTags } from './lib/tagging.mjs';
 
@@ -22,13 +23,27 @@ const argSeason = process.argv.indexOf('--season');
 const season = argSeason > 0 ? process.argv[argSeason + 1] : '2026-27';
 if (!/^\d{4}-\d{2}$/.test(season)) { console.error(`bad --season ${season}`); process.exit(1); }
 
+// --nba-best-effort (only weekly.mjs passes it): NBA.com is optional. Unreachable / blocked / malformed -> a
+// warning and exit 0 ("degraded"); database errors still fail. Without the flag nothing below changes.
+const BE = process.argv.includes('--nba-best-effort');
+const RUN_ID = BE && /^[A-Za-z0-9:_-]{1,64}$/.test(process.env.WEEKLY_RUN_ID ?? '') ? process.env.WEEKLY_RUN_ID : null;
+if (BE) {
+  process.stdout._handle?.setBlocking?.(true);
+  const state = enableBestEffort(process.env);
+  if (state !== 'ok') {
+    log(skipMessage(state));
+    console.log(weeklyLine({ step: 'schedule:nba', degraded: true, nba: state, skipped: SKIPPED['schedule:nba'], reason: skipMessage(state) }));
+    process.exit(0);
+  }
+}
+
 const TYPE = { '001': 'preseason', '002': 'regular', '006': 'cup_final' }; // playoffs/play-in come later in the season
 
 const { url, host, ssl } = publicDbUrl();
 const db = new pg.Client({ connectionString: url, ssl });
 try { await db.connect(); } catch (e) { console.error(`[schedule] cannot reach the database at ${host}: ${e.message}`); process.exit(1); }
 log(`connected: ${host} — season ${season}`);
-const { rows: [run] } = await db.query(`INSERT INTO ingestion_runs (job_type, source, triggered_by, details) VALUES ('load_schedule', 'nba_stats', 'manual', $1) RETURNING id`, [{ season }]);
+const { rows: [run] } = await db.query(`INSERT INTO ingestion_runs (job_type, source, triggered_by, details) VALUES ('load_schedule', 'nba_stats', 'manual', $1) RETURNING id`, [{ season, ...(RUN_ID && { weekly_run_id: RUN_ID }) }]);
 
 try {
   const all = (await nbaScheduleSeason(season)).leagueSchedule.gameDates.flatMap((d) => d.games);
@@ -119,17 +134,26 @@ try {
   const neutral = games.filter((x) => x.neutral).map((x) => `${x.date} ${x.g.awayTeam.teamTricode}@${x.g.homeTeam.teamTricode} ${x.g.arenaCity}`);
   const b2b = TG.b.filter((b) => b === 2).length;
   await db.query(`UPDATE ingestion_runs SET status='success', finished_at=now(), records_written=$2, details=$3 WHERE id=$1`,
-    [run.id, games.length + TG.g.length, { season, byType, tiers, placeholders, exhibitions, neutral, newGames: fresh.length, b2bSecondNights: b2b }]);
+    [run.id, games.length + TG.g.length, { season, ...(RUN_ID && { weekly_run_id: RUN_ID }), byType, tiers, placeholders, exhibitions, neutral, newGames: fresh.length, b2bSecondNights: b2b }]);
   log(`✓ ${games.length} games ${JSON.stringify(byType)} · ${fresh.length} new · regular-season TV ${JSON.stringify(tiers)}`);
   log(`  every team: ${counts.join('/')} known regular-season games · ${b2b} second-night-of-back-to-back team-games`);
   if (exhibitions.length) log(`  skipped ${exhibitions.length} preseason exhibition(s) vs non-NBA clubs: ${exhibitions.join(' | ')}`);
   if (placeholders.length) log(`  skipped ${placeholders.length} placeholder(s) with no teams yet: ${placeholders.join(' | ')}`);
   log(`  neutral (${neutral.length}): ${neutral.join(' | ')}`);
+  if (BE) console.log(weeklyLine({ step: 'schedule:nba', nba: 'ok' }));
 } catch (e) {
   await db.query('ROLLBACK').catch(() => {});
-  await db.query(`UPDATE ingestion_runs SET status='failed', finished_at=now(), error=$2 WHERE id=$1`, [run.id, e.message]).catch(() => {});
-  console.error('[schedule] FAILED — nothing was written.\n' + e.message);
-  process.exitCode = 1;
+  const c = BE ? classifyError(e) : null;
+  // A skipped / blocked NBA.com is never a success row (API freshness is max(finished_at) WHERE status = 'success').
+  await db.query(`UPDATE ingestion_runs SET status='failed', finished_at=now(), error=$2 WHERE id=$1`, [run.id, c?.kind === 'warn' ? c.reason : e.message]).catch(() => {});
+  if (c?.kind === 'warn') {
+    log(`WARNING ${c.reason} — NBA.com schedule not loaded, nothing was written.`);
+    console.log(weeklyLine({ step: 'schedule:nba', degraded: true, nba: c.nba, skipped: SKIPPED['schedule:nba'], reason: c.reason }));
+  } else {
+    console.error('[schedule] FAILED — nothing was written.\n' + e.message);
+    if (c) console.log(weeklyLine({ step: 'schedule:nba', nba: c.nba, reason: c.reason }));
+    process.exitCode = 1;
+  }
 } finally {
   await db.end();
 }

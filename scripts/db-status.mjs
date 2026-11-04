@@ -2,6 +2,7 @@
 // backfill status, and the latest seed/backfill runs.   npm run db:status
 import pg from 'pg';
 import { publicDbUrl } from './lib/env.mjs';
+import { weeklyStatusLine } from './lib/weekly-status.mjs';
 
 const { url, host, ssl } = publicDbUrl();
 const db = new pg.Client({ connectionString: url, ssl });
@@ -39,6 +40,10 @@ console.log(`  worker: ${w.runs ? `${w.runs} runs, last success ${w.last_ok ? ne
   (w.quota?.remaining != null ? `, Highlightly quota ${w.quota.remaining}/${w.quota.limit}` : '') +
   ` · ${created.n} worker-created player(s) not on NBA.com yet · ${review.length} held for review`);
 for (const r of review.slice(0, 10)) console.log(`    ? ${r.source} player ${r.source_id}: ${r.match_method}`);
+// Last weekly run (M6): the ingestion_runs rows that share the newest details->>'weekly_run_id'.
+const wk = await q(`SELECT source, job_type, status, details FROM ingestion_runs
+  WHERE details->>'weekly_run_id' = (SELECT details->>'weekly_run_id' FROM ingestion_runs WHERE details ? 'weekly_run_id' ORDER BY id DESC LIMIT 1)`);
+console.log(weeklyStatusLine(wk));
 // Player props (The Odds API, DraftKings): lines stored, last pull, credits left.
 const [pp] = await q(`SELECT (SELECT count(*)::int FROM prop_lines) lines, (SELECT count(DISTINCT game_id)::int FROM prop_lines) games,
   (SELECT max(finished_at) FROM ingestion_runs WHERE job_type = 'sync_props' AND status = 'success') last_ok,

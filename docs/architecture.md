@@ -93,6 +93,11 @@ access from Railway is not.**
   `arenaCity`, `isNeutral`, and NBA Cup labels (`gameLabel` /
   `gameSubLabel` / `gameSubtype`) — enough to tag national-TV,
   neutral-site, and Cup games at ingestion.
+  **Correction (M6, 2026-11-03):** the loaders do not use that cdn file.
+  `scripts/load-schedule.mjs` and `backfill.mjs` read the same schedule from
+  `stats.nba.com/stats/scheduleleaguev2`; the cdn file is only used by
+  `seed.mjs`. So the weekly run's only NBA.com host is `stats.nba.com`.
+  Highlightly fills part of the gap when NBA.com is blocked (§7.9).
 - **From Railway (throwaway `chalk-that-nba-probe` project, egress IP
   152.55.184.170): blocked.** Every stats.nba.com request (with and
   without browser headers) accepted the TLS connection and then hung until
@@ -548,7 +553,8 @@ Highlightly (§3.2). Decisions (JD, 2026-09-27):
   aborts if the backup fails), then opens the Railway CLI tunnel on port 55434
   (`scripts/lib/tunnel.mjs`, shared with the backup, M4 close sequence) and
   hands the URL to each step as `DATABASE_PUBLIC_URL` in the step's env only.
-  Plan: `docs/plans/M5-weekly-tunnel.md`.
+  Plan: `docs/plans/M5-weekly-tunnel.md`. **M6 (2026-11-03):** the steps are now Highlightly first,
+  NBA.com best-effort (§7.9).
 - Backfill's standings check now accepts 0-0 teams, so the weekly run
   works before opening night.
 - **Injury re-test tool**: `npm run injuries-probe -- --date D` (worker)
@@ -686,6 +692,74 @@ sentences, chips, end-to-end on real data). The model itself:
 `npm run ask:eval` (backend) sends 33 real questions and checks the plan
 fields that must match (≥ 90% to pass).
 
+## 7.9 Weekly job on Highlightly, NBA.com best-effort (M6, 2026-11-03)
+
+*Plan: `docs/plans/M6-highlightly-weekly.md`. Requirements: `docs/requirements/M6-highlightly-weekly.md`.*
+The first real weekly run (2026-11-03) failed at `schedule`: stats.nba.com timed
+out and cdn.nba.com answered Akamai "Access Denied" from home wifi and cellular.
+Since M6 the weekly run is **Highlightly first, NBA.com best-effort**.
+
+```
+guard -> lock -> preflight -> backup -> tunnel                                 (M5, unchanged)
+  schedule : schedule:nba  load-schedule.mjs --nba-best-effort   (the run's one NBA.com probe, 15 s)
+             schedule:hl   worker/scripts/weekly-hl.js schedule   (7 days back .. 60 ahead)
+  positions: positions:nba load-positions.mjs --nba-best-effort   (skipped when NBA.com is down)
+  backfill : backfill:hl   worker/scripts/weekly-hl.js backfill   (box scores of the last 7 days)
+             backfill:nba  backfill.mjs --season S --nba-best-effort (reconcile, unchanged when reachable)
+  status   : db-status.mjs (adds a "weekly:" line)
+-> close tunnel -> OK | OK-DEGRADED | FAIL line + notification
+```
+
+- **Result.** `OK` (everything ran), `OK-DEGRADED` (exit 0: NBA.com was skipped, or the Highlightly cap or
+  reserve was reached; the line lists `nba=down`, `skipped=...`, `stop=...`, `reason="..."`) or `FAIL`
+  (a Highlightly failure or a database error; `FAIL stage=<schedule|positions|backfill|status> reason="..."`).
+  Notifications: "Weekly run OK", "Weekly run OK with warnings", "Weekly run FAILED".
+- **Highlightly code lives in `worker/`** (`src/hl-weekly-client.js`, `weekly-schedule.js`, `weekly-backfill.js`,
+  CLI `scripts/weekly-hl.js`) so it reuses the worker's tested matching and box-score SQL (`sync.js`
+  `boxReady` / `resolveSides` / `writeSides`, no SQL change). Running a worker script from the Mac is the same
+  pattern as `worker/scripts/sync.js`. It needs `npm --prefix worker ci` once (the runner checks for it).
+- **One guarded client.** Per-run cap 600 requests, quota reserve 1,000 (read from `x-ratelimit-requests-remaining`
+  on every response), 4 requests/s, 429 (`Retry-After`, max 3 retries), 401/403 (auth error, no retry), 5xx and
+  timeouts (2 retries). Hitting the cap or the reserve ends the stage cleanly and the run is `OK-DEGRADED`.
+  The cap is per run: the runner hands each Highlightly step `WEEKLY_HL_BUDGET = cap - used`.
+- **Fetch first, write after.** Each Highlightly step does all its requests, then one short transaction
+  (`lock_timeout 5 s`, every game re-read `FOR UPDATE` and compared with a pre-fetch snapshot, so a game the live
+  worker changed meanwhile is skipped, not overwritten). A stop therefore leaves only complete units.
+- **Update-only (owner Q1).** Highlightly never creates games; unmatched matches are reported. It writes
+  `status`, scores, (conditionally) `tipoff_utc`/`game_date_local`, rest tags of the affected teams and the box score;
+  never arena, TV, Cup stage, season type, neutral-site, series, standings or `players.listed_position`.
+- **Who owns the tip-off (owner Q9).** NBA.com when `schedule:nba` loaded this run; otherwise Highlightly
+  (`WEEKLY_HL_TIPOFF=1`). Neutral-site changes and shifts over 7 days are reported (`needs_nba`, `needs_review`),
+  not applied. A move of more than 8 hours is only recognised for a match already linked in the crosswalk.
+  Alternating weeks (NBA.com up, then down) can therefore alternate the source of a tip-off.
+- **NBA.com best-effort.** One probe: 15 s to response headers, one attempt; after any failure the process (and, via
+  `WEEKLY_NBA_STATE=down`, the rest of the run) makes no more NBA.com requests. A skipped or failed NBA.com step never
+  writes a `success` `ingestion_runs` row (API freshness is `max(finished_at) WHERE status = 'success'`).
+  Unreachable, blocked (403), malformed or unexpected NBA.com data, and a season that fails the `checks failed`
+  validation are warnings; database errors fail. The reconcile is also skipped when NBA.com returns no game logs
+  while the database already holds final games (it would delete Highlightly rows).
+- **`ingestion_runs`.** `job_type` `weekly_hl_schedule` / `weekly_hl_backfill`, `source = 'highlightly'`,
+  `details` = window, counts, lists, requests, quota, stop, `nba_state`, `weekly_run_id`. `db:status` prints the
+  last weekly run from these rows.
+- **Key handling.** `weekly.mjs` still never reads `.env`. The Highlightly child reads `HIGHLIGHTLY_API_KEY` from its env
+  (or the repo `.env`), never from argv, masks it in everything it prints, and the runner masks
+  `process.env.HIGHLIGHTLY_API_KEY` too.
+- **Fixtures.** A production run refuses `HIGHLIGHTLY_FIXTURES`, `SEED_FIXTURES` and `WEEKLY_STEP_FIXTURE`; a fake
+  run (the drill) must set `HIGHLIGHTLY_FIXTURES` and either `SEED_FIXTURES` or `WEEKLY_NBA=0`.
+- **Request estimates** (per run, Highlightly): about 80 typical, 385 worst case, 505 for the first run that does
+  the full-season sweep. The plan period (day or month) of the 7,500-request plan is **not confirmed**; the cap and
+  reserve assume a month.
+- **Full-season sweep (owner Q11), off by default.** `WEEKLY_HL_FULL_SEASON=1` adds, after the normal window work,
+  every remaining date of the season (schedule) and older final games (box scores), but only if the latest
+  rate-limit header says more than 3,000 requests remain. **Check the Highlightly dashboard for the quota period
+  before enabling it** (owner decision Q3/Q11 is on hold until the period is confirmed).
+- **Concurrency with the live worker.** Weekly skips live games and games in the worker window (tip-off -8 h .. +10 min)
+  and starts box scores 8 h after tip-off. Two residual races are accepted (plan section 5): a brand-new player
+  resolved by both in the same second (R-C1), and the existing season-wide NBA.com reconcile holding locks for minutes (R-C2).
+- **Not covered by Highlightly (stale while NBA.com is blocked):** arenas and altitude, national TV, NBA Cup stage,
+  season type for new playoff/play-in games, new games (Cup knockouts show as `unmatched`), official standings rank
+  (the app falls back to win %), and listed positions (positions stay NBA.com-only).
+
 ## 8. Railway (as built)
 
 Created 2026-09-26, per PLATFORM.md §4. Deploy configured 2026-09-27 (step 9). Project `chalk-that-nba`,
@@ -777,6 +851,24 @@ Install per package: `npm ci` (or `npm install`) in `/`, `backend/`,
   localhost/127.0.0.1.
 - **Connection for backend/worker:** `DATABASE_URL` (`src/db.js`); TLS off
   for localhost, 127.0.0.1 and `*.railway.internal`.
+- **Weekly job flags (M6)** (all optional; defaults in parentheses; invalid values are refused):
+
+  | Variable | Meaning |
+  |---|---|
+  | `WEEKLY_NBA` (`1`) | `0` = make no NBA.com request this run (`nba.com disabled by config`) |
+  | `WEEKLY_HL_CAP` (`600`) | Highlightly requests per run, 1..600 |
+  | `WEEKLY_HL_RESERVE` (`1000`) | stop when the quota header says fewer would remain, 1000..100000 |
+  | `WEEKLY_HL_RPS` (`4`) | requests per second, 1..10 |
+  | `WEEKLY_HL_DAYS_BACK` / `WEEKLY_HL_DAYS_AHEAD` (`7` / `60`) | window, 1..30 / 0..120 |
+  | `WEEKLY_HL_FULL_SEASON` (unset) | exactly `1` opts in to the full-season sweep (needs remaining > 3,000) |
+  | `WEEKLY_DRY_RUN` (unset) | `1`: Highlightly steps run and roll back, NBA.com steps and positions are skipped |
+  | `HIGHLIGHTLY_FIXTURES`, `SEED_FIXTURES` | fixture directories; refused on a production run |
+  | `HIGHLIGHTLY_API_KEY` | read by the Highlightly step only (env, else repo `.env`) |
+
+  The runner sets `WEEKLY_RUN_ID`, `WEEKLY_NBA_STATE`, `WEEKLY_HL_BUDGET`, `WEEKLY_HL_LAST_REMAINING` and
+  `WEEKLY_HL_TIPOFF` for its steps; values set by the user are dropped. Manual runs:
+  `npm --prefix worker run weekly-hl -- schedule|backfill --season 2026-27 [--dry-run]` (needs `DATABASE_PUBLIC_URL`
+  from a hand-opened tunnel; tip-off changes are applied only when the runner sets `WEEKLY_HL_TIPOFF=1`).
 - **Loading data needs NBA.com,** which blocks cloud IPs (§3.1), so
   `db:seed` / `db:backfill` / `db:schedule` run from JD's Mac only. There
   is no committed data fixture; a fresh database has an empty schema.
@@ -785,12 +877,12 @@ Install per package: `npm ci` (or `npm install`) in `/`, `backend/`,
 
 | Package | Command | Runner | Needs Postgres? | Env vars | Result on an empty-schema DB |
 |---|---|---|---|---|---|
-| root | `npm test` | `node --test 'scripts/lib/*.test.mjs'` | No | none (`sources.test.mjs` stubs `fetch`, unsets `SEED_FIXTURES`) | 76/76 pass |
+| root | `npm test` | `node --test 'scripts/lib/*.test.mjs'` | No | none (`sources.test.mjs` stubs `fetch`, unsets `SEED_FIXTURES`) | 110/110 pass (M6) |
 | root (schema) | `npm run db:apply` | SQL constraint tests | Yes, empty DB | `DATABASE_PUBLIC_URL` | PASSED |
 | backend | `npm test` | `node --test --test-concurrency=1 'test/*.test.js'` | **Yes, with real loaded data** | `TEST_DATABASE_URL` (falls back to `DATABASE_URL`); `JWT_SECRET` is generated if unset | 21 pass / 44 fail / 3 skip (see below) |
-| worker | `npm test` | `node --test --test-concurrency=1 'test/*.test.js'` | Optional | `WORKER_TEST_DATABASE_URL` | without it: 17 pass, 6 skip. With it: 23 pass, 0 skip |
+| worker | `npm test` | `node --test --test-concurrency=1 'test/*.test.js'` | Optional | `WORKER_TEST_DATABASE_URL` | without it: 40 pass, 51 skip. With it: 91 pass, 0 skip (M6 added the Highlightly weekly client, schedule, backfill and CLI tests) |
 | root (backup drill) | `npm run db:backup:drill` | zsh harness | Docker (two throwaway `postgres:18`), macOS `hdiutil`, Homebrew libpq | none (generates its own random passwords) | 108 PASS; local only (CI has no hdiutil), not in `npm test` |
-| root (weekly drill) | `npm run db:weekly:drill` | zsh harness | Docker (one throwaway `postgres:18`), macOS `hdiutil`, Homebrew libpq | none (random passwords and ports; fake Railway CLI) | 155 PASS; local only (CI has no hdiutil), not in `npm test` |
+| root (weekly drill) | `npm run db:weekly:drill` | zsh harness | Docker (one throwaway `postgres:18`), macOS `hdiutil`, Homebrew libpq | none (random passwords and ports; fake Railway CLI) | 203 PASS (M6 added W26-W32: real sub-steps with Highlightly and synthetic NBA.com fixtures); local only (CI has no hdiutil), not in `npm test` |
 | frontend | `npm test` | `vitest run` (jsdom) | No | none (`fetch` mocked) | 32/32 pass |
 
 Details:

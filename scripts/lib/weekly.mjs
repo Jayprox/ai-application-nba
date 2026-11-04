@@ -26,6 +26,21 @@ export const STEPS = [
 ];
 export const FIXTURE_STEP = 'scripts/fixtures/fake-weekly-step.mjs';
 
+// M6: the real sub-steps (docs/plans/M6-highlightly-weekly.md section 4.6). `stage` is what a FAIL line names;
+// `kind` says how the runner feeds the step (nba: best-effort flag; hl: budget and tip-off authority).
+// NBA.com goes first so its single probe is the run's only NBA.com wait.
+export const HL_SCRIPT = 'worker/scripts/weekly-hl.js';
+export const SUBSTEPS = [
+  { stage: 'schedule', name: 'schedule:nba', script: 'scripts/load-schedule.mjs', mode: null, season: true, kind: 'nba' },
+  { stage: 'schedule', name: 'schedule:hl', script: HL_SCRIPT, mode: 'schedule', season: true, kind: 'hl' },
+  { stage: 'positions', name: 'positions:nba', script: 'scripts/load-positions.mjs', mode: null, season: false, kind: 'nba' },
+  { stage: 'backfill', name: 'backfill:hl', script: HL_SCRIPT, mode: 'backfill', season: true, kind: 'hl' },
+  { stage: 'backfill', name: 'backfill:nba', script: 'scripts/backfill.mjs', mode: null, season: true, kind: 'nba' },
+  { stage: 'status', name: 'status', script: 'scripts/db-status.mjs', mode: null, season: false, kind: 'status' },
+];
+// Step plan for a run. Fixture mode (the M5 drill) keeps the three fake stages; no real vendor step runs.
+export const planSteps = (cfg) => (cfg.stepFixture ? STEPS.map((s) => ({ ...s, stage: s.name, kind: s.name === 'status' ? 'status' : 'fixture' })) : SUBSTEPS);
+
 const intIn = (name, raw, dflt, min, max) => {
   if (raw === undefined || raw === '') return dflt;
   if (!/^\d+$/.test(String(raw))) throw new Error(`${name} must be an integer`);
@@ -37,6 +52,7 @@ const intIn = (name, raw, dflt, min, max) => {
 // Throws Error with a fixed message on bad config. `season` is the CLI arg (default 2026-27).
 export function loadWeeklyConfig(env = process.env, { season = '2026-27', home = os.homedir(), repoRoot = LIB_REPO_ROOT } = {}) {
   if (!/^\d{4}-\d{2}$/.test(String(season))) throw new Error('season must look like 2026-27');
+  if (env.WEEKLY_NBA !== undefined && env.WEEKLY_NBA !== '' && !['0', '1'].includes(env.WEEKLY_NBA)) throw new Error('WEEKLY_NBA must be 0 or 1');
   if (env.WEEKLY_RAILWAY_BIN && !path.isAbsolute(env.WEEKLY_RAILWAY_BIN)) throw new Error('WEEKLY_RAILWAY_BIN must be an absolute path');
   const bcfg = loadConfig(env, { home }); // the backup's own config: its port, dir, log and lock
   const port = intIn('WEEKLY_TUNNEL_PORT', env.WEEKLY_TUNNEL_PORT, 55434, 1024, 65535);
@@ -56,6 +72,14 @@ export function loadWeeklyConfig(env = process.env, { season = '2026-27', home =
     logPath: env.WEEKLY_LOG || path.join(repoRoot, 'logs/weekly.log'),
     notify: env.WEEKLY_NOTIFY !== '0',
     stepFixture: env.WEEKLY_STEP_FIXTURE === '1',
+    nba: env.WEEKLY_NBA !== '0',
+    hlCap: intIn('WEEKLY_HL_CAP', env.WEEKLY_HL_CAP, 600, 1, 600),                       // owner Q7: only safer (lower) values
+    hlReserve: intIn('WEEKLY_HL_RESERVE', env.WEEKLY_HL_RESERVE, 1000, 1000, 100000),    // owner Q3/Q7: only safer (higher) values
+    hlRps: intIn('WEEKLY_HL_RPS', env.WEEKLY_HL_RPS, 4, 1, 10),
+    hlDaysBack: intIn('WEEKLY_HL_DAYS_BACK', env.WEEKLY_HL_DAYS_BACK, 7, 1, 30),
+    hlDaysAhead: intIn('WEEKLY_HL_DAYS_AHEAD', env.WEEKLY_HL_DAYS_AHEAD, 60, 0, 120),
+    fullSeason: env.WEEKLY_HL_FULL_SEASON === '1',
+    dryRun: env.WEEKLY_DRY_RUN === '1',
     stateDir,
     lockDir,
     backup: bcfg,
@@ -97,6 +121,19 @@ export function fakeIsolationError(cfg, env = process.env, { home = os.homedir()
     || dir === REAL_VOL || dir.startsWith(REAL_VOL + path.sep)
     || path.resolve(cfg.backup.logPath) === path.resolve(REAL_LOG);
   return bad ? FAKE_ISOLATION_MSG : null;
+}
+
+export const FIXTURES_ON_PROD_MSG = 'fixtures (HIGHLIGHTLY_FIXTURES, SEED_FIXTURES, WEEKLY_STEP_FIXTURE) are not allowed on a production run';
+export const FAKE_NEEDS_FIXTURES_MSG = 'a fake run needs HIGHLIGHTLY_FIXTURES, and SEED_FIXTURES or WEEKLY_NBA=0, so it can not spend real quota or call NBA.com';
+
+// D12: fixture data must never reach production, and a drill must never spend real quota or call NBA.com.
+// Returns a fixed reason or null.
+export function fixtureGuardError(cfg, env = process.env, { repoRoot = LIB_REPO_ROOT } = {}) {
+  const fake = isFakeBin(env, 'WEEKLY_RAILWAY_BIN', { repoRoot });
+  if (!fake) return env.HIGHLIGHTLY_FIXTURES || env.SEED_FIXTURES || env.WEEKLY_STEP_FIXTURE ? FIXTURES_ON_PROD_MSG : null;
+  if (cfg.stepFixture) return null;                                   // only the fake step runs: nothing vendor-facing starts
+  if (!env.HIGHLIGHTLY_FIXTURES || !(env.SEED_FIXTURES || env.WEEKLY_NBA === '0')) return FAKE_NEEDS_FIXTURES_MSG;
+  return null;
 }
 
 const STAMP_RE = /^chalk-that-nba_(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z\.dump$/;
@@ -155,16 +192,23 @@ export function buildTunnelUrl({ user, password, database }, port) {
   return `postgres://${encodeURIComponent(user)}:${encodeURIComponent(password)}@127.0.0.1:${Number(port)}/${encodeURIComponent(database)}`;
 }
 
-// Env for one step child: a copy of `base` with DATABASE_PUBLIC_URL set and both prod flags removed.
-export function stepEnv(base, url) {
+// Variables only the runner may set: a copy in the user's environment is dropped so it can't steer a step.
+export const INTERNAL_ENV = ['WEEKLY_RUN_ID', 'WEEKLY_NBA_STATE', 'WEEKLY_HL_BUDGET', 'WEEKLY_HL_LAST_REMAINING', 'WEEKLY_HL_TIPOFF'];
+
+// Env for one step child: a copy of `base` without the prod flags or the internal variables, with
+// DATABASE_PUBLIC_URL set, plus `extra` (the runner's own values for this step).
+export function stepEnv(base, url, extra = {}) {
   const { WEEKLY_CONFIRM_PROD: _w, BACKUP_CONFIRM_PROD: _b, ...rest } = base;
-  return { ...rest, DATABASE_PUBLIC_URL: url };
+  for (const k of INTERNAL_ENV) delete rest[k];
+  return { ...rest, DATABASE_PUBLIC_URL: url, ...extra };
 }
 
 // `[script, ...args]` for node. In fixture mode schedule/positions/backfill are the fake step.
 export function stepArgv(step, season, { fixture = false } = {}) {
   const seasonArgs = step.season ? ['--season', season] : [];
   if (fixture && step.name !== 'status') return [FIXTURE_STEP, step.name, ...seasonArgs];
+  if (step.kind === 'hl') return [step.script, step.mode, ...seasonArgs];
+  if (step.kind === 'nba') return [step.script, ...seasonArgs, '--nba-best-effort'];
   return [step.script, ...seasonArgs];
 }
 
@@ -196,3 +240,81 @@ export function lineRedactor(secrets, write) {
     flush() { if (buf && !dropping) out(buf); buf = ''; },
   };
 }
+
+// ---- M6: sub-step results, run state, final line --------------------------------------------------------
+const STOPS = [null, 'cap', 'reserve', 'rate_limited'];
+const SKIP_OK = new Set(['nba:arena', 'nba:tv', 'nba:cup', 'nba:season_type', 'nba:new_games', 'nba:positions', 'nba:reconcile', 'nba:standings']);
+const NBA_OK = ['ok', 'down', 'disabled', 'skipped', 'n/a'];
+export const RESULT_MAX = 2048;
+const quotaVal = (v) => v === null || (Number.isInteger(v) && v >= 0 && v <= 9999999);
+
+// One "@@WEEKLY {json}" line from a step's stdout -> a validated object, or null. Never trusts the text:
+// size, JSON, step name, enums and the skipped allowlist are all checked; free text becomes one short line.
+export function parseResultLine(line, expectedStep) {
+  if (typeof line !== 'string' || !line.startsWith('@@WEEKLY ') || line.length > RESULT_MAX) return null;
+  let j;
+  try { j = JSON.parse(line.slice(9)); } catch { return null; }
+  if (!j || typeof j !== 'object' || j.v !== 1 || j.step !== expectedStep) return null;
+  if (typeof j.degraded !== 'boolean' || !NBA_OK.includes(j.nba) || !STOPS.includes(j.stop)) return null;
+  const hl = j.hl ?? {};
+  if (!Number.isInteger(hl.requests) || hl.requests < 0 || hl.requests > 100000 || !quotaVal(hl.limit ?? null) || !quotaVal(hl.remaining ?? null)) return null;
+  if (j.reason !== null && j.reason !== undefined && typeof j.reason !== 'string') return null;
+  return {
+    step: j.step, degraded: j.degraded, nba: j.nba, stop: j.stop,
+    skipped: Array.isArray(j.skipped) ? j.skipped.filter((x) => typeof x === 'string' && SKIP_OK.has(x)) : [],
+    hl: { requests: hl.requests, limit: hl.limit ?? null, remaining: hl.remaining ?? null },
+    reason: typeof j.reason === 'string' ? j.reason.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ').replace(/"/g, "'").trim().slice(0, 200) : null,
+  };
+}
+
+// What the runner knows while it goes: Highlightly requests used (the cap is per RUN, not per child),
+// the last quota header seen, whether NBA.com answered, and what degraded.
+export function newRunState(cfg) {
+  return { cap: cfg.hlCap, used: 0, limit: null, remaining: null, nba: cfg.nba ? 'ok' : 'disabled', nbaLoaded: false, degraded: false, skipped: [], stop: null, reasons: [] };
+}
+export const budgetLeft = (st) => Math.max(0, st.cap - st.used);
+
+// Fold one finished sub-step's result into the run state. `res` may be null (no result line).
+export function applyResult(st, step, res) {
+  if (!res) return st;
+  if (step.kind === 'hl') {
+    st.used += res.hl.requests;
+    if (res.hl.remaining !== null) { st.remaining = res.hl.remaining; st.limit = res.hl.limit ?? st.limit; }
+    if (res.stop && !st.stop) st.stop = res.stop;
+  }
+  if (step.kind === 'nba') {
+    if (res.nba === 'down' || res.nba === 'disabled') st.nba = res.nba;
+    if (step.name === 'schedule:nba') st.nbaLoaded = res.nba === 'ok' && !res.degraded;
+    for (const k of res.skipped) if (!st.skipped.includes(k)) st.skipped.push(k);
+  }
+  if (res.degraded) { st.degraded = true; if (res.reason) st.reasons.push(res.reason); }
+  return st;
+}
+
+// Env values the runner adds for one step (NBA state, run id, Highlightly budget and tip-off authority).
+export function stepExtra(step, st, runId) {
+  const extra = { WEEKLY_RUN_ID: runId };
+  if (step.kind === 'nba' && st.nba === 'down') extra.WEEKLY_NBA_STATE = 'down';
+  if (step.kind === 'hl') {
+    extra.WEEKLY_HL_BUDGET = String(budgetLeft(st));
+    if (st.remaining !== null) extra.WEEKLY_HL_LAST_REMAINING = String(st.remaining);
+    extra.WEEKLY_HL_TIPOFF = st.nbaLoaded ? '0' : '1';                    // Q9: NBA.com wins when it answered completely
+    if (st.nba !== 'ok') extra.WEEKLY_NBA_STATE = st.nba === 'disabled' ? 'disabled' : 'down';
+  }
+  return extra;
+}
+
+const q = (st) => (st.remaining === null ? 'unknown' : `${st.remaining}/${st.limit ?? '?'}`);
+export function finalLine({ iso, season, backup, st, duration, dryRun = false }) {
+  const head = `${iso} ${st.degraded ? 'OK-DEGRADED' : 'OK'} season=${season} backup=${backup} hl_requests=${st.used} quota=${q(st)}`;
+  const tail = `${dryRun ? ' dry_run=1' : ''} duration=${duration}`;
+  if (!st.degraded) return head + tail;
+  const parts = [];
+  if (st.nba !== 'ok') parts.push(`nba=${st.nba}`);
+  if (st.skipped.length) parts.push(`skipped=${st.skipped.join(',')}`);
+  if (st.stop) parts.push(`stop=${st.stop}`);
+  if (st.reasons.length) parts.push(`reason="${st.reasons[0].replace(/"/g, "'")}"`);
+  return `${head}${parts.length ? ' ' + parts.join(' ') : ''}${tail}`;
+}
+
+export const NOTIFY_TEXT = { ok: 'Weekly run OK', degraded: 'Weekly run OK with warnings — see logs/weekly.log', fail: 'Weekly run FAILED — see logs/weekly.log' };

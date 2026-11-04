@@ -12,7 +12,8 @@
 import pg from 'pg';
 import { randomUUID } from 'node:crypto';
 import { loadEnv, publicDbUrl } from './lib/env.mjs';
-import { rows, nbaStandings, nbaScheduleSeason, nbaGameLog } from './lib/sources.mjs';
+import { rows, nbaStandings, nbaScheduleSeason, nbaGameLog, enableBestEffort } from './lib/sources.mjs';
+import { SKIPPED, skipMessage, classifyError, weeklyLine, nbaSeasonComplete } from './lib/nba-best-effort.mjs';
 import { upsertArena } from './lib/arenas.mjs';
 import { linkToWorkerCreated, workerCreatedPlayers } from './lib/worker-players.mjs';
 import { writeStandings } from './lib/standings.mjs';
@@ -300,6 +301,21 @@ async function loadSeason(db, season, maps, data) {
 // ---------------------------------------------------------------- main ----
 const env = loadEnv();
 const seasons = seasonsFromArgs(process.argv.slice(2));
+// --nba-best-effort (only weekly.mjs passes it): NBA.com is optional. Unreachable / malformed / inconsistent
+// data -> the season is rolled back, a warning is logged and the run ends "degraded" with exit 0; database
+// errors still fail. Without the flag nothing below changes.
+const BE = process.argv.includes('--nba-best-effort');
+const RUN_ID = BE && /^[A-Za-z0-9:_-]{1,64}$/.test(process.env.WEEKLY_RUN_ID ?? '') ? process.env.WEEKLY_RUN_ID : null;
+const warned = [];                // best-effort warnings (classifyError results)
+if (BE) {
+  process.stdout._handle?.setBlocking?.(true);
+  const state = enableBestEffort(process.env);
+  if (state !== 'ok') {
+    log(`nba reconcile skipped (${skipMessage(state)})`);
+    console.log(weeklyLine({ step: 'backfill:nba', degraded: true, nba: state, skipped: SKIPPED['backfill:nba'], reason: skipMessage(state) }));
+    process.exit(0);
+  }
+}
 const { url, host, ssl } = publicDbUrl(env);
 const db = new pg.Client({ connectionString: url, ssl });
 try { await db.connect(); } catch (e) { console.error(`[backfill] cannot reach the database at ${host}: ${e.message}`); process.exit(1); }
@@ -314,15 +330,27 @@ if (maps.team.size !== 30) { console.error(`[backfill] expected 30 seeded teams,
 const failed = [];
 for (const season of seasons) {
   const t0 = Date.now();
-  const { rows: [run] } = await db.query(`INSERT INTO ingestion_runs (job_type, source, triggered_by, details) VALUES ('backfill_season', 'nba_stats', 'backfill', $1) RETURNING id`, [{ season }]);
+  const { rows: [run] } = await db.query(`INSERT INTO ingestion_runs (job_type, source, triggered_by, details) VALUES ('backfill_season', 'nba_stats', 'backfill', $1) RETURNING id`, [{ season, ...(RUN_ID && { weekly_run_id: RUN_ID }) }]);
   try {
     const data = await fetchSeason(season);
+    if (BE) {
+      // NBA.com answered but with no game logs while we already hold final games: do not reconcile (the
+      // destructive step would delete Highlightly rows NBA.com "doesn't have").
+      const { rows: [f] } = await db.query(`SELECT count(*)::int n FROM games WHERE season = $1 AND status = 'final'`, [season]);
+      if (!nbaSeasonComplete({ dbFinalGames: f.n, teamLogRows: data.team.length })) {
+        const reason = 'nba.com returned no game logs; reconcile skipped';
+        await db.query(`UPDATE ingestion_runs SET status='failed', finished_at=now(), error=$2 WHERE id=$1`, [run.id, reason]).catch(() => {});
+        log(`${season} ⚠ ${reason}`);
+        warned.push({ nba: 'ok', reason });
+        continue;
+      }
+    }
     await db.query('BEGIN');
     const r = await loadSeason(db, season, maps, data);
     await db.query('COMMIT');
     const c = r.counts;
     await db.query(`UPDATE ingestion_runs SET status='success', finished_at=now(), records_written=$2, details=$3 WHERE id=$1`,
-      [run.id, c.games + c.team_rows + c.player_rows + c.series, { season, ...c, byType: r.byType, tiers: r.tiers, neutral: r.neutral, notPlayed: r.notPlayed }]);
+      [run.id, c.games + c.team_rows + c.player_rows + c.series, { season, ...(RUN_ID && { weekly_run_id: RUN_ID }), ...c, byType: r.byType, tiers: r.tiers, neutral: r.neutral, notPlayed: r.notPlayed }]);
     log(`${season} ✓ ${c.games} games ${JSON.stringify(r.byType)} · ${c.player_rows} player rows · ${c.series} series · TV ${JSON.stringify(r.tiers)} · ${((Date.now() - t0) / 1000).toFixed(0)}s`);
     if (c.players_created) log(`  ${c.players_created} player(s) not in the seed were created from game logs`);
     if (c.players_linked) log(`  ${c.players_linked} player(s) the worker created were linked to their NBA.com id`);
@@ -335,9 +363,16 @@ for (const season of seasons) {
     if (r.neutral.length) log(`  neutral (${r.neutral.length}): ${r.neutral.length > 6 ? r.neutral.slice(0, 3).join(' | ') + ` | … +${r.neutral.length - 3} more` : r.neutral.join(' | ')}`);
   } catch (e) {
     await db.query('ROLLBACK').catch(() => {});
-    await db.query(`UPDATE ingestion_runs SET status='failed', finished_at=now(), error=$2 WHERE id=$1`, [run.id, e.message]).catch(() => {});
-    log(`${season} ✗ FAILED — nothing written for this season.\n  ${e.message}`);
-    failed.push(season);
+    const cls = BE ? classifyError(e) : null;
+    await db.query(`UPDATE ingestion_runs SET status='failed', finished_at=now(), error=$2 WHERE id=$1`, [run.id, cls?.kind === 'warn' ? cls.reason : e.message]).catch(() => {});
+    if (cls?.kind === 'warn') {
+      log(`${season} ⚠ ${cls.reason} — nothing written for this season (reconcile skipped).`);
+      warned.push(cls);
+    } else {
+      log(`${season} ✗ FAILED — nothing written for this season.\n  ${e.message}`);
+      failed.push(season);
+      if (cls) warned.push(cls);
+    }
   }
 }
 
@@ -353,3 +388,10 @@ for (const [name, season] of [['LeBron James', '2003-04'], ['Nikola Jokić', '20
 await db.end();
 if (failed.length) { log(`done with FAILURES: ${failed.join(', ')} (re-run with --season to retry just those)`); process.exitCode = 1; }
 else log('done — all seasons loaded and checked.');
+if (BE) {
+  const bad = failed.length ? warned.find((w) => w.kind === 'fail') : null;
+  const down = warned.find((w) => w.nba === 'down');
+  const warns = warned.filter((w) => w.kind !== 'fail');
+  console.log(weeklyLine({ step: 'backfill:nba', degraded: warns.length > 0 && !failed.length, nba: down ? 'down' : 'ok',
+    skipped: warns.length ? SKIPPED['backfill:nba'] : [], reason: bad ? bad.reason : (warns[0]?.reason ?? null) }));
+}

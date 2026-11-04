@@ -4,6 +4,14 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
+/** Base URL + auth headers for a key: direct key -> nba.highlightly.net; RapidAPI key -> RapidAPI host. */
+export function hostFor(key) {
+  const direct = !key.includes('msh');
+  const base = direct ? 'https://nba.highlightly.net' : 'https://nba-ncaab-api.p.rapidapi.com';
+  const headers = direct ? { 'x-rapidapi-key': key } : { 'x-rapidapi-key': key, 'x-rapidapi-host': 'nba-ncaab-api.p.rapidapi.com' };
+  return { base, headers };
+}
+
 export function createHighlightly({ key = process.env.HIGHLIGHTLY_API_KEY, fixtures = process.env.HIGHLIGHTLY_FIXTURES, timeoutMs = 20000 } = {}) {
   const quota = { limit: null, remaining: null, at: null };
   const calls = { n: 0 };
@@ -15,9 +23,7 @@ export function createHighlightly({ key = process.env.HIGHLIGHTLY_API_KEY, fixtu
       catch (e) { if (e.code === 'ENOENT') return null; throw e; }
     }
     if (!key) throw new Error('HIGHLIGHTLY_API_KEY is not set');
-    const direct = !key.includes('msh');
-    const base = direct ? 'https://nba.highlightly.net' : 'https://nba-ncaab-api.p.rapidapi.com';
-    const headers = direct ? { 'x-rapidapi-key': key } : { 'x-rapidapi-key': key, 'x-rapidapi-host': 'nba-ncaab-api.p.rapidapi.com' };
+    const { base, headers } = hostFor(key);
     const res = await fetch(base + pathAndQuery, { headers, signal: AbortSignal.timeout(timeoutMs) });
     const lim = res.headers.get('x-ratelimit-requests-limit'), rem = res.headers.get('x-ratelimit-requests-remaining');
     if (rem !== null) Object.assign(quota, { limit: Number(lim), remaining: Number(rem), at: new Date().toISOString() });

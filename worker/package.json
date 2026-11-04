@@ -11,7 +11,8 @@
     "sync": "node scripts/sync.js",
     "test": "node --test --test-concurrency=1 'test/*.test.js'",
     "props": "node scripts/props.js",
-    "injuries-probe": "node scripts/injuries-probe.js"
+    "injuries-probe": "node scripts/injuries-probe.js",
+    "weekly-hl": "node scripts/weekly-hl.js"
   },
   "dependencies": {
     "pg": "^8.13.0"

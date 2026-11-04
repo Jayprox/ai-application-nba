@@ -18,6 +18,7 @@ PW=$(openssl rand -hex 16)
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/chalk-wdrill.XXXXXX") || exit 1
 chmod 700 $WORK
 mkdir -p $WORK/priv $WORK/vol $WORK/wstate
+: > $WORK/empty.env                      # Highlightly step env file: empty, so drills never read the real .env
 VOL=$WORK/vol
 DIR=$VOL/db-backups
 LOG=$WORK/backup.log
@@ -67,12 +68,12 @@ hdiutil create -size 64m -fs APFS -volname WDRILL $WORK/drive.dmg >/dev/null 2>&
 
 # One env for both scripts. %p in the pidfiles becomes the tunnel port (weekly and backup keep separate files).
 BENV=(BACKUP_VOLUME=$VOL BACKUP_DIR=$DIR BACKUP_LOG=$LOG BACKUP_RAILWAY_BIN=$FAKE BACKUP_TUNNEL_PORT=$BP BACKUP_NOTIFY=0
-  WEEKLY_RAILWAY_BIN=$FAKE WEEKLY_TUNNEL_PORT=$WP WEEKLY_LOG=$WLOG WEEKLY_STATE_DIR=$WORK/wstate WEEKLY_NOTIFY=0 WEEKLY_STEP_FIXTURE=1
+  WEEKLY_RAILWAY_BIN=$FAKE WEEKLY_TUNNEL_PORT=$WP WEEKLY_LOG=$WLOG WEEKLY_STATE_DIR=$WORK/wstate WEEKLY_NOTIFY=0 WEEKLY_STEP_FIXTURE=1 WEEKLY_HL_ENV_FILE=$WORK/empty.env
   FAKE_RAILWAY_PASSWORD=$PW FAKE_RAILWAY_USER=postgres FAKE_RAILWAY_DB=backup_test FAKE_RAILWAY_TARGET_PORT=$SP
   FAKE_RAILWAY_PIDFILE=$WORK/fake.%p.pid FAKE_RAILWAY_SSH_PIDFILE=$WORK/ssh.%p.pid)
 
 # ---- Safety: the real railway CLI must be unreachable in EVERY case ----------
-# build_env [--no-wbin] [--no-bbin] [--shadow-wbin] [VAR=val ...] fills LE (the complete env
+# build_env [--no-wbin] [--no-bbin] [--shadow-wbin] [--no-fixture] [VAR=val ...] fills LE (the complete env
 # assignments for one launch) and aborts the whole drill unless every railway the run could reach is
 # a verified fake (or, for --shadow-wbin only, the verified call-recording shadow), and a production
 # flag is never combined with a PATH lookup.
@@ -87,8 +88,10 @@ grep -q chalk-drill-shadow $SHADOW/railway && [[ -x $SHADOW/railway ]] || abort_
 LE=()
 build_env() {
   local nw=0 nb=0 sw=0 a wbin="" bbin="" wflag="" bflag=""
-  while [[ $1 == --* ]]; do case $1 in --no-wbin) nw=1;; --no-bbin) nb=1;; --shadow-wbin) sw=1;; esac; shift; done
+  local nf=0
+  while [[ $1 == --* ]]; do case $1 in --no-wbin) nw=1;; --no-bbin) nb=1;; --shadow-wbin) sw=1;; --no-fixture) nf=1;; esac; shift; done
   LE=($BENV)
+  (( nf )) && LE=(${LE:#WEEKLY_STEP_FIXTURE=*})              # M6 cases run the REAL sub-steps
   (( nw )) && LE=(${LE:#WEEKLY_RAILWAY_BIN=*})
   (( nb )) && LE=(${LE:#BACKUP_RAILWAY_BIN=*})
   LE+=("$@")
@@ -117,7 +120,7 @@ start_weekly() { build_env "$@"; OUTN=$((OUTN+1)); rm -f $WORK/fake.*.pid $WORK/
 start_backup() { build_env "$@"; ( exec $LAUNCH $LE node scripts/backup-db.mjs ) >$WORK/outb.$OUTN 2>$WORK/errb.$OUTN & BPID=$!; }
 wsize() { [[ -f $WLOG ]] && stat -f %z $WLOG || print 0; }
 wnew() { tail -c +$((WOFF+1)) $WLOG 2>/dev/null; }           # weekly log text written by the last run
-wres() { wnew | grep -E 'Z (OK|FAIL) ' | tail -1; }          # its result line
+wres() { wnew | grep -E 'Z (OK|OK-DEGRADED|FAIL) ' | tail -1; }   # its result line
 blines() { [[ -f $LOG ]] && wc -l < $LOG | tr -d ' ' || print 0; }
 dumps() { ls $DIR 2>/dev/null | grep -E '^chalk-that-nba_[0-9]{8}T[0-9]{6}Z\.dump$'; }
 ndumps() { dumps | grep -c .; }
@@ -206,7 +209,9 @@ kill $NCPID 2>/dev/null; NCPID=""; sleep 0.3
 
 print "== W5 Happy path, no backup yet =="
 clear_backups
-( while :; do ps -axww -o args= >> $WORK/ps.txt; sleep 0.05; done ) &
+# Sample only the drill's own process tree (this shell and its descendants), so an unrelated host process
+# with a postgres:// URL in its argv can't fail the case.
+( while :; do ps -axww -o pid=,ppid=,args= | awk -v root=$$ '{ pid[NR]=$1; par[$1]=$2; line[$1]=$0 } END { for (p in par) { q=p; while (q > 1) { if (q == root) { print line[p]; break } q=par[q] } } }' | sed -E 's/^ *[0-9]+ +[0-9]+ //' >> $WORK/ps.txt; sleep 0.05; done ) &
 SAMPLER=$!
 run_weekly
 kill $SAMPLER 2>/dev/null; SAMPLER=""
@@ -436,6 +441,104 @@ run_weekly --shadow-wbin WEEKLY_RAILWAY_BIN=$SHADOW/railway WEEKLY_CONFIRM_PROD=
 expect_wfail "both flags + fake BACKUP_RAILWAY_BIN" preflight "BACKUP_RAILWAY_BIN must not be set for a production run"
 [[ ! -e $WORK/shadow.calls && $(nmarks) -eq 0 ]] && wlock_gone && [[ $(blines) == $BL && $(ndumps) == $D0 ]] \
   && pass "  shadow never called, no lock, no new dump or backup log line, 0 marks" || fail "  something ran after the refusal"
+
+# ============================== M6: Highlightly first, NBA.com best-effort ==============================
+# These cases run the REAL sub-steps (load-schedule / load-positions / backfill / worker weekly-hl.js) against the
+# throwaway database through the fake tunnel. Highlightly answers from fixtures (HIGHLIGHTLY_FIXTURES, no key, no
+# network); NBA.com answers from synthetic fixtures (SEED_FIXTURES) or is switched off (WEEKLY_NBA=0).
+# The fixtures are synthetic; nothing here contacts Highlightly or NBA.com.
+print "== M6 setup: date-relative Highlightly fixtures and the weekly seed =="
+FX=$WORK/m6fx; NBAFX=$REPO/scripts/fixtures/nba
+FAKEKEY=$(openssl rand -hex 16)
+DATES=$(node scripts/fixtures/make-weekly-drill-fixtures.mjs $FX $FAKEKEY) && pass "fixtures written ($DATES)" || { fail "fixture generator"; DATES="{}"; }
+jget() { print -r -- "$DATES" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s)[process.argv[1]]))' $1; }
+G1_TIP=$(jget g1_tip); G1_LOCAL=$(jget g1_local); FIN_TIP=$(jget fin_tip); FIN_LOCAL=$(jget fin_local)
+reset_m6() {
+  psql_src -c "TRUNCATE games, players, ingestion_runs RESTART IDENTITY CASCADE; DELETE FROM entity_id_crosswalk WHERE entity_type IN ('game', 'player'); DELETE FROM entity_id_crosswalk WHERE entity_type = 'team' AND source IN ('highlightly', 'nba_stats')" >/dev/null
+  psql_src -v g1_tip=$G1_TIP -v g1_local=$G1_LOCAL -v fin_tip=$FIN_TIP -v fin_local=$FIN_LOCAL -f db/tests/weekly_drill_seed.sql >/dev/null
+}
+G1=00000000-0000-4000-8000-0000000000c1; FIN=00000000-0000-4000-8000-0000000000c2
+q1() { psql_src -Atc "$1"; }
+g1tip() { q1 "select to_char(tipoff_utc at time zone 'UTC', 'YYYY-MM-DD\"T\"HH24:MI') from games where id = '$G1'"; }
+dur() { print -r -- "$(wres)" | sed -n 's/.* duration=\([0-9]*\)s$/\1/p'; }
+reset_m6 && pass "seed loaded (30 teams, 1 scheduled game, 1 final game without a box score)" || fail "weekly seed"
+mk_fresh_backup
+
+print "== W26 NBA.com blocked (synthetic) + Highlightly fixtures -> OK-DEGRADED, exit 0 =="
+reset_m6
+run_weekly --no-fixture HIGHLIGHTLY_FIXTURES=$FX/hl_ok SEED_FIXTURES=$NBAFX/synthetic_unreachable
+line=$(wres)
+[[ $RC -eq 0 ]] && pass "exit 0" || fail "exit $RC: $line"
+[[ $line == *" OK-DEGRADED season=2026-27 backup=reused:"* && $line == *" nba=down "* && $line == *"skipped=nba:arena,nba:tv,nba:cup,nba:season_type,nba:new_games,nba:positions,nba:reconcile,nba:standings"* ]] \
+  && pass "OK-DEGRADED with nba=down and the full skipped list" || fail "result line: $line"
+[[ $line == *" hl_requests="* && $line != *" hl_requests=0 "* ]] && pass "Highlightly requests were made and counted" || fail "hl_requests: $line"
+[[ $(dur) -lt 30 ]] && pass "whole run under 30 s (so the NBA.com wait was far below the 15 s probe limit)" || fail "duration $(dur)s"
+[[ "$(g1tip)" == "${G1_TIP:0:13}:00" ]] && fail "tip-off was not moved (Highlightly authority)" || pass "tip-off moved to Highlightly's time while NBA.com was down: $(g1tip)"
+[[ $(q1 "select count(*) from player_game_stats where game_id = '$FIN' and source = 'highlightly'") -gt 0 ]] && pass "box score caught up from Highlightly (source highlightly)" || fail "no box score rows"
+[[ $(q1 "select count(*) from ingestion_runs where source = 'nba_stats' and status = 'success'") -eq 0 ]] && pass "no NBA.com success row (freshness is not faked)" || fail "an NBA.com run is marked success"
+[[ $(q1 "select count(*) from ingestion_runs where source = 'highlightly' and status = 'success'") -eq 2 ]] && pass "two Highlightly run rows (schedule, backfill)" || fail "highlightly runs: $(q1 "select job_type || ':' || status from ingestion_runs where source = 'highlightly'")"
+wnew | grep -q '^\[status\] .*' && wnew | grep -q 'weekly: ' && pass "db:status shows the weekly line" || fail "no weekly line in the status output"
+common "W26"
+
+print "== W27 Highlightly down (HTTP 500) -> FAIL stage=schedule, database unchanged =="
+reset_m6
+BEFORE=$(q1 "select md5(string_agg(g::text, '|' order by id)) from games g")
+run_weekly --no-fixture HIGHLIGHTLY_FIXTURES=$FX/hl_500 WEEKLY_NBA=0
+expect_wfail "Highlightly 500" schedule 'highlightly unreachable (HTTP 500)'
+[[ "$(q1 "select md5(string_agg(g::text, '|' order by id)) from games g")" == "$BEFORE" ]] && pass "  games unchanged" || fail "  games changed after a Highlightly failure"
+[[ $(q1 "select count(*) from ingestion_runs where status = 'failed' and source = 'highlightly'") -eq 1 ]] && pass "  one failed Highlightly run row" || fail "  run rows: $(q1 "select job_type || ':' || status from ingestion_runs")"
+wnew | grep -q '^\[status\]' && fail "  status ran after the failure" || pass "  status did not run"
+common "W27"
+
+print "== W28 Quota reserve reached (remaining 1002, reserve 1000) -> OK-DEGRADED stop=reserve, no partial game =="
+reset_m6
+run_weekly --no-fixture HIGHLIGHTLY_FIXTURES=$FX/hl_reserve WEEKLY_NBA=0
+line=$(wres)
+[[ $RC -eq 0 && $line == *" OK-DEGRADED "* && $line == *"stop=reserve"* ]] && pass "exit 0, OK-DEGRADED, stop=reserve" || fail "rc=$RC $line"
+[[ $line == *"hl_requests=2 "* ]] && pass "exactly 2 requests before the reserve" || fail "requests: $line"
+[[ $(q1 "select count(*) from games g where box_score_checks > 0 and not exists (select 1 from player_game_stats s where s.game_id = g.id)") -eq 0 ]] && pass "no game marked loaded without its box score" || fail "partial game"
+common "W28"
+
+print "== W29 Request cap (WEEKLY_HL_CAP=3) -> stop=cap, nearest dates first =="
+reset_m6
+run_weekly --no-fixture HIGHLIGHTLY_FIXTURES=$FX/hl_quota_ok WEEKLY_NBA=0 WEEKLY_HL_CAP=3
+line=$(wres)
+[[ $RC -eq 0 && $line == *" OK-DEGRADED "* && $line == *"stop=cap"* && $line == *"hl_requests=3 "* ]] && pass "exit 0, stop=cap, exactly 3 requests in the whole run" || fail "rc=$RC $line"
+[[ "$(g1tip)" == "${G1_TIP:0:13}:00" ]] && fail "tomorrow's game (a nearest date) was not processed" || pass "tomorrow's game was processed (nearest dates first)"
+[[ $(q1 "select count(*) from player_game_stats where game_id = '$FIN'") -eq 0 ]] && pass "the box-score step had no budget left and wrote nothing" || fail "box score rows exist"
+common "W29"
+
+print "== W30 Key redaction (fake HIGHLIGHTLY_API_KEY in the environment) =="
+reset_m6
+run_weekly --no-fixture HIGHLIGHTLY_FIXTURES=$FX/hl_keyname WEEKLY_NBA=0 HIGHLIGHTLY_API_KEY=$FAKEKEY
+[[ $RC -eq 0 ]] && pass "exit 0" || fail "rc=$RC $(wres)"
+wnew | grep -q 'redacted' && pass "a vendor name equal to the key was masked in the log" || fail "no masked text in the log (the case did not exercise redaction)"
+hit=0; for f in $WLOG $LOG $WORK/out.$OUTN $WORK/err.$OUTN; do [[ -f $f ]] && grep -qF -- "$FAKEKEY" $f && hit=1; done
+[[ $hit -eq 0 ]] && pass "the key is absent from the weekly log, backup log, stdout and stderr" || fail "KEY FOUND in a log or output"
+[[ $(q1 "select count(*) from ingestion_runs where details::text like '%$FAKEKEY%'") -eq 0 ]] && pass "the key is not in ingestion_runs.details" || fail "key in ingestion_runs"
+common "W30"
+
+print "== W31 NBA.com answers with no game logs (synthetic) -> Highlightly rows are not deleted =="
+reset_m6
+run_weekly --no-fixture HIGHLIGHTLY_FIXTURES=$FX/hl_ok SEED_FIXTURES=$NBAFX/synthetic_zero_rows
+line=$(wres)
+[[ $RC -eq 0 && $line == *" OK-DEGRADED "* && $line == *"nba:reconcile"* ]] && pass "exit 0, OK-DEGRADED, reconcile reported as skipped" || fail "rc=$RC $line"
+wnew | grep -q 'nba.com returned no game logs; reconcile skipped' && pass "log: nba.com returned no game logs; reconcile skipped" || fail "no skip message"
+[[ $(q1 "select count(*) from player_game_stats where game_id = '$FIN' and source = 'highlightly'") -gt 0 ]] && pass "the Highlightly box-score rows are still there" || fail "highlightly rows were deleted"
+[[ $(q1 "select count(*) from ingestion_runs where source = 'nba_stats' and status = 'success'") -eq 0 ]] && pass "no NBA.com success row" || fail "NBA.com run marked success"
+common "W31"
+
+print "== W32 Fixture guards =="
+rm -f $WORK/shadow.calls; clear_marks
+run_weekly --shadow-wbin --no-fixture WEEKLY_RAILWAY_BIN=$SHADOW/railway WEEKLY_CONFIRM_PROD=1 BACKUP_CONFIRM_PROD=1 HIGHLIGHTLY_FIXTURES=$FX/hl_ok
+expect_wfail "production-looking run with HIGHLIGHTLY_FIXTURES" preflight ""
+[[ ! -e $WORK/shadow.calls ]] && wlock_gone && pass "  shadow never called, no lock" || fail "  something ran"
+run_weekly --no-fixture WEEKLY_NBA=0
+expect_wfail "fake run without HIGHLIGHTLY_FIXTURES" preflight "a fake run needs HIGHLIGHTLY_FIXTURES"
+[[ ! -f $WORK/fake.$WP.pid ]] && wlock_gone && pass "  no tunnel, no lock" || fail "  tunnel started"
+run_weekly --no-fixture HIGHLIGHTLY_FIXTURES=$FX/hl_ok
+expect_wfail "fake run with Highlightly fixtures but NBA.com live" preflight "a fake run needs HIGHLIGHTLY_FIXTURES"
+common "W32"
 
 print "== Summary: $PASS passed, $FAILN failed =="
 [[ $FAILN -eq 0 ]] && exit 0 || exit 1

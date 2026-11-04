@@ -71,7 +71,17 @@ export function readLog(env) {
   return fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
 }
 
-export const cleanup = (env) => fs.rmSync(env.root, { recursive: true, force: true });
+// Installed trees are 0444/0555: make them writable again before deleting the temp dir.
+export function relaxTree(dir) {
+  try {
+    fs.chmodSync(dir, 0o755);
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) relaxTree(p); else if (e.isFile()) fs.chmodSync(p, 0o644);
+    }
+  } catch { /* already gone */ }
+}
+export const cleanup = (env) => { relaxTree(env.root); fs.rmSync(env.root, { recursive: true, force: true }); };
 
 // ---- pre-filter fixtures ----
 import { prefilter } from '../src/prefilter.mjs';

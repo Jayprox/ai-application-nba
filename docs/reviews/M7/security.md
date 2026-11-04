@@ -398,3 +398,71 @@ What remains, and when it matters:
 - Files touched: `docs/reviews/M7/security.md` (this section, not committed). Scratch is under `scratchpad/m7-sec/r3`, `lc1`, `ghcfg`, `ghhome` and `harness/`.
 - Open question: which git subcommands does `gh pr create`/`view` run after its API call? This needs network access, so verifying it is the owner's call. The fix is cheap either way.
 - Next role: Coordinator, with a readiness report to the owner. Present C2-1 and C2-2 as conditions for `enforce` (fix outside the review loop, or accept).
+
+---
+
+## Re-review (fix cycle 3, final)
+
+Date: 2026-11-04. Reviewer: Sec.
+
+### C3.1 Scope and tools
+
+- Code HEAD: `c29d629fd3342451fce33c876ac9ef4ae301bba0`.
+- Commits reviewed: `13fdf59` (C2-1), `2ebd404` (C2-2), `c29d629` (README only). I read every source change (`git diff c483f3f c29d629 -- tools/approver/src`).
+- Install: a fresh `enforce` temp install (`scratchpad/m7-sec/r4`) using the real `runGit` gate. No real HOME, Keychain, network, model or settings were used.
+- Tests: `sandbox-exec` with outbound network denied gives **164 pass, 0 fail**.
+
+### C3.2 C2-1 and C2-2 re-tested, with variants
+
+**C2-1, git-dir file rule: fixed.**
+- Writes of `sub/g2/head`, `HEAD`, `Head`, `heaD`, `packed-REFS`, `sub/g/HOOKS/x` and `hooks/pre-commit` all give ask (`K-PATH`).
+- Write order no longer matters. In a directory that already holds one marker, the second marker asks whatever its case:
+  - `o1/` holding `objects/`: `o1/config`, `o1/Config` and `o1/refs/k` all ask.
+  - `o2/` holding `REFS/`: `o2/config` and `o2/objects/k` both ask.
+- A single marker in an otherwise plain directory stays an ordinary edit: `new1/config`, `new2/objects/k`, `lib/config` and `docs/refs/a.md` are allowed. Git cannot accept a directory without `HEAD`, and writing `HEAD` in any case always asks.
+- Unicode variants (`hеad` with a Cyrillic e, `conﬁg`, `refſ/k`) give ask (`K-UNICODE`).
+- Side effect: `lib/hooks/useX.js` now asks when `lib/` also holds `config`. That is a false positive (usability only), which is acceptable.
+
+**C2-2, gh gate: fixed.**
+- With an implicit git dir at `sub/g`, `cd sub/g && gh pr create|view|checks|diff|comment` all give ask.
+- `cd sub/g; gh pr view 5` and `cd sub/g || gh pr view 5` give ask: the cwd set is widened, so every possible cwd must pass the gate.
+- `gh -R other/repo …`, `gh pr view 5 -R …`, `--repo …` and `gh -C sub/g …` give ask (flags not in the spec).
+- These stay allowed: `gh pr view 5` and `gh pr create …` at the root, `cd sub && gh pr view 5`, and `cd sub/g && cd .. && gh pr view 5` (the final cwd is a normal directory).
+
+### C3.3 Regression pass
+
+I re-ran every repro from round 1, cycle 1 and cycle 2 on r4: 67 requests, giving 46 ask, 12 deny and 9 allow. All 9 allows are expected:
+- the quoted `"$(cat <<'EOF'…)"` commit message;
+- `git status`, `cd sub && git status` and `cd sub && git diff` in the main repo;
+- `rg --no-ignore KEY sub` and `sub/../sub` (C2-3, documented in the README);
+- the first single-marker writes into an empty `sub/g2` (see above).
+
+Every deny from earlier rounds still denies. No regression found.
+
+### C3.4 Final verdict
+
+`VERDICT: READY`
+
+Findings still open (none blocking):
+1. Note: `rg --no-ignore <subfolder>` searches gitignored, non-hidden files in that folder. There are none in the repo today, and the README documents it (C2-3).
+2. Note: a false positive in the git-dir file rule (`lib/hooks/…` next to `lib/config`). Usability only.
+3. Note, accepted residuals documented in the README's "What this does not protect" section:
+   - agent-edited tests or sources run under `npm test`/`node --test`;
+   - drill scripts are editable;
+   - the `mode` file is writable by any code-exec path, and the TTY check can be met with a pty;
+   - owner zsh aliases and functions can change the meaning of an allowed word;
+   - Claude Code transcript format dependence.
+   These are inherent to allow-mode. The owner weighs them at the shadow → `enforce-deny` → `enforce` exit criteria.
+
+Rationale:
+- Every Blocker and Major from round 1, cycle 1 and cycle 2 is fixed and re-verified on a fresh enforce install, with the real git gate.
+- No Appendix A deny is weakened, and the chflags/xattr requirement holds.
+- The hook still fails closed on every error, timeout and oversized input.
+- Nothing remaining blocks the merge, shadow mode, `enforce-deny` or `enforce`. Switching modes stays the owner's manual decision.
+
+### Handoff (fix cycle 3, final)
+
+- Done: re-tested C2-1 and C2-2 with case, Unicode, write-order and gh flag/cwd variants on a fresh enforce install; ran a full regression over all earlier repros; ran the tests offline (164/164).
+- Files touched: `docs/reviews/M7/security.md` (this section, not committed). Scratch is under `scratchpad/m7-sec/r4` and `harness/`.
+- Open questions: none.
+- Next role: Coordinator, with the readiness report to the owner (merge approval; mode switches are the owner's call).

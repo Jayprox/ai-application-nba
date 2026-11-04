@@ -17,7 +17,10 @@ export function verify(installDir) {
   lines.push(`policy version   : ${policyVersion}`);
   lines.push(`mode             : ${readMode(installDir)}`);
   lines.push(`repo             : ${i.repo_root} (visibility ${i.repo_visibility})`);
-  lines.push(`node             : ${i.node_path}`);
+  let nodeOk = false;
+  try { fs.accessSync(i.node_path, fs.constants.X_OK); nodeOk = fs.statSync(i.node_path).isFile(); } catch { /* missing */ }
+  lines.push(`node             : ${i.node_path} ${nodeOk ? '(ok)' : 'MISSING OR NOT EXECUTABLE: the hook cannot start and Claude Code silently falls back to normal prompts. Re-run uninstall and install.'}`);
+  if (!nodeOk) ok = false;
   lines.push(`install dir      : ${i.install_dir}`);
   lines.push(`log file         : ${path.join(i.log_dir, 'decisions.jsonl')}`);
   lines.push(`model (log only) : ${i.model?.enabled ? i.model.name : 'off'}`);

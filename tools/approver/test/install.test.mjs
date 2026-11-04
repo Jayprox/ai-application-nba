@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { relaxTree, APPROVER_DIR, payload } from './helpers.mjs';
-import { install, hookConfig, denyRules } from '../bin/install.mjs';
+import { install, hookConfig, denyRules, stableNodePath } from '../bin/install.mjs';
 import { verify } from '../bin/verify.mjs';
 import { setMode } from '../bin/mode.mjs';
 import { uninstall } from '../bin/uninstall.mjs';
@@ -50,7 +50,8 @@ test('install into a temp HOME: default locations, files 0444, dirs 0555, mode 0
   assert.equal(rec.files['policy.md'], sha256(fs.readFileSync(path.join(APPROVER_DIR, 'policy', 'policy.md'))));
   assert.equal(rec.repo_root, s.repo);
   assert.equal(rec.repo_visibility, 'private');
-  assert.equal(rec.node_path, fs.realpathSync(process.execPath));
+  assert.equal(rec.node_path, stableNodePath());
+  assert.equal(rec.model.name, 'claude-haiku-5-5');
   assert.ok(!('mode' in rec.files) && !('install.json' in rec.files));
   assert.equal(rec.model.daily_cap_usd, 1.0);
   assert.deepEqual(rec.keychain, { service: 'claude-approver-anthropic', account: 'claude-approver' });
@@ -78,7 +79,7 @@ test('install prints the hook JSON (quoted paths with a space), deny rules, the 
   assert.equal(r.hook.hooks.PermissionRequest[0].matcher, 'Bash|Edit|Write|NotebookEdit');
   assert.equal(cmd.type, 'command'); assert.equal(cmd.timeout, 5);
   assert.deepEqual(Object.keys(cmd).sort(), ['command', 'timeout', 'type']); // no async, no onFailure
-  assert.equal(cmd.command, `'${fs.realpathSync(process.execPath)}' '${path.join(s.installDir, 'src', 'approver.mjs')}'`);
+  assert.equal(cmd.command, `'${stableNodePath()}' '${path.join(s.installDir, 'src', 'approver.mjs')}'`);
   assert.ok(cmd.command.includes('Application Support'));
   assert.ok(r.text.includes(JSON.stringify(r.hook, null, 2)));
   assert.match(r.text, /security add-generic-password -a claude-approver -s claude-approver-anthropic -T \/usr\/bin\/security -w/);
@@ -225,4 +226,21 @@ test('README has the owner checklist, the stage exit criteria, -p behaviour and 
     'enforce-deny', 'Exit criteria', 'zero would-allow-but-you-denied', '-p', 'subagent', 'What this does not protect', 'Uninstall', 'rotate-log.mjs', 'mode.mjs', 'chflags', 'Bash(security:*)',
     'live-eval.mjs', 'i-understand-this-costs-money', 'Claude Code 2.1.318', 'UNCONFIRMED',
   ]) assert.ok(readme.includes(frag), `README lacks: ${frag}`);
+});
+
+test('QA 9: install records a stable node path, not a versioned Cellar path; verify fails loudly when node is missing', () => {
+  const s = scene();
+  const cellar = path.join(s.root, 'Cellar', 'node', '26.11.1', 'bin'); fs.mkdirSync(cellar, { recursive: true });
+  const real = path.join(cellar, 'node'); fs.writeFileSync(real, '#!/bin/sh\n', { mode: 0o755 });
+  const bin = path.join(s.root, 'bin'); fs.mkdirSync(bin); fs.symlinkSync(real, path.join(bin, 'node'));
+  assert.equal(stableNodePath(real, [path.join(bin, 'node')]), path.join(bin, 'node'));
+  assert.equal(stableNodePath(real, [path.join(bin, 'missing')]), real, 'no stable link: the real path is all there is');
+  assert.equal(stableNodePath('/usr/local/bin/node'), '/usr/local/bin/node');
+  const r = install({ ...s.base, nodePath: path.join(bin, 'node') });
+  assert.equal(r.record.node_path, path.join(bin, 'node'));
+  assert.ok(!r.hook.hooks.PermissionRequest[0].hooks[0].command.includes('Cellar'));
+  assert.equal(verify(s.installDir).ok, true);
+  fs.rmSync(real);
+  const v = verify(s.installDir);
+  assert.equal(v.ok, false); assert.match(v.text, /MISSING OR NOT EXECUTABLE/); assert.match(v.text, /VERIFY FAILED/);
 });

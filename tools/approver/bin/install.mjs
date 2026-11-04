@@ -17,6 +17,15 @@ import { copyTree, walk, shQuote, requireTTY, defaultChflags, bothTTY } from './
 const HERE = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 export const KEYCHAIN = { service: 'claude-approver-anthropic', account: 'claude-approver' };
 
+// A path that survives `brew upgrade node`: keep the stable symlink (/opt/homebrew/bin/node, /usr/local/bin/node) when it points at
+// the running binary, never a versioned Cellar path.
+export function stableNodePath(execPath = process.execPath, candidates = ['/opt/homebrew/bin/node', '/usr/local/bin/node']) {
+  const real = realResolve(execPath).real || execPath;
+  if (!/\/Cellar\/|\/\d+\.\d+\.\d+\//.test(execPath) && !/\/Cellar\//.test(real)) return execPath;
+  for (const c of candidates) { const r = realResolve(c); if (r.ok && r.exists && r.real === real) return c; }
+  return execPath;
+}
+
 export function hookConfig(nodePath, installDir) {
   return { hooks: { PermissionRequest: [{ matcher: 'Bash|Edit|Write|NotebookEdit', hooks: [{ type: 'command', command: `${shQuote(nodePath)} ${shQuote(path.join(installDir, 'src', 'approver.mjs'))}`, timeout: 5 }] }] } };
 }
@@ -36,7 +45,7 @@ export function denyRules(installDir, logDir, home) {
 export function install(opts) {
   const {
     repoVisibility, home = os.homedir(), repoRoot = path.resolve(HERE, '..', '..'), isTTY = bothTTY(), chflags = defaultChflags,
-    modelName = 'claude-haiku-4-5', noModel = false, nodePath = process.execPath, priceIn = 1.0, priceOut = 5.0,
+    modelName = 'claude-haiku-5-5', noModel = false, nodePath = stableNodePath(), priceIn = 1.0, priceOut = 5.0,
   } = opts;
   requireTTY(isTTY, 'install');
   if (!['private', 'public'].includes(repoVisibility)) throw new Error('--repo-visibility private|public is required (run: gh repo view --json visibility). Unknown counts as ask for gh pr comment.');
@@ -59,7 +68,7 @@ export function install(opts) {
   const realLog = realResolve(logDir).real || logDir;
   const record = {
     approver_version: APPROVER_VERSION, tested_claude_code: TESTED_CLAUDE_CODE, installed_at: new Date().toISOString(),
-    repo_root: rr.real, repo_visibility: repoVisibility, node_path: realResolve(nodePath).real || nodePath,
+    repo_root: rr.real, repo_visibility: repoVisibility, node_path: nodePath,
     install_dir: realInstall, log_dir: realLog,
     model: { enabled: !noModel, name: modelName, max_tokens: 150, per_call_cap_usd: 0.02, daily_cap_usd: 1.0, timeout_ms: 8000, prices: { input_per_mtok: priceIn, output_per_mtok: priceOut }, breaker: { failures: 3, cooldown_ms: 600000 } },
     keychain: KEYCHAIN,
@@ -83,6 +92,7 @@ export function install(opts) {
     `Installed the approver ${APPROVER_VERSION} in SHADOW mode (it prints nothing and changes no prompt).`,
     `  install dir : ${realInstall}   (${flagNote})`,
     `  log dir     : ${realLog}`,
+    `  node        : ${record.node_path}   (re-run uninstall + install after upgrading or moving node; verify checks it exists)`,
     `  repo        : ${rr.real}  (visibility: ${repoVisibility})`,
     `  model       : ${noModel ? 'off' : record.model.name} (log only, never decides)`,
     '', 'NEXT (you do these by hand; nothing below has been run for you):', '',

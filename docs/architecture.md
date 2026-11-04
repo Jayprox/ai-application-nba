@@ -760,6 +760,24 @@ guard -> lock -> preflight -> backup -> tunnel                                 (
   season type for new playoff/play-in games, new games (Cup knockouts show as `unmatched`), official standings rank
   (the app falls back to win %), and listed positions (positions stay NBA.com-only).
 
+## 7.10 Permission approver for Claude Code (M7, 2026-11-04)
+
+*Plan: `docs/plans/M7-permission-approver.md`. Requirements: `docs/requirements/M7-permission-approver.md`. Code, install steps and the owner checklist: `tools/approver/` (README there).*
+This is developer tooling, not part of the app: nothing here runs in the backend, the worker, the weekly job or CI beyond its offline tests, and it touches no database, Railway, Highlightly or NBA.com. It answers Claude Code permission prompts for this repo's own sessions.
+
+```
+PermissionRequest (Bash | Edit | Write | NotebookEdit), user-level hook, installed outside the repo
+  stdin -> shape check -> scope (cwd inside the repo? else silent) -> mode file -> policy.json/.md checksum
+        -> deterministic pre-filter (allow | ask | deny)  == the final decision
+        -> decision log (JSONL, redacted)  -> [undecided only] detached worker: model opinion -> log only
+        -> stdout by mode: shadow = nothing | enforce-deny = deny JSON | enforce = allow/deny JSON
+```
+
+- **As built, by decision.** (1) The model never decides in any mode (owner Q8 b): undecided is ask, the model's opinion is logged next to the outcome so its accuracy can be measured. (2) The model call is a direct HTTPS call from a detached background worker, with the key read from the macOS Keychain into memory; the hook has already answered, so the model adds no latency and cannot reach stdout. Cap US$1 per day, one call at a time, 8 s timeout, breaker after 3 failures. (3) Shadow outcomes (`ran` / `not_run`) come from the session transcript, which records the permission decision for every tool call, not from extra PreToolUse/PostToolUse hooks (flag F1). The transcript format is internal to Claude Code (checked on 2.1.318); unrecognised markers become `unknown`. (4) `git push -u|--set-upstream origin feat/<name>|fix/<name>` is allowed like the plain push (owner change to flag F9). (5) `chflags`, `xattr` and other flag/attribute changers are denied on protected paths, above them, or with an unresolvable target (the immutable flag can be cleared without sudo).
+- **Where things live.** Source, tests and a sample policy in `tools/approver/` (Node built-ins only). Installed by the owner to `~/Library/Application Support/claude-approver/` (files 0444, `chflags uchg`), log in `~/Library/Logs/claude-approver/` (0700). The root `npm test` script also runs `tools/approver/test/*.test.mjs`, so the existing CI job covers it with no workflow change.
+- **Tests.** Offline `node:test`: a labelled corpus of 200+ requests (every Appendix A rule, the 16 policy ambiguities A1-A16, injection twins, obfuscation, fail-closed cases), a fault matrix, a mocked always-allow / invalid / hanging model, redaction with fake secrets, the report on synthetic transcripts, install/verify/mode/uninstall in a temporary HOME with `chflags` and the Keychain mocked. `bin/live-eval.mjs` (paid, owner-run, refuses without a flag) is not part of `npm test`.
+- **Unconfirmed until the owner's self-check:** the transcript marker for an interactive "No", subagent payload fields, locked-Keychain behaviour, and the `Edit(...)` rule syntax for a folder with a space. Each fails safe.
+
 ## 8. Railway (as built)
 
 Created 2026-09-26, per PLATFORM.md §4. Deploy configured 2026-09-27 (step 9). Project `chalk-that-nba`,

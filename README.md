@@ -154,6 +154,7 @@ Fill in `HIGHLIGHTLY_API_KEY`, `ODDS_API_KEY` and `ANTHROPIC_API_KEY` in `.env` 
 | Test the weekly job end to end (throwaway container, fake Railway CLI, no production) | `npm run db:weekly:drill` |
 | Daily Postgres backup (off-Railway dump, keeps 14) | `BACKUP_CONFIRM_PROD=1 npm run db:backup` (without the flag it refuses; the launchd job sets it, see `ops/launchd/`; restore steps in `docs/backup-restore.md`) |
 | Test the backup + restore end to end (throwaway containers, no Railway) | `npm run db:backup:drill` |
+| Claude Code permission approver (M7, developer tooling): install, shadow report, mode switch | `node tools/approver/bin/install.mjs --repo-visibility private`, then `bin/report.mjs`, `bin/mode.mjs` from the install folder; nothing is active until you install it. Steps, owner checklist and rollback: `tools/approver/README.md` |
 | Injury source check (preseason) | `cd worker && npm run injuries-probe -- --date 2026-10-03` |
 | NBA changes the schedule (Cup knockouts, postponements) | `npm run db:schedule` |
 | Official standings rank (also written by the backfill) | `npm run db:standings` |

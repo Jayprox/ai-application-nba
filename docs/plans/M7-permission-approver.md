@@ -382,6 +382,14 @@ None of these changes a product requirement. F1–F3 change a mechanism the requ
 | F11 | CI coverage through the root `package.json` test glob, so no `.github/workflows/` edit is needed. | As planned. |
 | F12 | Existing `.claude/settings.json` allow rules (`git branch:*`, `git checkout -b:*`, `pytest:*`) pre-approve calls before the hook ever sees them (Q12). Unchanged by M7. | Owner follow-up. |
 
+### 6.1 Owner decisions on the flags (2026-11-04)
+
+Owner: "go, with one change." All flags take the plan default, except:
+
+- **F9 changed:** `git push -u origin <b>` and `git push --set-upstream origin <b>` are allowed when `<b>` is `feat/<name>` or `fix/<name>`, the same as the plain form. Anything else stays as in A15: refspecs with `:`, a leading `+`, `HEAD`, `--delete`, `--tags`, `--force*`, `-f` or other flags are ask, and any target of main or master is deny.
+- **F4:** the owner adds the `Bash(security:*)` deny rule personally at install. The install script still prints it as a suggestion.
+- **F3, F8, F12:** stay at their defaults unless the owner says otherwise after reading them.
+
 ## 7. Risks
 
 | # | Risk | Mitigation |

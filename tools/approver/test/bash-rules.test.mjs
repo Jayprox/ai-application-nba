@@ -132,7 +132,7 @@ test('self-protection reads are ask, not deny (story 9.5)', () => check([
   ['cat .claude/settings.json', 'ask', 'K-SELF-READ'], ['cat ~/.claude/settings.json', 'ask', 'K-SELF-READ'], ['ls .claude', 'ask', 'K-SELF-READ'],
   ['grep x .claude/settings.json', 'ask', 'K-SELF-READ'], ['head -3 innocent/settings.json', 'ask', 'K-SELF-READ'], ['cat < .claude/settings.json', 'ask', 'K-SELF-READ'],
   [(e) => `ls ${JSON.stringify(e.installDir)}`, 'ask', 'K-SELF-READ'], [(e) => `cat ${JSON.stringify(path.join(e.logDir, 'decisions.jsonl'))}`, 'ask', 'K-SELF-READ'],
-  ['git diff -- .claude/settings.json', 'ask', 'K-SELF-READ'], ['git log -- .claude', 'ask', 'K-SELF-READ'], ['sed -n 1p .claude/settings.json', 'ask', 'K-SELF-READ'],
+  ['git diff -- .claude/settings.json', 'ask', 'K-SELF-READ'], ['git show HEAD:.claude/settings.json', 'ask', 'K-SELF-READ'], ['git show HEAD:.git/config', 'ask', 'K-SELF-READ'], ['git log -- .claude', 'ask', 'K-SELF-READ'], ['sed -n 1p .claude/settings.json', 'ask', 'K-SELF-READ'],
   ['find .claude -name x', 'ask', 'K-SELF-READ'],
 ]));
 

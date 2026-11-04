@@ -60,6 +60,9 @@ function resolveWord(w, c, S) {
   // dd-style key=value arguments (of=/path)
   const kv = /^[A-Za-z_][\w-]*=(.+)$/.exec(t);
   if (kv) forms.push(kv[1]);
+  // git-style rev:path (HEAD:.claude/settings.json)
+  const rp = /^[^\/\s:][^\s:]*:([^\s:].*)$/.exec(t);
+  if (rp && !t.includes('://')) forms.push(rp[1]);
   for (const f of forms) {
     for (const cwd of c.cwds) {
       const r = realResolve(f, cwd);

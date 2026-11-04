@@ -10,7 +10,7 @@ import { readStdin, outputForMode, writeStdout } from './hook-io.mjs';
 import { loadInstall, readMode, loadPolicy, APPROVER_VERSION } from './config.mjs';
 import { inScope, readBranch } from './paths.mjs';
 import { prefilter as defaultPrefilter } from './prefilter.mjs';
-import { appendRecord } from './log.mjs';
+import { appendRecord, summarizeInput } from './log.mjs';
 import { sha256, canonicalJson, isPlainObject } from './util.mjs';
 
 export const TOOLS = ['Bash', 'Edit', 'Write', 'NotebookEdit'];
@@ -111,7 +111,7 @@ export async function run({ stdin, installDir, deps = {} }) {
   const record = rec({
     ...common, branch, decision: result.decision, rule_id: result.rule_id || null,
     undecided: !!result.undecided, reason: result.reason || null, error: result.error || null,
-    input_redacted: result.input_redacted ?? null, truncated: !!result.truncated,
+    input_redacted: summarizeInput(tool, input),
   });
   logIt(record);
   return { stdout: outputForMode(mode, result), record };

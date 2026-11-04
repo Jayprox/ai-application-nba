@@ -389,3 +389,12 @@ test('cd chains: a cd that is not followed by && widens the candidate directorie
   ['cd .claude && ls', 'ask', 'K-SELF-READ'], ['cd innocent && ls', 'ask', 'K-SELF-READ'], ['cd docs && cd .. && ls', 'allow', 'L-READ'], ['cd docs && cat .env', 'deny', 'D-SECRET-ENVFILE'],
   ['cd docs/inst && ls', 'ask', 'K-SELF-READ'], ['cd $HOME && ls', 'ask', 'K-DEFAULT'], ['cd ~ && ls', 'ask', 'K-DEFAULT'],
 ]));
+
+test('Sec 1: git diff/log/show never read outside the repo (no-index fallback), --output and --no-index are not allowed', () => check([
+  [(e) => `git diff /dev/null ${path.join(e.home, '.config/gh/hosts.yml')}`, 'ask', 'K-DEFAULT'], ['git diff /dev/null ~/.config/gh/hosts.yml', 'ask', 'K-DEFAULT'],
+  ['git diff --stat README.md /etc/hosts', 'ask', 'K-DEFAULT'], ['git diff ../outside.txt README.md', 'ask', 'K-DEFAULT'], ['git diff --no-index README.md docs/a.md', 'ask', 'K-DEFAULT'],
+  ['git diff -- /etc/hosts', 'ask', 'K-DEFAULT'], ['git log -p -- ~/.ssh/config', 'deny', 'D-SECRET-PATH'], ['git show /etc/hosts', 'ask', 'K-DEFAULT'], ['git show HEAD:../x', 'ask', 'K-DEFAULT'],
+  ['git log -- "*.env"', 'ask', 'K-DEFAULT'], ['git log -- ":(icase).ENV"', 'ask', 'K-DEFAULT'], ["git log -p -- '.e*'", 'ask', 'K-DEFAULT'],
+  ['git diff HEAD~1 -- README.md', 'allow', 'L-GIT-READ'], ['git diff origin/main...HEAD', 'allow', 'L-GIT-READ'], ['git diff README.md docs/a.md', 'allow', 'L-GIT-READ'], ['git show HEAD:README.md', 'allow', 'L-GIT-READ'],
+  ['git diff homelink/.config/gh/hosts.yml README.md', 'ask', 'K-DEFAULT'], ['git diff homelink', 'ask', 'K-DEFAULT'],
+]));

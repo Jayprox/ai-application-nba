@@ -98,6 +98,8 @@ export function seedRepo(env) {
   fs.writeFileSync(path.join(env.home, '.claude', 'settings.json'), '{}');
   fs.mkdirSync(path.join(env.home, '.ssh'), { recursive: true });
   fs.writeFileSync(path.join(env.home, '.ssh', 'id_rsa'), 'k');
+  fs.mkdirSync(path.join(env.home, '.config', 'gh'), { recursive: true });
+  fs.writeFileSync(path.join(env.home, '.config', 'gh', 'hosts.yml'), 'token: FAKE');
   fs.mkdirSync(env.logDir, { recursive: true });
   fs.symlinkSync(path.join(env.repo, '.env'), path.join(env.repo, 'notes.txt'));
   fs.symlinkSync(path.join(env.repo, '.claude'), path.join(env.repo, 'innocent'));

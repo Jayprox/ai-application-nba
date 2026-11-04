@@ -20,7 +20,7 @@ const ok = (id) => id;
 // One path argument: literal, resolves (in every candidate cwd) to an existing path inside the repo
 // that is not protected, a .env file, a secret path or secret-looking (A1, A11).
 export function pathOk(word, S, c, { mustExist = true, dirOnly = false } = {}) {
-  if (word.dynamic || word.glob || word.text === '' || word.text.startsWith('~')) return false;
+  if (word.dynamic || word.glob || word.text === '' || word.text.startsWith('~') || /[*?\[]/.test(word.text) || word.text.startsWith(':')) return false; // no globs or git pathspec magic
   for (const cwd of c.cwds) {
     const r = realResolve(word.text, cwd);
     if (!r.ok || (mustExist && !r.exists)) return false;
@@ -88,19 +88,35 @@ export function gitParts(words) {
   return { sub: words[i]?.text ?? null, globals, args: words.slice(i + 1) };
 }
 
+// Every word of git diff/log/show is either a revision or a path inside the repo (Sec 1). A word that looks like
+// a revision but names an existing path must also pass the repo-boundary check. --no-index and --output are not
+// in the flag specs, so they never reach here.
+function revWordOk(a, S, c, allowRevPath) {
+  if (a.dynamic || a.glob) return false;
+  const t = a.text;
+  if (allowRevPath) {
+    const m = REV_PATH_RE.exec(t);
+    if (m) {
+      if (m[1] && !REV_RE.test(m[1])) return false;
+      // rev:path is relative to the repo root, whatever the cwd
+      return pathOk({ ...a, text: m[2] }, S, { cwds: [S.pc.repoRoot] }, { mustExist: false });
+    }
+  }
+  if (t.startsWith('-') || t.startsWith(':')) return false;
+  if (/^(\/|~|\.\.?(\/|$))/.test(t)) return pathOk(a, S, c);
+  if (!REV_RE.test(t)) return false;
+  for (const cwd of c.cwds) {
+    const r = realResolve(t, cwd);
+    if (r.ok && r.exists) return pathOk(a, S, c);
+  }
+  return true;
+}
+
 function revsAndPaths(args, S, c, { allowRevPath }) {
   const di = args.findIndex((a) => a.text === '--');
   const left = di >= 0 ? args.slice(0, di) : args;
   const right = di >= 0 ? args.slice(di + 1) : [];
-  for (const a of left) {
-    if (a.dynamic || a.glob) return false;
-    let t = a.text;
-    if (allowRevPath) {
-      const m = REV_PATH_RE.exec(t);
-      if (m) { if (m[1] && !REV_RE.test(m[1])) return false; if (!pathOk({ ...a, text: m[2] }, S, c, { mustExist: false })) return false; continue; }
-    }
-    if (t.startsWith('-') || !REV_RE.test(t)) return false;
-  }
+  for (const a of left) if (!revWordOk(a, S, c, allowRevPath)) return false;
   return right.every((a) => pathOk(a, S, c, { mustExist: false }));
 }
 

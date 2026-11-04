@@ -416,3 +416,14 @@ test('Sec 2 and 6: the literal $(cat <<EOF) exception needs double quotes and an
   ["git commit -m \"$(cat <<'EOF'\nfine message\n\nbody\nEOF\n)\"", 'allow', 'L-GIT-COMMIT'],
   ["gh pr create --title t --body \"$(cat <<'EOF'\n## Summary\nEOF\n)\"", 'allow', 'L-GH'],
 ]));
+
+test('Sec 5: nested .git: writes deny, and git commands run inside a nested repository are ask', () => check([
+  ['echo x > nested/.git/config', 'deny', 'D-SELF'], ['cp README.md nested/.git/hooks/pre-commit', 'deny', 'D-SELF'], ['cat nested/.git/config', 'ask', 'K-SELF-READ'],
+  ['cd nested && git status', 'ask', 'K-DEFAULT'], ['cd nested && git commit -m x', 'ask', 'K-DEFAULT'], ['cd nested/deeper && git diff', 'ask', 'K-DEFAULT'],
+  ['cd nested && ls', 'allow', 'L-READ'], ['git add nested/a.txt', 'ask', 'K-DEFAULT'], ['git add nested/deeper/b.txt', 'ask', 'K-DEFAULT'], ['git add docs/a.md', 'allow', 'L-GIT-ADD'],
+  ['git status', 'allow', 'L-GIT-READ'],
+]));
+test('Sec 5: git status in a session whose cwd is inside a nested repo is ask', () => {
+  assert.equal(judge(env, 'Bash', { command: 'git status' }, { cwd: path.join(env.repo, 'nested') }).decision, 'ask');
+  assert.equal(judge(env, 'Bash', { command: 'git status' }, { cwd: path.join(env.repo, 'docs') }).decision, 'allow');
+});

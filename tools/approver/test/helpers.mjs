@@ -93,7 +93,7 @@ export function seedRepo(env) {
   const w = (rel, body = 'x') => { const f = path.join(env.repo, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, body); };
   for (const f of ['README.md', 'CLAUDE.md', 'docs/a.md', 'docs/b.md', 'src/app.js', 'test/y.test.js', 'worker/test/x.test.js', 'worker/package.json', 'package.json',
     'package-lock.json', 'scripts/weekly-drill.sh', 'scripts/other.sh', 'certs/server.pem', '.env', '.env.example', 'sub/.env.production', '.claude/settings.json',
-    'secrets/api.txt', '.npmrc', '.github/workflows/test.yml', 'tools/approver/src/x.mjs', 'db/schema.sql', 'ops/launchd/a.plist']) w(f);
+    'secrets/api.txt', 'nested/.git/config', 'nested/a.txt', 'nested/deeper/b.txt', 'gitfile/.git', '.npmrc', '.github/workflows/test.yml', 'tools/approver/src/x.mjs', 'db/schema.sql', 'ops/launchd/a.plist']) w(f);
   fs.mkdirSync(path.join(env.home, '.claude'), { recursive: true });
   fs.writeFileSync(path.join(env.home, '.claude', 'settings.json'), '{}');
   fs.mkdirSync(path.join(env.home, '.ssh'), { recursive: true });

@@ -121,7 +121,8 @@ export function classifyPath(real, pc) {
   const segs = (rel !== null ? rel : real).split('/').filter(Boolean).map(lc);
   const base = segs.length ? segs[segs.length - 1] : '';
   const L = lc(real);
-  const isProtected = pc.roots.some((r) => insideCI(real, r)) || segs.includes('.claude') || segs.includes('.claude.json');
+  const isProtected = pc.roots.some((r) => insideCI(real, r)) || segs.includes('.claude') || segs.includes('.claude.json')
+    || segs.includes('.git'); // every .git directory or gitdir file at any depth: git runs its config and hooks (Sec 5)
   const protectedAncestor = !isProtected && pc.roots.some((r) => insideCI(r, real));
   return {
     inRepo, rel, protected: isProtected, protectedAncestor,

@@ -136,7 +136,18 @@ const DIFF_LONG = {
   '--no-renames': true, '--find-renames': 'optval', '--no-pager': true,
 };
 
+// A nested .git (directory or gitdir file) between a working directory and the repo root makes git use that
+// repository's config, fsmonitor and hooks, which an agent could have written: not allowed (Sec 5).
+export function nestedGit(dir, S) {
+  const root = S.pc.repoRoot;
+  for (let d = dir; d !== root && isInside(d, root); d = path.dirname(d)) {
+    try { fs.lstatSync(path.join(d, '.git')); return true; } catch { /* none here */ }
+  }
+  return false;
+}
+
 function gitAllow(c, S) {
+  if (c.cwds.some((d) => nestedGit(d, S))) return null;
   const { sub, globals, args } = gitParts(c.words);
   if (sub === null) return null;
   // only --no-pager is a harmless global option (-c, -C, --git-dir, --exec-path... are not)
@@ -171,6 +182,8 @@ function gitAllow(c, S) {
     case 'add': {
       const r = f({ long: {} });
       const files = r.pos;
+      const targets = c.cwds.flatMap((d) => files.map((f) => realResolve(f.text, d)));
+      if (targets.some((t) => t.ok && nestedGit(path.dirname(t.real), S))) return null;
       return r.ok && files.length && r.flags.every((x) => x.name === '--') && allPaths(files, S, c) ? ok('L-GIT-ADD') : null;
     }
     case 'commit': {

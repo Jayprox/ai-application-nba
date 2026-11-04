@@ -145,3 +145,10 @@ test('Sec 4: non-ASCII paths (APFS case folding: U+017F, U+FB01) are never allow
   ], fn);
   expectAll([[P('.claude/ſettings.json'), 'deny', 'D-SELF'], [P('.ENV'), 'deny', 'D-SECRET-ENVFILE'], ['~jayprox_pro/.zshrc', 'ask', 'K-OUTSIDE'], ['~root/x', 'ask', 'K-OUTSIDE']]);
 });
+
+test('Sec 5: every .git directory or gitdir file at any depth is protected', () => {
+  for (const fn of [edit, write, nb]) expectAll([
+    [P('nested/.git/config'), 'deny', 'D-SELF'], [P('nested/.git/hooks/pre-commit'), 'deny', 'D-SELF'], [P('sub/.git/HEAD'), 'deny', 'D-SELF'], [P('gitfile/.git'), 'deny', 'D-SELF'],
+    [P('new/deep/.git/config'), 'deny', 'D-SELF'], [P('nested/.GIT/config'), 'deny', 'D-SELF'], [P('.gitmodules'), 'allow', 'L-EDIT'], [P('docs/.github-notes.md'), 'allow', 'L-EDIT'],
+  ], fn);
+});

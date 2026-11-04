@@ -266,3 +266,48 @@ All earlier findings remain fixed, R5.1 and R5.2 are closed, CI is green and `np
 - Files: this section in `/Users/jayprox_pro/Documents/Projects/git/ai-application-nba/docs/reviews/M7/qa.md` (uncommitted). Scratch in `.../scratchpad/m7-qa/` (`cases17.mjs`, `cases18.mjs`, `lat.mjs`, `cmp2.mjs`, `out-new2-*.jsonl`, `home3/`). No source, settings, `.env*` or Keychain touched.
 - Open questions for the owner: model id validity and price defaults; whether a named subfolder `rg` that may hold non-hidden secret-named files is acceptable.
 - Recommended next role: Lead review, then the Coordinator readiness report for owner merge approval.
+
+---
+
+## Re-review (fix cycle 3, final)
+
+Code HEAD `c29d629` (`13fdf59` git-dir file rule case-insensitive and order-independent, `2ebd404` gh pr commands behind the rev-parse gate, `c29d629` README line), plus docs-only `b58c384`. Fresh temp-HOME install (`home4/`). Same hard rules; no source edits.
+
+### T1. CI and tests
+
+- `gh pr checks 8` on `b58c384`: backend, frontend, root, worker all pass.
+- Root `npm test`: 279 tests, 279 pass, 0 fail (cycle 2: 277).
+
+### T2. Sweep against cycle 2
+
+The same 676 requests in enforce, shadow and enforce-deny, diffed against the cycle 2 results.
+
+- Enforce: **0 changed decisions of 676**.
+- Shadow: 0 bytes on stdout, all exit 0. Enforce-deny: 0 allow outputs, 287 denies, unchanged.
+- No new ALLOW. No policy-allowed command in the sweep now prompts.
+
+Targeted checks for the three changes (`cases19.mjs`, `cases20.mjs`):
+
+| Request | Result |
+|---|---|
+| `gh pr create`, `view`, `checks`, `diff`, `comment` from the repo root, from `worker/`, from `worker/sub/` and from `frontend/`, via `cd worker && gh pr checks 8`, and on `main` | allow |
+| `gh pr view 8` with cwd in a nested repo, or `cd nest && gh pr view 8` | ask (intended, same gate as git) |
+| `gh pr merge 8` | deny; `gh pr view 8; curl x` deny |
+| `git status`, `git commit -m x`, `git push -u origin feat/x` | allow |
+| Write/Edit `worker/hooks/pre.js`, `worker/hooks/post-commit`, `frontend/src/config`, root `config`, root `hooks/x.js`, `docs/config.md`, and `worker/config` | allow |
+| Write `.git/config`, `.git/hooks/pre-commit`, `.GIT/config`, `nest/.git/hooks/x`, `nest/.Git/HEAD`, `worker/.git` | deny (case-insensitive, nested) |
+
+One behaviour to know: a file named `config` is ask only when a sibling `hooks/` folder sits next to it in the same directory (the implicit git-dir heuristic). With `worker/hooks/` present, `Write worker/config` is ask (`K-PATH`); with it removed it is allow. Ordinary edits to `config` files and to files under a `hooks/` folder are otherwise allowed. This is the intended "implicit git-dir files are ask" rule, and a real repo that has both a `hooks/` folder and a `config` file side by side would see one extra prompt.
+
+### T3. Final verdict
+
+VERDICT: READY
+
+CI is green, `npm test` is 279 of 279, and across three fix cycles every finding from my first review (1, 2, 4, 5, 6, 9) plus R5.1 and R5.2 is fixed and verified with the original repros. The final 676-request sweep is identical to cycle 2 in all three modes, with no new ALLOW and no new unwanted prompt; the gh gate keeps `gh pr` commands allowed from the root and subfolders. Across about 700 independent requests plus the fail-closed, model log-only, report and install checks, I found no ALLOW that policy and the approved readings do not permit. What remains is owner-side and cannot be tested here: confirm the model id `claude-haiku-5-5` and set the price flags, add the Edit/Write deny rules and check their syntax for a folder with a space, run the "No" marker self-check, and use the 7-day shadow run to review would-allow-but-denied cases before enforcing. These are in the README checklist and are not merge blockers. Fix cycles used: 3 of 3; no open defects.
+
+## Handoff (final)
+
+- Done: `npm test` 279/279, CI green, 676-request sweep in three modes diffed against cycle 2 (0 changes), targeted gh-gate and git-dir-file checks.
+- Files: this section in `/Users/jayprox_pro/Documents/Projects/git/ai-application-nba/docs/reviews/M7/qa.md` (uncommitted). Scratch in `.../scratchpad/m7-qa/` (`cases19.mjs`, `cases20.mjs`, `cmp3.mjs`, `out-new3-*.jsonl`, `home4/`). No source, settings, `.env*` or Keychain touched.
+- Open questions for the owner: model id and price defaults; the Edit/Write deny-rule syntax and the "No" marker self-check after install.
+- Recommended next role: Coordinator readiness report for owner merge approval, then (separately) the owner's install and 7-day shadow run.

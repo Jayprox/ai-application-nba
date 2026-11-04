@@ -155,10 +155,29 @@ test('Sec 5: every .git directory or gitdir file at any depth is protected', () 
 
 test('Sec R1: files that make a directory a git dir (HEAD, packed-refs, config/objects/refs/hooks beside a HEAD) are ask; plain source trees are not', () => {
   const mkf = (rel, body = 'x') => { const f = P(rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, body); };
-  mkf('sub/g2/HEAD'); mkf('sub/g2/objects/k'); mkf('sub/g2/refs/k'); mkf('sub/g2/hooks/pre-commit'); mkf('lib/config'); mkf('lib/hooks/useX.js'); mkf('docs/refs/a.md');
+  mkf('sub/g2/HEAD'); mkf('sub/g2/objects/k'); mkf('sub/g2/refs/k'); mkf('sub/g2/hooks/pre-commit'); mkf('lib/config'); mkf('lib2/hooks/useX.js'); mkf('docs/refs/a.md');
   for (const fn of [edit, write, nb]) expectAll([
     [P('sub/g3/HEAD'), 'ask', 'K-PATH'], [P('HEAD'), 'ask', 'K-PATH'], [P('sub/g3/packed-refs'), 'ask', 'K-PATH'], [P('sub/g2/config'), 'ask', 'K-PATH'], [P('sub/g2/objects/new'), 'ask', 'K-PATH'],
     [P('sub/g2/refs/heads/x'), 'ask', 'K-PATH'], [P('sub/g2/hooks/post-commit'), 'ask', 'K-PATH'], [P('sub/g2/info/exclude'), 'ask', 'K-PATH'],
-    [P('lib/config'), 'allow', 'L-EDIT'], [P('lib/hooks/useX.js'), 'allow', 'L-EDIT'], [P('docs/refs/a.md'), 'allow', 'L-EDIT'], [P('src/config.js'), 'allow', 'L-EDIT'], [P('docs/HEAD.md'), 'allow', 'L-EDIT'],
+    [P('lib/config'), 'allow', 'L-EDIT'], [P('lib2/hooks/useX.js'), 'allow', 'L-EDIT'], [P('docs/refs/a.md'), 'allow', 'L-EDIT'], [P('src/config.js'), 'allow', 'L-EDIT'], [P('docs/HEAD.md'), 'allow', 'L-EDIT'],
   ], fn);
+});
+
+test('Sec C2-1: the git-dir file rule is case-insensitive and does not depend on write order', () => {
+  const mkf = (rel) => { const f = P(rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, 'x'); };
+  for (const fn of [edit, write, nb]) expectAll([
+    [P('c1/head'), 'ask', 'K-PATH'], [P('c1/Head'), 'ask', 'K-PATH'], [P('c1/PACKED-REFS'), 'ask', 'K-PATH'],
+    // first marker alone is an ordinary edit, in any order...
+    [P('o1/config'), 'allow', 'L-EDIT'], [P('o2/objects/k'), 'allow', 'L-EDIT'], [P('o3/REFS/k'), 'allow', 'L-EDIT'], [P('o4/Hooks/x'), 'allow', 'L-EDIT'],
+  ], fn);
+  // ...and the second marker, whichever it is, asks
+  mkf('g1/Objects/k');
+  expectAll([[P('g1/config'), 'ask', 'K-PATH'], [P('g1/refs/k'), 'ask', 'K-PATH'], [P('g1/HOOKS/x'), 'ask', 'K-PATH'], [P('g1/CONFIG'), 'ask', 'K-PATH']]);
+  mkf('g2/config');
+  expectAll([[P('g2/objects/k'), 'ask', 'K-PATH'], [P('g2/refs/k'), 'ask', 'K-PATH'], [P('g2/hooks/pre-commit'), 'ask', 'K-PATH']]);
+  mkf('g3/hooks/x');
+  expectAll([[P('g3/config'), 'ask', 'K-PATH'], [P('g3/refs/k'), 'ask', 'K-PATH'], [P('g3/hooks/y'), 'allow', 'L-EDIT']]);
+  mkf('g4/packed-refs');
+  expectAll([[P('g4/refs/k'), 'ask', 'K-PATH'], [P('g4/info/exclude'), 'ask', 'K-PATH']]);
+  expectAll([[P('lib/config'), 'allow', 'L-EDIT'], [P('lib2/hooks/useX.js'), 'allow', 'L-EDIT'], [P('docs/refs/a.md'), 'allow', 'L-EDIT'], [P('lib/hooks/z.js'), 'ask', 'K-PATH']]);
 });

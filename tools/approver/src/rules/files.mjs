@@ -13,18 +13,26 @@ const SPECS = {
 
 const res = (decision, rule_id, policy, undecided = false) => ({ decision, rule_id, undecided, reason: policy.rules[rule_id]?.reason || rule_id });
 
-// Sec R1: git also accepts a directory as its git dir when it holds HEAD, objects/ and refs/ (no `.git` name needed), and then
-// honours its `config` and `hooks/`. Simple rule: a file named HEAD or packed-refs is ask anywhere; `config` is ask when a HEAD or
-// objects or refs sits next to it; anything under objects/, refs/ or hooks/ (and info/) whose parent holds a HEAD is ask.
-// Plain source trees (src/config, docs/refs.md, lib/hooks/useX.js with no HEAD file beside them) stay ordinary edits.
+// Sec R1/C2-1: git also accepts a directory as its git dir when it holds HEAD, objects/ and refs/ (no `.git` name needed), and then
+// honours its `config` and `hooks/`. APFS is case-insensitive, so every name is compared lower-cased. The rule must not depend on write
+// order, so it is symmetric: the "marker" names are head, packed-refs, config, objects, refs, hooks. Writing head or packed-refs is ask
+// anywhere. Writing config, or anything under objects/refs/hooks/info, is ask when the directory it belongs to already holds ANY OTHER
+// marker. One marker alone (lib/config, lib/hooks/useX.js, docs/refs/a.md) stays an ordinary edit; a second one, in any order, asks.
+const GIT_MARKERS = new Set(['head', 'packed-refs', 'config', 'objects', 'refs', 'hooks']);
+const GIT_SUBDIRS = new Set(['objects', 'refs', 'hooks', 'info']);
+function markersIn(dir) {
+  try { return fs.readdirSync(dir).map((n) => n.toLowerCase()).filter((n) => GIT_MARKERS.has(n)); } catch { return []; }
+}
 function looksLikeGitDirFile(real) {
-  const base = path.basename(real);
-  if (base === 'HEAD' || base === 'packed-refs') return true;
-  const has = (dir, name) => { try { fs.lstatSync(path.join(dir, name)); return true; } catch { return false; } };
-  if (base === 'config' && ['HEAD', 'objects', 'refs'].some((n) => has(path.dirname(real), n))) return true;
+  const base = path.basename(real).toLowerCase();
+  if (base === 'head' || base === 'packed-refs') return true;
+  if (base === 'config' && markersIn(path.dirname(real)).some((m) => m !== 'config')) return true;
   const segs = real.split('/');
   for (let i = segs.length - 2; i > 0; i--) {
-    if (['objects', 'refs', 'hooks', 'info'].includes(segs[i]) && has(segs.slice(0, i).join('/') || '/', 'HEAD')) return true;
+    const seg = segs[i].toLowerCase();
+    if (!GIT_SUBDIRS.has(seg)) continue;
+    const dir = segs.slice(0, i).join('/') || '/';
+    if (markersIn(dir).some((m) => m !== seg)) return true;
   }
   return false;
 }

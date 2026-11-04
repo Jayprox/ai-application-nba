@@ -11,6 +11,7 @@ import { loadInstall, readMode, loadPolicy, APPROVER_VERSION } from './config.mj
 import { inScope, readBranch } from './paths.mjs';
 import { prefilter as defaultPrefilter } from './prefilter.mjs';
 import { appendRecord, summarizeInput } from './log.mjs';
+import { runGit as defaultRunGit } from './git-run.mjs';
 import { sha256, canonicalJson, isPlainObject } from './util.mjs';
 
 export const TOOLS = ['Bash', 'Edit', 'Write', 'NotebookEdit'];
@@ -52,7 +53,7 @@ function baseRecord(mode, payload, extra) {
 
 export async function run({ stdin, installDir, deps = {} }) {
   const t0 = performance.now();
-  const d = { prefilter: defaultPrefilter, appendRecord, readBranch, home: os.homedir(), ...deps };
+  const d = { prefilter: defaultPrefilter, appendRecord, readBranch, runGit: defaultRunGit, home: os.homedir(), ...deps };
   const inst = loadInstall(installDir);
   const logIt = (rec) => {
     if (!inst.ok) return;

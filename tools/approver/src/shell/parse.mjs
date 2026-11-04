@@ -132,7 +132,9 @@ class Parser {
 
   scanEmbedded(text) {
     const p = new Parser(text, this.st, this.nest);
-    p.readDQ(null, new Word());
+    const w = new Word();
+    p.readDQ(null, w);
+    this.st.vars.push(...w.vars); // expansions inside unquoted here-docs and ${...} are still expansions
   }
 
   parseSimple() {
@@ -178,7 +180,10 @@ class Parser {
           }
         }
         const am = /^([A-Za-z_][A-Za-z0-9_]*)(\+?)=/.exec(w.raw);
-        if (am) { cmd.assigns.push({ name: am[1], value: w }); continue; }
+        if (am) {
+          const v = Object.assign(new Word(), w, { text: w.text.slice(am[0].length) });
+          cmd.assigns.push({ name: am[1], value: v }); continue;
+        }
       }
       cmd.words.push(w);
     }
@@ -190,7 +195,7 @@ class Parser {
   finish(cmd) {
     const w0 = cmd.words[0];
     if (w0 && !cmd.opaque) {
-      if (w0.dynamic) cmd.dynamicName = true; else cmd.name = w0.text;
+      if (w0.dynamic && !w0.ansi) cmd.dynamicName = true; else cmd.name = w0.text; // ANSI-C quoting decodes statically
     }
     this.st.commands.push(cmd);
     this.last = cmd;
@@ -321,6 +326,7 @@ class Parser {
       if (sub.length === 1 && sub[0].name === 'cat' && sub[0].words.length === 1 && sub[0].heredocs.length === 1
         && sub[0].heredocs[0].quoted && sub[0].redirs.length === 1 && sub[0].assigns.length === 0) {
         w.text += sub[0].heredocs[0].body.replace(/\n+$/, '');
+        this.st.commands.splice(startIdx); // it is a string now, not a command
       } else w.dynamic = true;
       return;
     }
@@ -392,7 +398,7 @@ class Parser {
       ...newCommand(this), words, nested: 'wrapper', pipeIndex: parentCmd.pipeIndex, prevOp: parentCmd.prevOp,
       depth: this.st.depth + 1,
     };
-    if (words[0].dynamic) cmd.dynamicName = true; else cmd.name = words[0].text;
+    if (words[0].dynamic && !words[0].ansi) cmd.dynamicName = true; else cmd.name = words[0].text;
     this.st.commands.push(cmd);
     if (cmd.name) {
       const p = new Parser('', this.st, this.nest + 1);
@@ -415,7 +421,8 @@ class Parser {
         if (script.dynamic) cmd.unknownInner = true; else this.nestedScript(script.text, 'script');
       } else if (cmd.heredocs.length) this.nestedScript(cmd.heredocs.map((h) => h.body).join('\n'), 'script');
       else if (cmd.herestring) { if (cmd.herestring.dynamic) cmd.unknownInner = true; else this.nestedScript(cmd.herestring.text, 'script'); }
-      else cmd.unknownInner = true;
+      else if (w.slice(1).some((x) => !x.text.startsWith('-'))) cmd.runsFile = true; // `bash script.sh`: a file, never allowed
+      else cmd.unknownInner = true; // script comes from stdin
       return;
     }
     if (nm === 'eval') {
@@ -467,6 +474,7 @@ class Parser {
       break;
     }
     const argv = w.slice(k);
+    if (!argv.length) cmd.noInner = true;
     if (spec.script && argv.length) {
       if (argv.some((x) => x.dynamic)) cmd.unknownInner = true; else this.nestedScript(argv.map((x) => x.text).join(' '), 'script');
       return;
@@ -479,8 +487,8 @@ class Parser {
 // Returns { ok, errors, commands, normalized, nonAscii, control }.
 export function parseShell(raw) {
   const { text, nonAscii, control } = normalizeText(raw);
-  const st = { commands: [], errors: [], depth: 0, kind: null };
+  const st = { commands: [], errors: [], depth: 0, kind: null, vars: [] };
   const p = new Parser(text, st, 0);
   try { p.parseSequence(null); p.readHeredocs(); p.flushDeferred(); } catch (e) { if (e instanceof ParseError) st.errors.push(e.message); else st.errors.push('internal_parse_error'); }
-  return { ok: st.errors.length === 0, errors: st.errors, commands: st.commands, normalized: text, nonAscii, control };
+  return { ok: st.errors.length === 0, errors: st.errors, commands: st.commands, vars: st.vars, normalized: text, nonAscii, control };
 }

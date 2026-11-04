@@ -65,7 +65,7 @@ test('real process: in-scope shadow call exits 0 with empty stdout and writes on
   const log = readLog(env);
   assert.equal(log.length, 1);
   assert.equal(log[0].mode, 'shadow');
-  assert.equal(log[0].decision, 'ask');
+  assert.equal(log[0].decision, 'allow', 'the real pre-filter would allow `ls`, and shadow still prints nothing');
   assert.equal(log[0].branch, 'feat/test');
 });
 

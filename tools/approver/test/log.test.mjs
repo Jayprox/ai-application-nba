@@ -95,6 +95,7 @@ test('log failure never changes the decision flow (story 5.7)', async () => {
   assert.ok(r2.stdout.includes('"deny"'));
   // a real failure: the log dir path is occupied by a file
   const blocked = mk({ mode: 'shadow' });
+  fs.mkdirSync(path.dirname(blocked.logDir), { recursive: true });
   fs.writeFileSync(blocked.logDir, 'not a dir');
   const r3 = await runHook(blocked, payload(blocked));
   assert.equal(r3.stdout, '');

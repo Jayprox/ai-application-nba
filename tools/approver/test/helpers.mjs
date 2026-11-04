@@ -16,8 +16,8 @@ export function makeEnv({ branch = 'feat/test', mode = 'shadow', visibility = 'p
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'approver-t-')));
   const repo = path.join(root, 'repo');
   const home = path.join(root, 'home');
-  const installDir = path.join(root, 'install');
-  const logDir = path.join(root, 'logs');
+  const installDir = path.join(root, 'Library', 'Application Support', 'claude-approver'); // note the space
+  const logDir = path.join(root, 'Library', 'Logs', 'claude-approver');
   fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
   if (branch) fs.writeFileSync(path.join(repo, '.git', 'HEAD'), `ref: refs/heads/${branch}\n`);
   fs.mkdirSync(home, { recursive: true });
@@ -66,3 +66,39 @@ export function readLog(env) {
 }
 
 export const cleanup = (env) => fs.rmSync(env.root, { recursive: true, force: true });
+
+// ---- pre-filter fixtures ----
+import { prefilter } from '../src/prefilter.mjs';
+
+export const SAMPLE_POLICY = JSON.parse(fs.readFileSync(path.join(APPROVER_DIR, 'policy', 'policy.sample.json'), 'utf8'));
+
+// A small repo with the files the rules look at, plus symlinks to things that must stay protected.
+export function seedRepo(env) {
+  const w = (rel, body = 'x') => { const f = path.join(env.repo, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, body); };
+  for (const f of ['README.md', 'CLAUDE.md', 'docs/a.md', 'docs/b.md', 'src/app.js', 'test/y.test.js', 'worker/test/x.test.js', 'worker/package.json', 'package.json',
+    'package-lock.json', 'scripts/weekly-drill.sh', 'scripts/other.sh', 'certs/server.pem', '.env', '.env.example', 'sub/.env.production', '.claude/settings.json',
+    'secrets/api.txt', '.npmrc', '.github/workflows/test.yml', 'tools/approver/src/x.mjs', 'db/schema.sql', 'ops/launchd/a.plist']) w(f);
+  fs.mkdirSync(path.join(env.home, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(env.home, '.claude', 'settings.json'), '{}');
+  fs.mkdirSync(path.join(env.home, '.ssh'), { recursive: true });
+  fs.writeFileSync(path.join(env.home, '.ssh', 'id_rsa'), 'k');
+  fs.mkdirSync(env.logDir, { recursive: true });
+  fs.symlinkSync(path.join(env.repo, '.env'), path.join(env.repo, 'notes.txt'));
+  fs.symlinkSync(path.join(env.repo, '.claude'), path.join(env.repo, 'innocent'));
+  fs.symlinkSync(env.installDir, path.join(env.repo, 'docs', 'inst'));
+  fs.symlinkSync(path.join(env.home, '.claude'), path.join(env.repo, 'homeclaude'));
+  fs.symlinkSync(env.home, path.join(env.repo, 'homelink'));
+  return env;
+}
+
+export function mkCtx(env, over = {}) {
+  return {
+    repoRoot: env.repo, repoVisibility: 'private', home: env.home, installDir: env.installDir, actualInstallDir: env.installDir,
+    logDir: env.logDir, policy: SAMPLE_POLICY, runGit: () => ({ status: 0 }), ...over,
+  };
+}
+
+export function judge(env, tool, input, { cwd, branch = 'feat/test', ctx } = {}) {
+  return prefilter({ tool, input, cwd: cwd || env.repo, branch, ctx: ctx || mkCtx(env) });
+}
+export const bash = (env, command, opt) => judge(env, 'Bash', { command }, opt);

@@ -310,3 +310,91 @@ Rationale:
 - Files touched: `docs/reviews/M7/security.md` (this section, not committed). Scratch is under `scratchpad/m7-sec/r2`, `brace1` and `harness/`.
 - Open questions: none new. The questions from round 1 about the executing shell and Write tool expansion are now answered: zsh, and `~user` is ask.
 - Next role: Dev, to fix R1 and R2 and add corpus cases (fix cycle 2 of 3), then Sec re-review.
+
+---
+
+## Re-review (fix cycle 2)
+
+Date: 2026-11-04. Reviewer: Sec.
+
+### C2.1 Scope and tools
+
+- Code HEAD: `c483f3ff2ec287be725232dca747a0b923d8312c`.
+- Commits reviewed: `5f5b7e7` (R2/R3), `1c8109f` (R1 + QA R5.1), `c483f3f` (README only). I read every source change (`git diff a6e7f9a c483f3f -- tools/approver/src`).
+- Install: a fresh `enforce` temp install (`scratchpad/m7-sec/r3`). It uses the **real** `runGit`, so the new `rev-parse` gate ran against real git in the temp repo. No real HOME, Keychain, network, model or settings were used.
+- Tests: `sandbox-exec` with outbound network denied gives **162 pass, 0 fail**.
+- Local git checks used only `rev-parse` and benign `/usr/bin/true` config values, with `GIT_TRACE`.
+- `gh` was traced only with outbound network denied, `GH_TOKEN=dummy`, and a temp `GH_CONFIG_DIR` and HOME. No keyring and no API were reached.
+
+### C2.2 R1–R3 re-tested
+
+| Item | Repro | Now | Status |
+|---|---|---|---|
+| R2 | `{ls,A/../test/run.sh}`, `{cat,…}` (with `A/` and `ls,A/` present) | ask | **Fixed** |
+| R2, variants | `'{ls,…}'`, `"{ls}"`, `\{ls,.}`, `{ls,.};ls`, `l{s,} .`, `{l,}s`, `$'{ls,.}'`, `{ ls; }`, `ls {a,b}` | all ask | Fixed |
+| R2, deny shadow | `{cu,}rl x` → `D-NET`; `{git,push,origin,main}` → `D-GIT-MAIN` | deny | Works. The shadow copy never yields an allow, because the real command is always `dynamicName`. |
+| R3 | 3,000-level nested brace word, and words over 4 KB | ask, fast | Fixed |
+| R1 | implicit git dir `sub/g` (lowercase `head`, `objects/`, `refs/`, `config` with `worktree`): `cd sub/g && git status` / `git log` | ask (`rev-parse` returns `sub/g`, not `<repo>/.git`) | **Fixed for git** |
+| R1, normal | `git status`, `cd sub && git diff` | allow | No regression |
+
+### C2.3 Attacks on the new code
+
+**The `rev-parse --absolute-git-dir` gate (`allow.mjs gitDirOk`, `git-run.mjs`): holds**
+- **Environment.** `spawnSync` gets a fresh env: `PATH`, `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_OPTIONAL_LOCKS=0`, and `GIT_CEILING_DIRECTORIES=<parent of repo root>`. No `GIT_DIR`, `GIT_WORK_TREE`, `GIT_CONFIG_*`, `GIT_TRACE` or HOME is inherited from the hook process.
+- **Can a hostile config make the gate itself execute something?** I tested a hostile implicit git dir whose config sets `core.fsmonitor`, `core.hooksPath`, `core.pager`, `pager.rev-parse`, and an `include.path` that defines `alias.rev-parse`, all set to `/usr/bin/true`. With `GIT_TRACE`, `git -c core.fsmonitor=false -c core.hooksPath=/dev/null rev-parse --absolute-git-dir` logged only `built-in: git rev-parse` and **no child process**. The pager is never used because stdout is a pipe, and aliases cannot shadow built-ins.
+- **Other cases:**
+  - **Timeout** (700 ms per distinct cwd, cached): a hang or error means not allowed. Many distinct `cd` targets can only push the hook past its 5 s timeout, which is a normal prompt.
+  - **Symlinked `.git`:** both sides go through `realResolve`.
+  - **`safe.directory` / dubious ownership:** `rev-parse` exits non-zero, so not allowed.
+  - **A repo whose root `.git` is a `gitdir:` file (worktree):** the result is not equal to `<repo>/.git`, so git is never allowed. That fails closed; it is a usability cost, not a hole.
+- **Residual:** the gate checks the git dir with a clean environment, but the real command runs with the owner's environment and global config. Those are owner-controlled, and an agent cannot set them persistently.
+
+**C2-1. Minor (defence in depth): the implicit git-dir file rule is case-sensitive** (`files.mjs looksLikeGitDirFile`)
+- Repro: each of these Writes gives ALLOW (`L-EDIT`): `<repo>/sub/g2/head` (lowercase), `<repo>/sub/g2/config`, `<repo>/sub/g2/objects/k`, `<repo>/sub/g2/refs/k`, and `<repo>/sub/g/HOOKS/x`. `HEAD` and `hooks/pre-commit` are asked as intended.
+- Local check: on APFS, git accepts a lowercase `head`; `rev-parse` reported that directory as the git dir. Writing `config` before `HEAD` also passes, because the rule depends on write order.
+- Effect: an agent can build an implicit git dir with no prompt. **Git commands are still safe**, because the gate catches them. The only exposure is the `gh` question in C2-2.
+- Fix: compare base names case-insensitively (`head`, `packed-refs`, `config`, and the `objects`/`refs`/`hooks`/`info` segments). Make `config` ask whenever its parent directory holds `objects` or `refs`, or simply whenever the base name is `config` outside known source folders.
+
+**C2-2. Minor, unverified suspicion (medium-low confidence): `gh pr …` is not gated by `gitDirOk`**
+- Repro: with the implicit git dir from C2-1 in place, `cd sub/g && gh pr create --title t --body b` gives ALLOW (`L-GH`), and so does `cd sub/g && gh pr view 5`.
+- Why it might matter: gh runs git itself. If any git subcommand it runs there executes config (for example `git status --porcelain` triggering `core.fsmonitor`, or `core.sshCommand` on a push), that is code execution.
+- What I could check: offline with network denied, gh made **no** git call before its first API request (the `GIT_TRACE` file stayed empty). I could not observe what it runs after a successful API call without network access.
+- Fix: one line. Apply the same `nestedGit`/`gitDirOk` cwd check in `ghAllow`, and optionally to `npm test`/`node --test`.
+
+**C2-3. Note: `rg --no-ignore` is allowed only with explicit paths below the root**
+- `rg --no-ignore KEY .`, no path, `--files`, `sub/..` and `cd sub && … ..` all give ask.
+- `rg --no-ignore KEY sub` still searches `sub/` recursively. That includes gitignored, non-hidden files in it; hidden files such as `.env` and `.claude` stay skipped.
+- A name scan of the repo found no non-hidden secret-like files (`secrets/`, `*.pem`, `*.key`, `credentials*`, `id_*`, `*.p12`). `cat` of such files would already be asked, but a recursive `rg` would not be. Acceptable for now; revisit if such files ever appear.
+
+### C2.4 Final regression pass (round-1 and cycle-1 repros on the r3 install)
+
+Every round-1 repro gives the same result as in the cycle-1 table (R.2):
+- ask: `git diff` outside the repo, unquoted here-doc literals, `.ignore`/`rg`, Unicode paths, `EOF)` smuggling, `.npmrc`/`.mcp.json`/`CLAUDE.local.md`, `grep -r`, pathspec globs, `~user`.
+- deny: the `.env` literal, `ſecrets`, `Application ſupport`, `.git` writes, `chflags` through `cd`/`xargs`, `--config-env`, `arch`/`noglob curl`.
+- The ordinary quoted commit message and plain git reads are still allowed.
+
+No regression found.
+
+### C2.5 Verdict (fix cycle 2, the last one the charter allows)
+
+`VERDICT: READY WITH CONDITIONS`
+
+What remains, and when it matters:
+
+| Item | Severity | Matters for merge / `shadow` / `enforce-deny`? | Matters for `enforce` (silent allows)? |
+|---|---|---|---|
+| C2-1: case-insensitive git-dir file rule | Minor | No. These are allow-side gaps, and those modes print no allow. | Yes, as the enabler for C2-2. Git itself is safe because of the gate. |
+| C2-2: `gh` not gated by `gitDirOk` | Minor (unverified) | No | Yes. **Fix it (one line) or accept the risk explicitly before switching to `enforce`.** |
+| C2-3: recursive `rg` in subdirectories | Note | No | Low. Revisit if secret-named files appear. |
+| Documented residuals: agent-edited tests run under `npm test`/`node --test`; editable drill scripts; pty and mode file (round-1 note 13); owner zsh aliases (note 15) | Accepted by design (README "What this does not protect") | No | They are inherent to allow-mode. The owner decides at the enforce exit criteria. |
+
+- **Nothing remaining blocks the merge, shadow mode or `enforce-deny`.** No deny is weakened; every Appendix A deny repro still denies.
+- **Conditions before `enforce`:** fix C2-2 (gate `gh` like git) and C2-1 (case-insensitive base names), or have the owner accept them in writing.
+- Both are allow-side issues, so they only matter once `enforce` is on. Since this was the last fix cycle, the Coordinator should put this choice to the owner rather than start a fourth Dev/Sec cycle.
+
+### Handoff (fix cycle 2)
+
+- Done: re-tested R1–R3 on a fresh enforce install with the real git gate; attacked the brace shadow copy, the `rev-parse` gate (env, hostile config, symlinks, worktrees, timeout), the implicit git-dir file rule, the recursive `rg` change and `gh`; ran a full regression pass; ran the tests offline (162/162).
+- Files touched: `docs/reviews/M7/security.md` (this section, not committed). Scratch is under `scratchpad/m7-sec/r3`, `lc1`, `ghcfg`, `ghhome` and `harness/`.
+- Open question: which git subcommands does `gh pr create`/`view` run after its API call? This needs network access, so verifying it is the owner's call. The fix is cheap either way.
+- Next role: Coordinator, with a readiness report to the owner. Present C2-1 and C2-2 as conditions for `enforce` (fix outside the review loop, or accept).

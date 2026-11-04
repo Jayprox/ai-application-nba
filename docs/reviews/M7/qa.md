@@ -216,3 +216,53 @@ Findings 1, 2, 4, 5, 6 and 9 are fixed and verified with the original repros; `c
 - Files: this section in `/Users/jayprox_pro/Documents/Projects/git/ai-application-nba/docs/reviews/M7/qa.md`. Scratch in `.../scratchpad/m7-qa/` (`sweep.sh`, `cmp.mjs`, `out-old-*.jsonl`, `out-new-*.jsonl`, `cases15.mjs`, `cases16.mjs`, `perf-n.mjs`, `perf2-n.mjs`, `home2/`). No source, settings, `.env*` or Keychain touched.
 - Open questions: should a path-less recursive `rg` be ask (R5.1)? Is the model id `claude-haiku-5-5` valid for the owner's account?
 - Next role: Lead review, then Coordinator readiness report. Optional small Dev follow-up for R5.1 and the README line for R5.2.
+
+---
+
+## Re-review (fix cycle 2)
+
+Code HEAD `c483f3f` (`5f5b7e7` brace syntax never allowed, `1c8109f` git allowed only when `rev-parse` reports `<repo>/.git` and recursive `rg` is ask, `c483f3f` README note). Fresh temp-HOME install (`home3/`), same hard rules, no source edits.
+
+### S1. CI and tests
+
+- `gh pr checks 8`: backend, frontend, root, worker all pass.
+- Root `npm test`: 277 tests, 277 pass, 0 fail (cycle 1: 270).
+
+### S2. Sweep against cycle 1 results
+
+The same 676 requests in enforce, shadow and enforce-deny, compared with the cycle 1 run (`out-new-*` vs `out-new2-*`).
+
+- Shadow: 0 bytes on stdout, all exit 0. Enforce-deny: 0 allow outputs, 287 denies (identical to cycle 1).
+- Enforce: **1 changed decision of 676**: `rg --no-ignore foo` (path-less, repo root) allow to ask, which is the intended R5.1 fix.
+- **No new ALLOW.** No other command that policy allows now prompts.
+
+New targeted checks on the rev-parse gate (`cases17.mjs`, 36 requests, normal clone with `.git` at the root):
+
+| Request | Result |
+|---|---|
+| `git status`, `git diff`, `git add .`, `git commit -m "x"`, `git push -u origin feat/x`, `git log -p -- worker`, `git show HEAD`, `git branch`, `git checkout -b feat/y`, `git switch -c fix/z`, `git diff main...HEAD`, on `feat/qa` and on `main` | allow |
+| `cd worker && git log --oneline -3`, `cd worker/sub && git status`, `git status` with cwd `worker/sub` | allow |
+| `git status` with cwd in a folder that has its own `.git` (nested repo), `cd nest && git status`, `cd nest/deep && git log`, `git -C nest status` | ask (intended) |
+| `rg --no-ignore foo`, `rg --no-ignore foo .`, `rg --no-ignore --files`, `rg --no-ignore -n token`, `rg foo` | ask (R5.1 fixed) |
+| `rg --no-ignore foo secrets` | deny; `rg --no-ignore foo worker` and `... README.md` allow; `grep foo README.md` allow; `grep -r foo worker` ask |
+| `{curl,x}`, `curl{,}` | deny; `echo {a,b}`, `ls {a,b}`, `{ls,-la}`, `echo {1..3}`, `ls {a,b,c}{d,e}`, 5000 nested `{` then `curl x` | ask (brace syntax is never allowed, no hang); `git commit -m "{a,b} ok"` allow (quoted braces are literal) |
+
+No regression in everyday git: every command in the list you named is still allowed in a normal repo.
+
+Latency added by the gate (30 runs each, whole process, temp HOME): `ls` p50 121 ms, p95 128 ms (cycle 1: 120 and 129); `git status` p50 135 ms, p95 139 ms (cycle 1: 122 and 126). So the gate costs about 13 ms on git commands and nothing on others, well under the 200 ms target.
+
+### S3. R5.1 and R5.2
+
+- R5.1 confirmed fixed: a recursive `rg` with no path, `.` or `--files` at the repo root is ask; naming a directory such as `worker` is still allowed, and naming `secrets` is deny. A named subfolder could still hold non-hidden secret-named files; that is the same class at a smaller scope and the owner may accept it.
+- R5.2 confirmed: README adds a note that a commit message naming `.env` or `~/.ssh/...` as a whole token, or in a here-doc body, is a hard deny that cannot be approved under `enforce-deny` or `enforce`, and that a plain sentence in `-m "..."` is not scanned. This matches observed behaviour (`-m "fix .env loading"` is allow).
+
+### S4. VERDICT: READY WITH CONDITIONS
+
+All earlier findings remain fixed, R5.1 and R5.2 are closed, CI is green and `npm test` is 277 of 277. The 676-request sweep changed exactly one decision (the intended `rg` one), produced no new ALLOW and no new unwanted prompt, and the rev-parse gate keeps everyday git allowed at a cost of about 13 ms. The remaining conditions are the owner-side items, not code: confirm the model id `claude-haiku-5-5` is valid on the account and set `--price-in/--price-out` from the Console; do the checklist steps that cannot be tested here (Edit/Write deny-rule syntax for a folder with a space, the "No" marker self-check, real `chflags uchg`); and use the 7-day shadow run to look for would-allow-but-denied cases. Fix cycle 2 of 3 used; I have no open defects.
+
+## Handoff (re-review, cycle 2)
+
+- Done: `npm test` 277/277, CI green, 676-request re-sweep in three modes diffed against cycle 1 (one intended change, no new ALLOW), git rev-parse gate and brace-syntax checks, latency measured, R5.1 and R5.2 confirmed.
+- Files: this section in `/Users/jayprox_pro/Documents/Projects/git/ai-application-nba/docs/reviews/M7/qa.md` (uncommitted). Scratch in `.../scratchpad/m7-qa/` (`cases17.mjs`, `cases18.mjs`, `lat.mjs`, `cmp2.mjs`, `out-new2-*.jsonl`, `home3/`). No source, settings, `.env*` or Keychain touched.
+- Open questions for the owner: model id validity and price defaults; whether a named subfolder `rg` that may hold non-hidden secret-named files is acceptable.
+- Recommended next role: Lead review, then the Coordinator readiness report for owner merge approval.

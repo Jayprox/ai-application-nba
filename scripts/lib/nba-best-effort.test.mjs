@@ -11,6 +11,7 @@ test('NBA-side problems are warnings (exit 0, degraded); database errors are fai
   assert.equal(classifyError(new TypeError("Cannot read properties of undefined (reading 'gameDates')")).kind, 'warn');
   assert.equal(classifyError(new SyntaxError('bad')).kind, 'warn');
   assert.equal(classifyError(new Error('checks failed:\n    - standings 10-2, loaded 9-3')).kind, 'warn');
+  assert.equal(classifyError(new Error('only 0 teams have regular-season games')).kind, 'warn', 'NBA.com answered with an empty schedule');
   assert.equal(classifyError(new Error('game 0022600001: unknown team id 1610612999')).kind, 'warn');
   assert.deepEqual(classifyError(pgErr('42P01')), { kind: 'fail', nba: 'ok', reason: 'database error (42P01)' });
   assert.equal(classifyError(pgErr('55P03')).reason, 'database error (55P03)');

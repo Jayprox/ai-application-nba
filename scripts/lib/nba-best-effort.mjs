@@ -35,6 +35,7 @@ export function classifyError(e) {
   if (e?.name === 'NbaDataError') return { kind: 'warn', nba: 'ok', reason: `nba.com data rejected: ${ONE_LINE(e.message)}` };
   if (e instanceof TypeError || e instanceof SyntaxError || e instanceof RangeError) return { kind: 'warn', nba: 'ok', reason: 'nba.com data rejected: unexpected response shape' };
   if (/^checks failed/.test(msg)) return { kind: 'warn', nba: 'ok', reason: `nba.com data rejected: ${ONE_LINE(msg.split('\n')[0])}` };
+  if (/^only \d+ teams have regular-season games/.test(msg)) return { kind: 'warn', nba: 'ok', reason: 'nba.com data rejected: schedule incomplete' };
   if (/^game \S+: unknown team id/.test(msg)) return { kind: 'warn', nba: 'ok', reason: `nba.com data rejected: ${ONE_LINE(msg)}` };
   return { kind: 'fail', nba: 'ok', reason: `unexpected error (${ONE_LINE(e?.name || 'Error')})` };
 }

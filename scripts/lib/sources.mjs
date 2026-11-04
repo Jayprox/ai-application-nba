@@ -14,6 +14,14 @@ function fixture(name) {
   return JSON.parse(readFileSync(p, 'utf8'));
 }
 
+// In best-effort fixture mode a missing fixture is "NBA.com unreachable", never a real request.
+function fixtureOr(name, network) {
+  const f = fixture(name);
+  if (f !== undefined) return f;
+  if (be.on && FIXTURES) { be.down = 'fixture missing'; throw new NbaUnavailable('fixture missing'); }
+  return network();
+}
+
 async function getJson(url, headers, { retries = 3, timeoutMs = 30000 } = {}) {
   for (let attempt = 1; ; attempt++) {
     try {
@@ -101,17 +109,17 @@ export function rows(json, setName) {
 
 export async function nbaStandings(season) {
   gate();
-  return fixture(`standings_${season}`) ?? nbaStats('leaguestandingsv3', { LeagueID: '00', Season: season, SeasonType: 'Regular Season' });
+  return fixtureOr(`standings_${season}`, () => nbaStats('leaguestandingsv3', { LeagueID: '00', Season: season, SeasonType: 'Regular Season' }));
 }
 export async function nbaAllPlayers(season) {
   gate();
-  return fixture(`allplayers_${season}`) ?? nbaStats('commonallplayers', { IsOnlyCurrentSeason: '0', LeagueID: '00', Season: season });
+  return fixtureOr(`allplayers_${season}`, () => nbaStats('commonallplayers', { IsOnlyCurrentSeason: '0', LeagueID: '00', Season: season }));
 }
 /** Every player ever (Historical=1) with NBA.com's listed POSITION — retired players included. */
 export async function nbaPlayerIndex(season) {
   gate();
-  return fixture(`playerindex_${season}`) ?? nbaStats('playerindex', { College: '', Country: '', DraftPick: '', DraftRound: '', DraftYear: '', Height: '',
-    Historical: '1', LeagueID: '00', Season: season, SeasonType: 'Regular Season', TeamID: '0', Weight: '' });
+  return fixtureOr(`playerindex_${season}`, () => nbaStats('playerindex', { College: '', Country: '', DraftPick: '', DraftRound: '', DraftYear: '', Height: '',
+    Historical: '1', LeagueID: '00', Season: season, SeasonType: 'Regular Season', TeamID: '0', Weight: '' }));
 }
 /** Returns undefined in fixture mode when that team's roster wasn't captured. */
 export async function nbaRoster(teamId, season) {

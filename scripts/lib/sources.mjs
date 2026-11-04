@@ -38,11 +38,59 @@ const NBA_HEADERS = {
 };
 let lastNbaCall = 0;
 async function nbaStats(endpoint, params) {
+  gate();
   const wait = 700 - (Date.now() - lastNbaCall); // be polite: ~1.4 req/s max
   if (wait > 0) await sleep(wait);
   lastNbaCall = Date.now();
   const qs = new URLSearchParams(params).toString();
-  return getJson(`https://stats.nba.com/stats/${endpoint}?${qs}`, NBA_HEADERS);
+  const url = `https://stats.nba.com/stats/${endpoint}?${qs}`;
+  if (!be.on) return getJson(url, NBA_HEADERS);
+  // Best-effort (weekly run): the first call is the run's single probe, 15 s to headers, ONE attempt.
+  // After a success later calls get 2 attempts. Any failure latches "down" for the rest of the process.
+  const attempts = be.okCalls === 0 ? 1 : 2;
+  let last;
+  for (let i = 1; i <= attempts; i++) {
+    try { const j = await getBestEffort(url); be.okCalls++; return j; } catch (e) { last = e; if (i < attempts) await sleep(1500); }
+  }
+  be.down = last.nbaKind;
+  throw last;
+}
+
+// ---- NBA.com best-effort mode (M6) ------------------------------------------------------------------
+// Off by default; the three weekly loaders turn it on with --nba-best-effort. See scripts/lib/nba-best-effort.mjs.
+export class NbaUnavailable extends Error {
+  /** @param kind 'timeout' | 'HTTP 403 blocked' | 'HTTP <n>' | 'network' | 'malformed response' | 'disabled' */
+  constructor(kind) { super(`stats.nba.com unreachable (${kind})`); this.name = 'NbaUnavailable'; this.nbaKind = kind; }
+}
+const be = { on: false, disabled: false, down: null, okCalls: 0, headerMs: 15000, bodyMs: 60000 };
+/** @returns 'ok' | 'disabled' | 'down' (the loader then makes no NBA.com request at all) */
+export function enableBestEffort(env = process.env, { headerMs = 15000, bodyMs = 60000 } = {}) {
+  Object.assign(be, { on: true, headerMs, bodyMs, okCalls: 0, down: null, disabled: env.WEEKLY_NBA === '0' });
+  if (be.disabled) return 'disabled';
+  if (env.WEEKLY_NBA_STATE === 'down') { be.down = 'earlier in this run'; return 'down'; }
+  return 'ok';
+}
+export const nbaDownKind = () => be.down;
+function gate() {
+  if (!be.on) return;
+  if (be.disabled) throw new NbaUnavailable('disabled');
+  if (be.down) throw new NbaUnavailable(be.down);
+  // Synthetic fixture mode: a file _nba_unreachable.json ({"kind":"timeout"}) simulates a blocked NBA.com.
+  if (FIXTURES && existsSync(join(FIXTURES, '_nba_unreachable.json'))) {
+    const kind = String(JSON.parse(readFileSync(join(FIXTURES, '_nba_unreachable.json'), 'utf8')).kind ?? 'timeout');
+    be.down = kind;
+    throw new NbaUnavailable(kind);
+  }
+}
+async function getBestEffort(url) {
+  const ac = new AbortController();
+  let timer = setTimeout(() => ac.abort(), be.headerMs);
+  let res;
+  try { res = await fetch(url, { headers: NBA_HEADERS, signal: ac.signal }); } catch { clearTimeout(timer); throw new NbaUnavailable(ac.signal.aborted ? 'timeout' : 'network'); }
+  if (!res.ok) { clearTimeout(timer); throw new NbaUnavailable(res.status === 403 ? 'HTTP 403 blocked' : `HTTP ${res.status}`); }
+  clearTimeout(timer);
+  timer = setTimeout(() => ac.abort(), be.bodyMs);
+  try { return await res.json(); } catch { throw new NbaUnavailable(ac.signal.aborted ? 'timeout' : 'malformed response'); } finally { clearTimeout(timer); }
 }
 
 /** resultSet -> array of plain objects keyed by header. */
@@ -52,18 +100,22 @@ export function rows(json, setName) {
 }
 
 export async function nbaStandings(season) {
+  gate();
   return fixture(`standings_${season}`) ?? nbaStats('leaguestandingsv3', { LeagueID: '00', Season: season, SeasonType: 'Regular Season' });
 }
 export async function nbaAllPlayers(season) {
+  gate();
   return fixture(`allplayers_${season}`) ?? nbaStats('commonallplayers', { IsOnlyCurrentSeason: '0', LeagueID: '00', Season: season });
 }
 /** Every player ever (Historical=1) with NBA.com's listed POSITION — retired players included. */
 export async function nbaPlayerIndex(season) {
+  gate();
   return fixture(`playerindex_${season}`) ?? nbaStats('playerindex', { College: '', Country: '', DraftPick: '', DraftRound: '', DraftYear: '', Height: '',
     Historical: '1', LeagueID: '00', Season: season, SeasonType: 'Regular Season', TeamID: '0', Weight: '' });
 }
 /** Returns undefined in fixture mode when that team's roster wasn't captured. */
 export async function nbaRoster(teamId, season) {
+  gate();
   if (FIXTURES) return fixture(`roster_${teamId}_${season}`);
   return nbaStats('commonteamroster', { LeagueID: '00', Season: season, TeamID: String(teamId) });
 }
@@ -74,11 +126,13 @@ export async function nbaSchedule() {
 
 /** Full season schedule incl. arena, tip times, playoff/Cup labels, national TV (1996-97+). */
 export async function nbaScheduleSeason(season) {
+  gate();
   if (FIXTURES) return fixture(`schedule_${season}`);
   return nbaStats('scheduleleaguev2', { LeagueID: '00', Season: season });
 }
 /** Every team- or player-game row for one season type ('Regular Season' | 'Playoffs' | 'PlayIn' | 'IST'). */
 export async function nbaGameLog(season, seasonType, playerOrTeam) {
+  gate();
   const name = `gamelog_${season}_${seasonType.replace(/\W+/g, '')}_${playerOrTeam}`;
   if (FIXTURES) return fixture(name) ?? { resultSets: [{ name: 'LeagueGameLog', headers: [], rowSet: [] }] };
   return nbaStats('leaguegamelog', { Counter: '0', Direction: 'ASC', LeagueID: '00', PlayerOrTeam: playerOrTeam, Season: season, SeasonType: seasonType, Sorter: 'DATE' });

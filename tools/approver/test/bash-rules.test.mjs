@@ -459,7 +459,7 @@ test('Sec minor: git global options before a denied subcommand still deny; more 
 
 test('QA 5: brace expansion that yields a deny-listed command word is deny', () => check([
   ['{curl,x}', 'deny', 'D-NET'], ['curl{,}', 'deny', 'D-NET'], ['{railway,x} up', 'deny', 'D-PROD-RAILWAY'], ['c{url,at} x', 'deny', 'D-NET'], ['{wget,-O,x} http://y', 'deny', 'D-NET'],
-  ['{ls,docs}', 'allow', 'L-READ'], ['echo {a,b}', 'ask', 'K-DEFAULT'],
+  ['{ls,docs}', 'ask', 'K-DEFAULT'], ['echo {a,b}', 'ask', 'K-DEFAULT'],
 ]));
 
 test('QA 6: comments never change a decision (twins)', () => {
@@ -472,4 +472,23 @@ test('QA 6: comments never change a decision (twins)', () => {
   }
   assert.equal(bash(env, 'echo "a # curl"').decision, 'ask');
   assert.equal(bash(env, 'ls a#b').rule_id, 'K-DEFAULT');
+});
+
+test('Sec R2: a command word with brace syntax is never allowed (zsh runs `ls,A/..`, bash runs `ls A/..`); deny scanning still sees the expansion', () => check([
+  ['{ls,A/../test/run.sh}', 'ask', 'K-DEFAULT'], ['{cat,A/../test/run.sh}', 'ask', 'K-DEFAULT'], ['{ls,.}', 'ask', 'K-DEFAULT'], ['{ls,A/../x}', 'ask', 'K-DEFAULT'], ['ls,A/../test/run.sh', 'ask', 'K-DEFAULT'],
+  ['{cat,README.md}', 'ask', 'K-DEFAULT'], ["'{ls,x}'", 'ask', 'K-DEFAULT'], ['"{ls,x}"', 'ask', 'K-DEFAULT'], ['ls{,}', 'ask', 'K-DEFAULT'], ['{git,status}', 'ask', 'K-DEFAULT'], ['l{s,}', 'ask', 'K-DEFAULT'], ['\\{ls,x}', 'ask', 'K-DEFAULT'],
+  ['{curl,x}', 'deny', 'D-NET'], ['{cu,}rl x', 'deny', 'D-NET'], ['{rm,-rf,x}', 'deny', 'D-RM-RF'], ['{git,push,origin,main}', 'deny', 'D-GIT-MAIN'], ['{ls,x};{curl,y}', 'deny', 'D-NET'],
+]));
+test('Sec R2: a Write of a directory named like a brace word stays an ordinary edit (the danger is execution, which is now refused)', () => {
+  assert.equal(judge(env, 'Write', { file_path: path.join(env.repo, 'ls,A', 'keep'), content: 'x' }).decision, 'allow');
+});
+
+test('Sec R3: brace detection is linear: 32 KB of brace-like text parses quickly and is never allowed', () => {
+  for (const cmd of ['ls {' + ','.repeat(32000), 'ls ' + '{'.repeat(32000), 'ls ' + '{a,'.repeat(10000), 'ls {' + 'a'.repeat(5000) + ',b}']) {
+    const t0 = performance.now();
+    const r = bash(env, cmd);
+    const ms = performance.now() - t0;
+    assert.ok(ms < 400, `${ms.toFixed(0)} ms`);
+    assert.equal(r.decision, 'ask');
+  }
 });

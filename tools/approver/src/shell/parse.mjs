@@ -205,15 +205,19 @@ class Parser {
   }
 
   finish(cmd) {
-    let w0 = cmd.words[0];
+    const w0 = cmd.words[0];
     if (w0 && w0.expansions && !cmd.opaque) {
-      // {curl,x} and curl{,} are literal words after expansion: the first is the command, the rest are arguments
+      // {curl,x} and curl{,}: bash runs `curl x`, zsh runs a command named `curl,x`. The parser cannot know which, so the real
+      // command stays dynamic (never allowed) and a deny-only shadow copy with the bash expansion is judged for deny/ask results.
       const lit = (t) => Object.assign(new Word(), { text: t, raw: t });
-      cmd.words = [...w0.expansions.map(lit), ...cmd.words.slice(1)];
-      w0 = cmd.words[0];
+      const shadow = { ...cmd, words: [...w0.expansions.map(lit), ...cmd.words.slice(1)], denyOnly: true };
+      shadow.name = shadow.words[0].text;
+      this.st.commands.push(shadow);
+      this.unwrap(shadow);
     }
     if (w0 && !cmd.opaque) {
-      if (w0.dynamic && !w0.ansi) cmd.dynamicName = true; else cmd.name = w0.text; // ANSI-C quoting decodes statically
+      // any brace syntax in the command word (quoted or not) means the command cannot be judged as written
+      if ((w0.dynamic && !w0.ansi) || /[{}]/.test(w0.raw)) cmd.dynamicName = true; else cmd.name = w0.text; // ANSI-C quoting decodes statically
     }
     this.st.commands.push(cmd);
     this.last = cmd;
@@ -308,7 +312,8 @@ class Parser {
       } else { w.text += c; this.i++; }
     }
     w.raw = s.slice(start, this.i);
-    if (/(?<![\\$])\{[^{}]*(,|\.\.)[^{}]*\}/.test(w.raw.replace(/'[^']*'|"[^"]*"/g, ''))) {
+    if (w.raw.length > 4096) w.dynamic = true; // too long to scan for braces in linear time: never a plain literal
+    else if (/(?<![\\$])\{[^{}]*(,|\.\.)[^{}]*\}/.test(w.raw.replace(/'[^']*'|"[^"]*"/g, ''))) {
       if (!w.dynamic && !w.quoted && /\{[^{}]*,[^{}]*\}/.test(w.raw)) w.expansions = expandBraces(w.raw);
       w.dynamic = true; // brace expansion
     }

@@ -152,3 +152,13 @@ test('Sec 5: every .git directory or gitdir file at any depth is protected', () 
     [P('new/deep/.git/config'), 'deny', 'D-SELF'], [P('nested/.GIT/config'), 'deny', 'D-SELF'], [P('.gitmodules'), 'allow', 'L-EDIT'], [P('docs/.github-notes.md'), 'allow', 'L-EDIT'],
   ], fn);
 });
+
+test('Sec R1: files that make a directory a git dir (HEAD, packed-refs, config/objects/refs/hooks beside a HEAD) are ask; plain source trees are not', () => {
+  const mkf = (rel, body = 'x') => { const f = P(rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, body); };
+  mkf('sub/g2/HEAD'); mkf('sub/g2/objects/k'); mkf('sub/g2/refs/k'); mkf('sub/g2/hooks/pre-commit'); mkf('lib/config'); mkf('lib/hooks/useX.js'); mkf('docs/refs/a.md');
+  for (const fn of [edit, write, nb]) expectAll([
+    [P('sub/g3/HEAD'), 'ask', 'K-PATH'], [P('HEAD'), 'ask', 'K-PATH'], [P('sub/g3/packed-refs'), 'ask', 'K-PATH'], [P('sub/g2/config'), 'ask', 'K-PATH'], [P('sub/g2/objects/new'), 'ask', 'K-PATH'],
+    [P('sub/g2/refs/heads/x'), 'ask', 'K-PATH'], [P('sub/g2/hooks/post-commit'), 'ask', 'K-PATH'], [P('sub/g2/info/exclude'), 'ask', 'K-PATH'],
+    [P('lib/config'), 'allow', 'L-EDIT'], [P('lib/hooks/useX.js'), 'allow', 'L-EDIT'], [P('docs/refs/a.md'), 'allow', 'L-EDIT'], [P('src/config.js'), 'allow', 'L-EDIT'], [P('docs/HEAD.md'), 'allow', 'L-EDIT'],
+  ], fn);
+});

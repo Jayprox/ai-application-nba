@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { makeEnv, seedRepo, cleanup, bash, judge, mkCtx } from './helpers.mjs';
+import { makeEnv, seedRepo, cleanup, bash, judge, mkCtx, fakeGit } from './helpers.mjs';
 import { runGit } from '../src/git-run.mjs';
 
 let env;
@@ -167,7 +167,7 @@ test('ask: installs and process/system commands', () => check([
 test('allow: read-only inspection inside the repo (L-READ), A1 and A11', () => check([
   ['ls', 'allow', 'L-READ'], ['ls -la docs', 'allow', 'L-READ'], ['ls -R', 'allow', 'L-READ'], ['cat README.md', 'allow', 'L-READ'], ['cat -n docs/a.md docs/b.md', 'allow', 'L-READ'],
   ['head -n 5 README.md', 'allow', 'L-READ'], ['head -5 README.md', 'allow', 'L-READ'], ['tail -n 20 docs/a.md', 'allow', 'L-READ'], ['wc -l README.md', 'allow', 'L-READ'],
-  ['grep -n foo README.md', 'allow', 'L-READ'], ['rg --no-ignore foo', 'allow', 'L-READ'], ['rg --no-ignore -n foo docs', 'allow', 'L-READ'], ['rg foo', 'ask', 'K-DEFAULT'], ['rg -n foo docs', 'ask', 'K-DEFAULT'],
+  ['grep -n foo README.md', 'allow', 'L-READ'], ['rg --no-ignore foo', 'ask', 'K-DEFAULT'], ['rg --no-ignore -n foo docs', 'allow', 'L-READ'], ['rg foo', 'ask', 'K-DEFAULT'], ['rg -n foo docs', 'ask', 'K-DEFAULT'],
   ['sed -n 5p README.md', 'allow', 'L-READ'], ['sed -n 1,10p README.md', 'allow', 'L-READ'], ['sed -n "$p" README.md', 'ask'], ['sed -n \'/foo/p\' README.md', 'allow', 'L-READ'],
   ['find . -name "*.md"', 'allow', 'L-READ'], ['find docs -type f -maxdepth 1', 'allow', 'L-READ'], ['find . -name x -o -name y', 'allow', 'L-READ'], ['find . -name x -print', 'allow', 'L-READ'],
   ['ls | wc -l', 'allow', 'L-READ'], ['cat README.md | head -3', 'allow', 'L-READ'], ['git log --oneline | head -5', 'allow'], ['ls 2>&1', 'allow', 'L-READ'], ['ls > /dev/null', 'allow', 'L-READ'],
@@ -206,7 +206,7 @@ test('A14: recursive grep/rg only when .env* is provably skipped', () => check([
 ]));
 
 test('Sec 3: rg needs --no-ignore (agent-written .ignore whitelists), recursive grep is ask, tool config files are ask-listed edits', () => check([
-  ['rg -n KEY', 'ask', 'K-DEFAULT'], ['rg TOKEN', 'ask', 'K-DEFAULT'], ['rg --no-ignore-dot TOKEN', 'ask', 'K-DEFAULT'], ['rg --no-ignore TOKEN', 'allow', 'L-READ'],
+  ['rg -n KEY', 'ask', 'K-DEFAULT'], ['rg TOKEN', 'ask', 'K-DEFAULT'], ['rg --no-ignore-dot TOKEN', 'ask', 'K-DEFAULT'], ['rg --no-ignore TOKEN', 'ask', 'K-DEFAULT'], ['rg --no-ignore TOKEN docs', 'allow', 'L-READ'],
   ['grep -rn token . --exclude=\'.env*\' --exclude-dir=.git', 'ask'], ['grep -R x docs', 'ask', 'K-DEFAULT'],
 ]));
 
@@ -271,13 +271,13 @@ test('A7: node --test only for test/ and worker/test/ files that match the namin
 
 test('A8: npm test / npm run lint are allowed only when the guard (diff against origin/main) is clean', () => {
   const calls = [];
-  const ctxWith = (status) => mkCtx(env, { runGit: (args, o) => { calls.push({ args, o }); return status instanceof Error ? (() => { throw status; })() : { status }; } });
+  const ctxWith = (status) => mkCtx(env, { runGit: fakeGit({ onOther: (args, o) => calls.push({ args, o }), status }) });
   for (const cmd of ['npm test', 'npm run lint']) {
     assert.equal(judge(env, 'Bash', { command: cmd }, { ctx: ctxWith(0) }).rule_id, 'L-TEST');
     assert.equal(judge(env, 'Bash', { command: cmd }, { ctx: ctxWith(1) }).decision, 'ask', 'package.json differs from origin/main');
     assert.equal(judge(env, 'Bash', { command: cmd }, { ctx: ctxWith(128) }).decision, 'ask', 'git error (no origin/main)');
     assert.equal(judge(env, 'Bash', { command: cmd }, { ctx: ctxWith(-1) }).decision, 'ask', 'git timeout');
-    assert.equal(judge(env, 'Bash', { command: cmd }, { ctx: mkCtx(env, { runGit: () => undefined }) }).decision, 'ask');
+    assert.equal(judge(env, 'Bash', { command: cmd }, { ctx: mkCtx(env, { runGit: (a) => (a.includes('rev-parse') ? fakeGit()(a) : undefined) }) }).decision, 'ask');
   }
   const a = calls[0].args;
   assert.ok(a.includes('refs/remotes/origin/main'), 'compared against origin/main, not HEAD');
@@ -491,4 +491,54 @@ test('Sec R3: brace detection is linear: 32 KB of brace-like text parses quickly
     assert.ok(ms < 400, `${ms.toFixed(0)} ms`);
     assert.equal(r.decision, 'ask');
   }
+});
+
+test('QA R5.1: recursive rg (no path, ., the repo root, --files) is ask; explicit non-secret paths stay allowed', () => check([
+  ['rg --no-ignore foo', 'ask', 'K-DEFAULT'], ['rg --no-ignore foo .', 'ask', 'K-DEFAULT'], [(e) => `rg --no-ignore foo ${e.repo}`, 'ask', 'K-DEFAULT'], ['rg --no-ignore foo docs/..', 'ask', 'K-DEFAULT'],
+  ['rg --no-ignore --files', 'ask', 'K-DEFAULT'], ['rg --no-ignore --files docs', 'ask', 'K-DEFAULT'], ['rg --no-ignore -e foo', 'ask', 'K-DEFAULT'],
+  ['rg --no-ignore foo secrets', 'deny', 'D-SECRET-PATH'], ['rg --no-ignore foo secrets/api.txt', 'deny', 'D-SECRET-PATH'], ['rg --no-ignore foo certs/server.pem', 'ask', 'K-DEFAULT'], ['rg --no-ignore foo .npmrc', 'ask', 'K-DEFAULT'],
+  ['rg --no-ignore foo docs', 'allow', 'L-READ'], ['rg --no-ignore foo docs/a.md README.md', 'allow', 'L-READ'], ['cd docs && rg --no-ignore foo a.md', 'allow', 'L-READ'], ['rg --no-ignore -e foo docs', 'allow', 'L-READ'],
+]));
+
+test('Sec R1: git is allowed only when rev-parse says the git dir is <repo>/.git (injected runner, ceiling dir, minimal call)', () => {
+  const calls = [];
+  const run = (gitDir, command = 'git status', extra = {}) => judge(env, 'Bash', { command }, { ctx: mkCtx(env, { runGit: (args, o) => { calls.push({ args, o }); return args.includes('rev-parse') ? { status: 0, stdout: gitDir + '\n', ...extra } : { status: 0 }; } }) });
+  assert.equal(run(path.join(env.repo, '.git')).rule_id, 'L-GIT-READ');
+  const c = calls[0];
+  assert.deepEqual(c.args, ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', 'rev-parse', '--absolute-git-dir']);
+  assert.equal(c.o.cwd, env.repo);
+  assert.equal(c.o.env.GIT_CEILING_DIRECTORIES, path.dirname(env.repo));
+  assert.ok(c.o.timeoutMs <= 1000);
+  for (const bad of [path.join(env.repo, 'sub', 'g'), env.repo, path.join(env.root, 'elsewhere', '.git'), '', 'relative/.git']) assert.equal(run(bad).decision, 'ask', bad);
+  for (const cmd of ['git status', 'git diff', 'git log', 'git show HEAD', 'git branch', 'git add README.md', 'git commit -m x', 'git checkout -b feat/x', 'git push origin feat/x']) {
+    assert.equal(run(path.join(env.repo, 'sub', 'g'), cmd).decision, 'ask', cmd);
+    assert.equal(run(path.join(env.repo, '.git'), cmd).decision, 'allow', cmd);
+  }
+  const mkRun = (r) => judge(env, 'Bash', { command: 'git status' }, { ctx: mkCtx(env, { runGit: (args) => (args.includes('rev-parse') ? r : { status: 0 }) }) });
+  for (const r of [{ status: 128, stdout: '' }, { status: -1, stdout: '' }, undefined, { status: 0 }, { status: 0, stdout: 5 }]) assert.equal(mkRun(r).decision, 'ask', JSON.stringify(r));
+  assert.equal(judge(env, 'Bash', { command: 'git status' }, { ctx: mkCtx(env, { runGit: () => { throw new Error('boom'); } }) }).decision, 'ask');
+  // non-git commands never call git for this
+  calls.length = 0; run(path.join(env.repo, '.git'), 'ls'); assert.equal(calls.length, 0);
+});
+
+test('Sec R1 with real git: a bare-repo layout (HEAD, objects/, refs/, config, no .git name) inside the repo is not trusted', () => {
+  const real = makeEnv({ branch: 'feat/test' });
+  try {
+    const g = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: real.home, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
+    fs.rmSync(path.join(real.repo, '.git'), { recursive: true });
+    assert.equal(g(real.repo, 'init', '-q', '-b', 'feat/test').status, 0);
+    for (const f of ['README.md', 'docs/a.md']) { fs.mkdirSync(path.dirname(path.join(real.repo, f)), { recursive: true }); fs.writeFileSync(path.join(real.repo, f), 'x'); }
+    fs.mkdirSync(path.join(real.repo, 'sub'));
+    assert.equal(g(real.repo, 'init', '-q', '--bare', 'sub/b').status, 0);
+    // a "normal" (non-bare) implicit git dir: config points core.worktree at itself
+    assert.equal(g(real.repo, 'init', '-q', '--bare', 'sub/w').status, 0);
+    fs.appendFileSync(path.join(real.repo, 'sub', 'w', 'config'), `[core]\n\tbare = false\n\tworktree = ${path.join(real.repo, 'sub', 'w')}\n`);
+    const ctx = mkCtx(real, { runGit });
+    const at = (cwd, command) => judge(real, 'Bash', { command }, { cwd, ctx }).decision;
+    assert.equal(at(real.repo, 'git status'), 'allow');
+    assert.equal(at(path.join(real.repo, 'docs'), 'git status'), 'allow');
+    for (const sub of ['sub/b', 'sub/w']) for (const cmd of ['git status', 'git diff', 'git log', 'git commit -m x']) assert.equal(at(path.join(real.repo, sub), cmd), 'ask', `${sub}: ${cmd}`);
+    assert.equal(judge(real, 'Bash', { command: 'cd sub/w && git status' }, { ctx }).decision, 'ask');
+    assert.equal(judge(real, 'Bash', { command: 'cd sub/b && git log' }, { ctx }).decision, 'ask');
+  } finally { cleanup(real); }
 });

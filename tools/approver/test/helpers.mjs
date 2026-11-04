@@ -110,10 +110,22 @@ export function seedRepo(env) {
   return env;
 }
 
+// A stand-in for git: rev-parse answers <repo>/.git (what a normal repo reports); every other call returns `status`.
+// `onOther` sees the non-rev-parse calls (the npm test guard's diff).
+export function fakeGit({ status = 0, repo, onOther, gitDir } = {}) {
+  return (args, o) => {
+    if (args.includes('rev-parse')) return { status: 0, stdout: (gitDir ?? (repo ? repo + '/.git' : FAKE_GITDIR.value)) + '\n' };
+    onOther?.(args, o);
+    return typeof status === 'function' ? status(args, o) : { status };
+  };
+}
+export const FAKE_GITDIR = { value: '' };
+
 export function mkCtx(env, over = {}) {
+  FAKE_GITDIR.value = env.repo + '/.git';
   return {
     repoRoot: env.repo, repoVisibility: 'private', home: env.home, installDir: env.installDir, actualInstallDir: env.installDir,
-    logDir: env.logDir, policy: SAMPLE_POLICY, runGit: () => ({ status: 0 }), ...over,
+    logDir: env.logDir, policy: SAMPLE_POLICY, runGit: fakeGit(), ...over,
   };
 }
 

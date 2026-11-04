@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { makeEnv, seedRepo, writeInstall, payload, runHook, spawnHook, readLog, cleanup, judge, mkCtx, APPROVER_DIR } from './helpers.mjs';
+import { makeEnv, seedRepo, writeInstall, payload, runHook, spawnHook, readLog, cleanup, judge, mkCtx, fakeGit, APPROVER_DIR } from './helpers.mjs';
 import { ALLOW_JSON, denyJson } from '../src/hook-io.mjs';
 
 const corpus = JSON.parse(fs.readFileSync(path.join(APPROVER_DIR, 'test', 'fixtures', 'requests.json'), 'utf8'));
@@ -62,7 +62,7 @@ async function exec(item, mode) {
   writeInstall(e, { visibility: item.repo_visibility });
   if (item.fault) tamper(e, item.fault); // after the install record is written, so the hashes are stale on purpose
   const text = stdinFor(item, e);
-  const runGit = () => ({ status: item.git_guard_status ?? 0 });
+  const runGit = fakeGit({ repo: e.repo, status: item.git_guard_status ?? 0 });
   const before = readLog(e).length;
   const out = await runHook(e, text, { runGit });
   const log = readLog(e);

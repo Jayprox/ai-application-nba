@@ -146,8 +146,31 @@ export function nestedGit(dir, S) {
   return false;
 }
 
+// Ask git which git dir it would really use from this directory (Sec R1): a directory holding HEAD, objects/ and refs/ is a git
+// dir without being named .git. rev-parse runs no hooks or fsmonitor. The answer must be <repoRoot>/.git, with discovery capped at
+// the repo's parent so nothing above the repo can be picked up. Any error, timeout or mismatch is "no".
+export function gitDirOk(dir, S) {
+  const cache = S.gitDirCache || (S.gitDirCache = new Map());
+  if (cache.has(dir)) return cache.get(dir);
+  let ok = false;
+  try {
+    const root = S.pc.repoRoot;
+    const r = S.ctx.runGit(['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', 'rev-parse', '--absolute-git-dir'], {
+      cwd: dir, timeoutMs: 700, capture: true, env: { GIT_CEILING_DIRECTORIES: path.dirname(root) },
+    });
+    if (r && r.status === 0 && typeof r.stdout === 'string') {
+      const got = realResolve(r.stdout.trim());
+      const want = realResolve(path.join(root, '.git'));
+      ok = got.ok && want.ok && got.real === want.real;
+    }
+  } catch { ok = false; }
+  cache.set(dir, ok);
+  return ok;
+}
+
 function gitAllow(c, S) {
   if (c.cwds.some((d) => nestedGit(d, S))) return null;
+  if (!c.cwds.every((d) => gitDirOk(d, S))) return null;
   const { sub, globals, args } = gitParts(c.words);
   if (sub === null) return null;
   // only --no-pager is a harmless global option (-c, -C, --git-dir, --exec-path... are not)
@@ -322,8 +345,12 @@ export function allowRule(c, S) {
       // Sec 3: ripgrep honours .ignore/.rgignore/.gitignore whitelists (`!.env`) that an agent can write, so every
       // search must switch ignore files off. Hidden files (.env, .claude) then stay skipped by rg's default.
       if (!hasFlag(r.flags, '--no-ignore')) return null;
-      const files = hasFlag(r.flags, '--files') || hasFlag(r.flags, '-e') ? r.pos : r.pos.slice(1);
-      if (!hasFlag(r.flags, '--files') && !hasFlag(r.flags, '-e') && !r.pos.length) return null;
+      // QA R5.1: a recursive search (--files, no path, or the repo root) would read non-hidden secret-named files
+      // (secrets/, *.pem, id_*, credentials*). Only explicit paths below the root are allowed.
+      if (hasFlag(r.flags, '--files')) return null;
+      const files = hasFlag(r.flags, '-e') ? r.pos : r.pos.slice(1);
+      if (!files.length || !r.pos.length) return null;
+      if (files.some((f) => c.cwds.some((d) => { const x = realResolve(f.text, d); return x.ok && x.real === S.pc.repoRoot; }))) return null;
       return allPaths(files, S, c) ? ok('L-READ') : null;
     }
     case 'sed': {

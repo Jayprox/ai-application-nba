@@ -190,3 +190,39 @@ test('a match id that is not a positive integer is refused before any request', 
 test('without a key and without fixtures the client refuses to start', () => {
   assert.throws(() => createWeeklyHighlightly({ fixtures: '' }), /HIGHLIGHTLY_API_KEY is not set/);
 });
+
+// ---- C2: the timeout covers the body, and the size limit is enforced while streaming
+const streamRes = (chunks, { onCancel } = {}) => {
+  let i = 0;
+  return { status: 200, ok: true, headers: { get: () => null }, text: async () => { throw new Error('text() must not be used for a stream'); },
+    body: { getReader: () => ({ read: async () => (i < chunks.length || chunks === Infinity ? { done: false, value: chunks[i++] ?? new Uint8Array(1024 * 1024) } : { done: true }), cancel: async () => { onCancel?.(); } }) } };
+};
+
+test('a body that stalls after the headers hits the timeout (text path) and is retried then unavailable', async () => {
+  const hl = mk({ fetchImpl: async () => ({ status: 200, ok: true, headers: { get: () => null }, text: () => new Promise(() => {}) }), timeoutMs: 15, backoffMs: [1, 1] });
+  await assert.rejects(hl.matches('2026-04-12'), (e) => e instanceof HighlightlyUnavailable && /timeout/.test(e.message));
+  assert.equal(hl.stats.total, 3);
+});
+
+test('a streamed body that stalls midway hits the timeout too', async () => {
+  const enc = new TextEncoder();
+  const stalled = () => ({ status: 200, ok: true, headers: { get: () => null }, body: { getReader: () => { let n = 0; return { read: () => (n++ === 0 ? Promise.resolve({ done: false, value: enc.encode('{"data":[') }) : new Promise(() => {})), cancel: async () => {} }; } } });
+  const hl = mk({ fetchImpl: async () => stalled(), timeoutMs: 15, backoffMs: [1, 1] });
+  await assert.rejects(hl.matches('2026-04-12'), (e) => e instanceof HighlightlyUnavailable && /timeout/.test(e.message));
+});
+
+test('an endless streamed body is cut at the size limit (stops reading, cancels, malformed)', async () => {
+  let cancelled = false, reads = 0;
+  const res = { status: 200, ok: true, headers: { get: () => null }, body: { getReader: () => ({ read: async () => { reads++; return { done: false, value: new Uint8Array(1024 * 1024) }; }, cancel: async () => { cancelled = true; } }) } };
+  const hl = mk({ fetchImpl: async () => res, maxBody: 5 * 1024 * 1024 });
+  await assert.rejects(hl.matches('2026-04-12'), (e) => e instanceof HighlightlyMalformed && /too large/.test(e.message));
+  assert.ok(cancelled);
+  assert.ok(reads <= 6, `read ${reads} MB before stopping`);
+  assert.equal(hl.stats.total, 1, 'not retried, counted once');
+});
+
+test('a streamed JSON body within the limit is parsed', async () => {
+  const enc = new TextEncoder();
+  const hl = mk({ fetchImpl: async () => streamRes([enc.encode('{"data":'), enc.encode('[]}')]) });
+  assert.deepEqual(await hl.matches('2026-04-12'), []);
+});

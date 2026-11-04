@@ -83,6 +83,21 @@ test('the key is masked in everything the process prints, even when vendor data 
   assert.ok(gid);
 });
 
+test('C1: a key that exists ONLY in the env file (not the process env) is masked too, even as a vendor name', { skip }, async () => {
+  const rec = recorded('box-score_1439038');
+  rec[0].boxScores.at(-1).player.name = KEY;
+  await addGame(db, { home: 'HOU', away: 'MEM', local: '2026-04-12', tip: new Date(Date.now() - 2 * 24 * 3600e3).toISOString(), status: 'final', home_score: 132, away_score: 101, season: '2025-26' });
+  const tip = new Date(Date.now() - 2 * 24 * 3600e3);
+  const dir = synthDir({ 'box-score_1439038': rec, [`matches_${etDate(tip)}`]: { data: [{ ...recorded('matches_2026-04-12').data[0], date: tip.toISOString() }], pagination: { totalCount: 1 } } });
+  copyFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'fixtures/weekly/recorded/lineups_1439038.json'), path.join(dir, 'lineups_1439038.json'));
+  const env = baseEnv(dir, { WEEKLY_HL_DAYS_BACK: '5', WEEKLY_HL_ENV_FILE: envFile(`HIGHLIGHTLY_API_KEY=${KEY}\n`) });
+  delete env.HIGHLIGHTLY_API_KEY;
+  const r = await exec(['backfill', '--season', '2025-26'], env);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.match(r.out, /\[redacted\]/);
+  assert.ok(!r.out.includes(KEY) && !r.err.includes(KEY));
+});
+
 test('dry run writes no ingestion_runs row and changes nothing', { skip }, async () => {
   const { dir, season } = await setup();
   const snap = [await fingerprint(db, 'games'), await count(db, 'entity_id_crosswalk')];

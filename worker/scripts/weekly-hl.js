@@ -27,18 +27,23 @@ const fromFile = (names) => {
   return out;
 };
 const fixtures = process.env.HIGHLIGHTLY_FIXTURES || '';
-const need = ['DATABASE_PUBLIC_URL', ...(fixtures ? [] : ['HIGHLIGHTLY_API_KEY'])].filter((n) => !process.env[n]);
+const need = ['DATABASE_PUBLIC_URL', 'HIGHLIGHTLY_API_KEY'].filter((n) => !process.env[n]);   // the key is read even with fixtures, so it is always masked
 const file = need.length ? fromFile(need) : {};
 const KEY = process.env.HIGHLIGHTLY_API_KEY || file.HIGHLIGHTLY_API_KEY || '';
 const DB_URL = process.env.DATABASE_PUBLIC_URL || file.DATABASE_PUBLIC_URL || '';
 
 // ---- 2. self-redaction, before anything can print --------------------------------------------------
 for (const s of [process.stdout, process.stderr]) s._handle?.setBlocking?.(true);      // process.exit() must not lose the result line
-const mask = (s) => (KEY.length >= 4 ? String(s).split(KEY).join('[redacted]') : String(s));
+const { createLineMasker } = await import('../src/line-mask.js');
+const maskers = [];
 for (const stream of [process.stdout, process.stderr]) {
   const w = stream.write.bind(stream);
-  stream.write = (chunk, ...rest) => w(typeof chunk === 'string' ? mask(chunk) : mask(Buffer.from(chunk).toString('utf8')), ...rest);
+  const m = createLineMasker(KEY, (t) => w(t));
+  maskers.push(m);
+  stream.write = (chunk, enc, cb) => { m.push(chunk); if (typeof enc === 'function') enc(); else if (typeof cb === 'function') cb(); return true; };
 }
+process.on('exit', () => { for (const m of maskers) m.flush(); });
+const mask = (s) => (KEY.length >= 4 ? String(s).split(KEY).join('[redacted]') : String(s));
 const { clean } = await import('../src/weekly-util.js');
 
 const STEP = process.argv[2] === 'backfill' ? 'backfill:hl' : 'schedule:hl';

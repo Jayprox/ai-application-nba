@@ -11,6 +11,8 @@ import { localDate } from './team-tz.js';
 import { capList, clean, inTransaction, nearestFirst } from './weekly-util.js';
 
 const MIN = 60e3, HOUR = 3600e3;
+// A team score above this is not a basketball score (the NBA record is 186); far below SMALLINT's 32767.
+const MAX_TEAM_SCORE = 400;
 const MAX_TIP_SHIFT = 7 * 24 * HOUR;
 
 /** Pure: is this match well-formed enough to use? Returns a reason string or null. */
@@ -20,6 +22,14 @@ export function badMatch(m, endYear) {
   if (m.homeTeam?.id === undefined || m.homeTeam?.id === null || m.awayTeam?.id === undefined || m.awayTeam?.id === null) return 'team id missing';
   if (typeof m.date !== 'string' || Number.isNaN(Date.parse(m.date))) return 'bad date';
   if (Number(m.season) !== endYear) return `season ${clean(m.season, 10)}`;
+  for (const side of ['homeTeam', 'awayTeam']) {
+    const periods = m.state?.score?.[side];
+    if (periods === undefined || periods === null) continue;
+    if (!Array.isArray(periods) || periods.length > 20) return 'bad score';
+    let sum = 0;
+    for (const p of periods) { if (!Number.isInteger(p) || p < 0 || p > 150) return 'bad score'; sum += p; }
+    if (sum > MAX_TEAM_SCORE) return 'bad score';
+  }
   return null;
 }
 

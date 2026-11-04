@@ -192,6 +192,22 @@ test('one malformed match does not stop the others', { skip }, async () => {
   assert.equal(new Date((await game(id)).tipoff_utc).toISOString(), '2026-10-07T03:00:00.000Z');
 });
 
+test('out-of-range scores are skipped and reported as bad matches; the next match is still processed (C3)', { skip }, async () => {
+  const id = await seedLalGs();
+  const bad = (score) => lalGs({ state: { description: 'Finished', score } });
+  for (const score of [{ homeTeam: [99999], awayTeam: [100] }, { homeTeam: [-5, 20], awayTeam: [100] }, { homeTeam: [20.5], awayTeam: [10] }, { homeTeam: ['x'], awayTeam: [1] }, { homeTeam: [120, 120, 120, 120], awayTeam: [1] }]) {
+    const r = await run(synthDir(day('2026-10-06', [bad(score)])), { daysAhead: 0, tipoffAuthority: false });
+    assert.equal(r.counts.bad_matches, 1, JSON.stringify(score));
+    assert.match(r.lists.bad_matches[0], /bad score/);
+    const g = await game(id);
+    assert.deepEqual([g.status, g.home_score], ['scheduled', null]);
+  }
+  const ok = await run(synthDir(day('2026-10-06', [lalGs({ id: 42, season: 2027, homeTeam: { id: 3, abbreviation: 'DEN' }, awayTeam: { id: 45, abbreviation: 'UTAH' }, state: { description: 'Finished', score: { homeTeam: [1e9], awayTeam: [1] } } }),
+    lalGs({ state: { description: 'Postponed', score: { homeTeam: [], awayTeam: [] } } })])), { daysAhead: 0, tipoffAuthority: false });
+  assert.equal(ok.counts.bad_matches, 1);
+  assert.equal((await game(id)).status, 'postponed');
+});
+
 test('a whole malformed response fails the pass and writes nothing', { skip }, async () => {
   await seedLalGs();
   const dir = synthDir({ ...day('2026-10-05', []) });

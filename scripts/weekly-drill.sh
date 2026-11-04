@@ -208,7 +208,9 @@ kill $NCPID 2>/dev/null; NCPID=""; sleep 0.3
 
 print "== W5 Happy path, no backup yet =="
 clear_backups
-( while :; do ps -axww -o args= >> $WORK/ps.txt; sleep 0.05; done ) &
+# Sample only the drill's own process tree (this shell and its descendants), so an unrelated host process
+# with a postgres:// URL in its argv can't fail the case.
+( while :; do ps -axww -o pid=,ppid=,args= | awk -v root=$$ '{ pid[NR]=$1; par[$1]=$2; line[$1]=$0 } END { for (p in par) { q=p; while (q > 1) { if (q == root) { print line[p]; break } q=par[q] } } }' | sed -E 's/^ *[0-9]+ +[0-9]+ //' >> $WORK/ps.txt; sleep 0.05; done ) &
 SAMPLER=$!
 run_weekly
 kill $SAMPLER 2>/dev/null; SAMPLER=""

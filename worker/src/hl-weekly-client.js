@@ -37,7 +37,7 @@ export function retryAfterMs(v, nowMs) {
 
 export function createWeeklyHighlightly({
   key, fetchImpl, fixtures = process.env.HIGHLIGHTLY_FIXTURES, budget = 600, reserve = 1000, rps = 4, lastRemaining = null,
-  sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = () => Date.now(), log = () => {}, timeoutMs = 20000, backoffMs = [1000, 3000],
+  sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = () => Date.now(), log = () => {}, timeoutMs = 20000, backoffMs = [1000, 3000], maxBody = MAX_BODY,
 } = {}) {
   const stats = { total: 0, byEndpoint: { matches: 0, 'box-score': 0, lineups: 0, other: 0 }, limit: null, remaining: quotaInt(lastRemaining), stop: null };
   let doFetch = fetchImpl;
@@ -69,17 +69,43 @@ export function createWeeklyHighlightly({
     else { stats.remaining = rem; if (lim !== null) stats.limit = lim; }
   }
 
+  // Reads the body with a hard size limit WHILE streaming (a response that never ends is cut at maxBody).
+  async function readBody(res) {
+    const reader = res.body?.getReader?.();
+    if (!reader) {
+      const t = await res.text();
+      if (t.length > maxBody) throw new HighlightlyMalformed('body too large');
+      return t;
+    }
+    const parts = []; let n = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      n += value.byteLength;
+      if (n > maxBody) { reader.cancel().catch(() => {}); throw new HighlightlyMalformed('body too large'); }
+      parts.push(value);
+    }
+    return new TextDecoder().decode(Buffer.concat(parts));
+  }
+
+  // One attempt. The timeout covers the headers AND the body. Returns { res, text } (text only for 2xx).
   async function attempt(pq, ep) {
-    let timer;
+    let timer, counted = false;
+    const ac = new AbortController();
     try {
-      const ac = new AbortController();
       const init = { headers: auth?.headers ?? {}, signal: ac.signal };
       const timeout = new Promise((_, rej) => { timer = setTimeout(() => { ac.abort(); rej(Object.assign(new Error('timeout'), { kind: 'timeout' })); }, timeoutMs); });
-      const res = await Promise.race([doFetch(base + pq, init), timeout]);
-      afterResponse(res, ep);
-      return { res };
+      const work = (async () => {
+        const res = await doFetch(base + pq, init);
+        afterResponse(res, ep); counted = true;
+        const text = res.status >= 200 && res.status < 300 ? await readBody(res) : null;
+        return { res, text };
+      })();
+      work.catch(() => {});
+      return await Promise.race([work, timeout]);
     } catch (e) {
-      stats.total++; stats.byEndpoint[ep]++;                                   // a failed attempt was still sent
+      if (e instanceof HighlightlyMalformed) throw e;
+      if (!counted) { stats.total++; stats.byEndpoint[ep]++; }                  // a failed attempt was still sent
       throw Object.assign(new Error('fail'), { kind: e?.kind === 'timeout' ? 'timeout' : 'network' });
     } finally { clearTimeout(timer); }
   }
@@ -92,6 +118,7 @@ export function createWeeklyHighlightly({
       await beforeRequest();
       let r;
       try { r = await attempt(pq, ep); } catch (e) {
+        if (e instanceof HighlightlyMalformed) throw e;
         if (retries5xx < backoffMs.length) { await sleep(backoffMs[retries5xx++]); continue; }
         throw new HighlightlyUnavailable(e.kind);
       }
@@ -115,9 +142,7 @@ export function createWeeklyHighlightly({
         throw new HighlightlyUnavailable(`HTTP ${st}`);
       }
       if (st < 200 || st >= 300) throw new HighlightlyMalformed(`HTTP ${st}`);
-      let text;
-      try { text = await res.text(); } catch { throw new HighlightlyUnavailable('network'); }
-      if (text.length > MAX_BODY) throw new HighlightlyMalformed('body too large');
+      const { text } = r;
       try { return JSON.parse(text); } catch { throw new HighlightlyMalformed('not JSON'); }
     }
   }

@@ -200,14 +200,14 @@ test('A9: find with -exec, -delete, -ok, -execdir, -fprint and friends is not al
 
 test('A14: recursive grep/rg only when .env* is provably skipped', () => check([
   ['grep -r foo .', 'ask', 'K-DEFAULT'], ['grep -R foo docs', 'ask', 'K-DEFAULT'], ['grep -rn foo . --exclude=\'.env*\'', 'ask', 'K-DEFAULT'],
-  ['grep -rn foo . --exclude-dir=.git', 'ask', 'K-DEFAULT'], ['grep -rn foo . --exclude=\'.env*\' --exclude-dir=.git --exclude-dir=.claude', 'ask', 'K-DEFAULT'],
+  ['grep -rn foo . --exclude-dir=.git', 'ask'], ['grep -rn foo . --exclude=\'.env*\' --exclude-dir=.git --exclude-dir=.claude', 'ask'],
   ['grep -r foo', 'ask', 'K-DEFAULT'], ['rg --hidden foo', 'ask', 'K-DEFAULT'], ['rg -uu foo', 'ask', 'K-DEFAULT'], ['rg -g "*" foo', 'ask', 'K-DEFAULT'],
   ['rg --pre cat foo', 'ask', 'K-DEFAULT'], ['rg -L foo', 'ask', 'K-DEFAULT'], ['rg --no-ignore foo .claude', 'ask', 'K-SELF-READ'], ['rg --no-ignore foo .env', 'deny', 'D-SECRET-ENVFILE'],
 ]));
 
 test('Sec 3: rg needs --no-ignore (agent-written .ignore whitelists), recursive grep is ask, tool config files are ask-listed edits', () => check([
   ['rg -n KEY', 'ask', 'K-DEFAULT'], ['rg TOKEN', 'ask', 'K-DEFAULT'], ['rg --no-ignore-dot TOKEN', 'ask', 'K-DEFAULT'], ['rg --no-ignore TOKEN', 'allow', 'L-READ'],
-  ['grep -rn token . --exclude=\'.env*\' --exclude-dir=.git', 'ask', 'K-DEFAULT'], ['grep -R x docs', 'ask', 'K-DEFAULT'],
+  ['grep -rn token . --exclude=\'.env*\' --exclude-dir=.git', 'ask'], ['grep -R x docs', 'ask', 'K-DEFAULT'],
 ]));
 
 test('git read and local (L-GIT-*): allowed forms', () => check([
@@ -426,4 +426,23 @@ test('Sec 5: nested .git: writes deny, and git commands run inside a nested repo
 test('Sec 5: git status in a session whose cwd is inside a nested repo is ask', () => {
   assert.equal(judge(env, 'Bash', { command: 'git status' }, { cwd: path.join(env.repo, 'nested') }).decision, 'ask');
   assert.equal(judge(env, 'Bash', { command: 'git status' }, { cwd: path.join(env.repo, 'docs') }).decision, 'allow');
+});
+
+test('Sec 7 / QA 1 / QA 2: cd is tracked, so relative targets resolve against the new directory', () => {
+  const I = (e) => JSON.stringify(e.installDir);
+  check([
+    [(e) => `cd ${I(e)} && chflags nouchg mode`, 'deny', 'D-SELF'], [(e) => `cd ${I(e)}; chflags nouchg mode`, 'deny', 'D-SELF'], [(e) => `pushd ${I(e)} && chflags nouchg mode`, 'deny', 'D-SELF'],
+    ['cd .claude && chflags nouchg settings.json', 'deny', 'D-SELF'], ['cd .claude; xattr -c settings.json', 'deny', 'D-SELF'],
+    [(e) => `cd ${JSON.stringify(path.dirname(e.installDir))} && chflags -R nouchg claude-approver`, 'deny', 'D-SELF'],
+    [(e) => `cd ${I(e)} && echo x > mode`, 'deny', 'D-SELF'], [(e) => `cd ${I(e)} && rm mode`, 'deny', 'D-SELF'], [(e) => `cd ${I(e)}/src && sed -i s/a/b/ approver.mjs`, 'deny', 'D-SELF'],
+    ['cd ~/.claude && echo x > settings.json', 'deny', 'D-SELF'], [(e) => `cd ${JSON.stringify(e.logDir)} && rm decisions.jsonl`, 'deny', 'D-SELF'],
+    ['cd $WHERE && chflags nouchg mode', 'deny', 'D-SELF'], ['cd docs && cd ../.claude && chflags nouchg settings.json', 'deny', 'D-SELF'], ['(cd .claude && chflags nouchg settings.json)', 'deny', 'D-SELF'],
+    ['cd docs && chflags nouchg a.md', 'ask', 'K-ATTR'], ['cd docs && xattr -c a.md', 'ask', 'K-ATTR'],
+    [(e) => `dd if=/dev/zero of=${I(e)}/mode`, 'deny', 'D-SELF'], [(e) => `dd of=${e.installDir}/mode`, 'deny', 'D-SELF'], ['dd of=.claude/settings.json', 'deny', 'D-SELF'],
+    ['echo x > nonexist/../.claude/settings.json', 'deny', 'D-SELF'], ['cp README.md missing/../.claude/settings.json', 'deny', 'D-SELF'],
+    ['git diff --output=.claude/settings.json', 'deny', 'D-SELF'], ['git log --output=.git/config', 'deny', 'D-SELF'], ['git diff --output=out.txt', 'ask', 'K-DEFAULT'],
+    [(e) => `echo ${I(e)}/mode | xargs chflags nouchg`, 'deny', 'D-SELF'], ['echo .claude/settings.json | xargs xattr -c', 'deny', 'D-SELF'], ['ls | xargs chflags nouchg', 'ask', 'K-ATTR'],
+    ['find . -name x -exec chflags nouchg {} +', 'ask', 'K-ATTR'], ['find .claude -exec chflags nouchg {} +', 'deny', 'D-SELF'], ['printf x | xargs -I{} xattr -d {} README.md', 'ask', 'K-ATTR'],
+    ['echo x > .claude/ſettings.json', 'deny', 'D-SELF'], ['cat ſecrets/api.txt', 'deny', 'D-SECRET-PATH'], ['echo x > opſ/a.txt', 'ask', 'K-DEFAULT'],
+  ]);
 });

@@ -8,7 +8,7 @@ import { realResolve, isInside, buildPathCtx, classifyPath, textSecret, expandHo
 import { allowRule, cdTarget, findInfo, sedInfo, gitParts } from './allow.mjs';
 
 const BASH_KEYS = new Set(['command', 'description', 'timeout', 'run_in_background', 'dangerouslyDisableSandbox']);
-const MAX_PARSE = 64 * 1024;
+const MAX_PARSE = 32 * 1024;
 const MAX_WORDS_ANALYSED = 400;
 
 const shape = (why) => ({ decision: 'ask', rule_id: 'K-SHAPE', undecided: false, reason: why });
@@ -24,20 +24,29 @@ function recordsFor(S) {
 
 function add(list, id) { if (!list.includes(id)) list.push(id); }
 
+// Tracks `cd`/`pushd` through the whole command so relative targets of later commands resolve against the directory the
+// shell would be in. A `cd X &&` at the top level narrows the set; any other joiner (or a cd in a subshell) widens it, which
+// over-approximates. Targets are tracked even when they are protected or outside the repo (the allow rule for cd is separate).
+// A target we cannot resolve makes every later command's directory unknown.
 function setupCwds(parsed, S) {
-  // Top-level commands run in order; `cd X &&` narrows the working-directory set, any other joiner widens it.
-  let cur = [S.cwdReal];
+  let cur = [S.cwdReal]; let unknown = false;
   for (const c of parsed.commands) {
-    c.cwds = cur;
-    if (c.nested || c.depth > 0 || c.name !== 'cd' || c.cwds.length === 0) continue;
-    const t = cdTarget(c, S);
-    if (!t) continue;
+    c.cwds = cur; c.cwdUnknown = unknown;
+    const nm = c.name ? baseLower(c.name) : null;
+    if (c.nested === 'wrapper' || (nm !== 'cd' && nm !== 'pushd' && nm !== 'popd')) continue;
+    if (nm === 'popd') { unknown = true; continue; }
+    const target = c.words.slice(1).find((w) => !(isFlag(w.text) && !w.dynamic));
+    const home = /^(~|\$HOME|\$\{HOME\})(\/|$)/;
+    let t;
+    if (!target) t = S.pc.home;
+    else if (target.text === '-' || (target.dynamic && !home.test(target.text))) { unknown = true; continue; }
+    else t = expandHome(target.text, S.pc.home);
+    if (!t || /[$`]/.test(t)) { unknown = true; continue; }
     const succ = [];
-    for (const d of cur) { const r = realResolve(t.text, d); if (r.ok && r.exists) succ.push(r.real); }
-    if (succ.length !== cur.length) continue;
-    cur = c.nextOp === '&&' ? succ : [...new Set([...succ, ...cur])];
+    for (const d of cur) { const r = realResolve(t, d); if (r.ok) succ.push(r.real); else if (r.error === 'dotdot_after_missing') succ.push(path.resolve(d, t)); }
+    if (!succ.length) { unknown = true; continue; }
+    cur = c.depth === 0 && c.nextOp === '&&' ? [...new Set(succ)] : [...new Set([...succ, ...cur])];
   }
-  for (const c of parsed.commands) if (!c.cwds) c.cwds = [S.cwdReal];
 }
 
 // ---- word-level checks: secrets, variable expansion, protected paths ----
@@ -49,7 +58,12 @@ function pathCandidate(text) {
 function resolveWord(w, c, S) {
   // returns array of classified real paths for a word, [] when it is not a usable path
   let t = w.text;
-  if (isFlag(t)) { const m = /^--?[A-Za-z][\w-]*=(.*)$/.exec(t); if (!m || !/^[\/~$]/.test(m[1])) return []; t = m[1]; }
+  if (isFlag(t)) {
+    const m = /^--?([A-Za-z][\w-]*)=(.*)$/.exec(t);
+    // --output=x, --file=x ... name a path even when relative
+    if (!m || !(/^[\/~$]/.test(m[2]) || /output|file|dir|path|out/i.test(m[1]))) return [];
+    t = m[2];
+  }
   if (!pathCandidate(t)) return [];
   const homePrefixed = /^(~|\$HOME|\$\{HOME\})(\/|$)/.test(t);
   if (w.dynamic && !homePrefixed) return [];
@@ -67,6 +81,7 @@ function resolveWord(w, c, S) {
     for (const cwd of c.cwds) {
       const r = realResolve(f, cwd);
       if (r.ok) out.push({ real: r.real, k: classifyPath(r.real, S.pc) });
+      else if (r.error === 'dotdot_after_missing') { const lex = path.resolve(cwd, f); out.push({ real: lex, k: classifyPath(lex, S.pc) }); } // a/../.claude through a missing a
     }
   }
   return out;
@@ -108,7 +123,7 @@ function checkWords(c, S, F) {
       }
       if (prodRe.test(w.text)) add(F.deny, 'D-PROD-VARS');
     }
-    if (inline) {
+    if (inline || (B.writers || []).includes(c.nm)) {
       const L = w.text.toLowerCase();
       if (S.markers.some((m) => L.includes(m))) touches.push({ w, real: null });
     }
@@ -143,6 +158,7 @@ function readOnlyForSelf(c) {
   if (nm === 'sed') { const s = sedInfo(c); return s.safe; }
   if (nm === 'find') return findInfo(c).readOnly;
   if (nm === 'git') {
+    if (c.words.some((w) => /^--output(=|$)/.test(w.text))) return false;
     const { sub } = gitParts(c.words);
     return !!sub && ['status', 'diff', 'log', 'show', 'branch', 'ls-files', 'blame', 'rev-parse', 'grep', 'describe', 'shortlog', 'ls-tree', 'cat-file'].includes(sub);
   }
@@ -253,6 +269,7 @@ function judgeCommand(c, S, F) {
   c.nm = c.name ? baseLower(c.name) : null;
   const nm = c.nm;
   const touches = checkWords(c, S, F);
+  if (touches.length) F.anyTouch = true;
 
   if (c.dynamicName) add(F.notAllow, 'dynamic_command_name');
   if (c.unknownInner) add(F.notAllow, 'unknown_inner_script');
@@ -279,10 +296,14 @@ function judgeCommand(c, S, F) {
     }
     if (B.system.includes(nm)) add(F.ask, 'K-SYS');
     if (B.attr_changers.includes(nm)) {
-      // The user-immutable flag can be cleared without sudo, so flag/attribute changers are fenced hard:
-      // any target on a protected path (or above one), or any target we cannot resolve, is deny.
-      const targets = arg(c).filter((a) => !isFlag(a.text));
-      if (touches.length || targets.some((a) => a.dynamic || a.glob)) add(F.deny, 'D-SELF');
+      // The user-immutable flag can be cleared without sudo, so flag/attribute changers are fenced hard: any target on a
+      // protected path (or above one), a target we cannot resolve, or a directory we cannot track is deny. Targets fed from
+      // stdin (xargs, pipes, find -exec) are deny when a protected path is mentioned anywhere in the command, else ask.
+      const rest = arg(c).filter((a) => !isFlag(a.text));
+      const spec = ['chflags', 'chgrp', 'chattr', 'setfacl'].includes(nm) ? 1 : 0;
+      const stdinFed = c.nested === 'wrapper' || c.pipeIndex > 0 || rest.length <= spec;
+      if (touches.length || rest.some((a) => a.dynamic || a.glob) || c.cwdUnknown) add(F.deny, 'D-SELF');
+      else if (stdinFed) F.pendingAttr = true;
       else add(F.ask, 'K-ATTR');
     }
   }
@@ -350,6 +371,10 @@ export function bashRules({ input, cwd, ctx }) {
   if (!tooLong) {
     setupCwds(parsed, S);
     for (const c of parsed.commands) judgeCommand(c, S, F);
+    if (F.pendingAttr) {
+      const low = parsed.normalized.toLowerCase();
+      if (F.anyTouch || pc.markers.some((m) => low.includes(m))) add(F.deny, 'D-SELF'); else add(F.ask, 'K-ATTR');
+    }
     if (parsed.commands.some((c) => c.dynamicName)) {
       // a command name we cannot read: scan every readable word for a deny item (story 2.5)
       looseDenyScan(parsed.commands.flatMap((c) => [...c.words, ...c.assigns.map((a) => a.value)]).filter((w) => !w.dynamic).map((w) => w.text), S, F);

@@ -51,6 +51,7 @@
     "system": ["kill", "pkill", "killall", "chmod", "chown", "sudo", "launchctl"],
     "attr_changers": ["chflags", "xattr", "chattr", "setfacl", "setfattr", "setfile", "chgrp"],
     "tree_writers": ["rm", "mv", "chflags", "xattr", "chattr", "setfacl", "setfattr", "setfile", "chmod", "chown", "chgrp", "rmdir", "unlink", "shred"],
+    "writers": ["cp", "mv", "ln", "tee", "touch", "truncate", "dd", "install", "rm", "rmdir", "unlink", "shred", "rsync"],
     "read_commands": ["cat", "head", "tail", "less", "more", "grep", "egrep", "fgrep", "rg", "ls", "wc", "file", "stat", "diff", "cmp", "strings", "od", "xxd", "hexdump", "du", "nl", "sort", "uniq", "cut", "readlink", "realpath", "basename", "dirname", "tree", "bat", "shasum", "md5", "cksum", "pwd", "which", "type", "cd", "pushd", "popd", "echo", "printf", "test", "["],
     "inline_code": ["python", "python2", "python3", "node", "perl", "ruby", "php", "deno", "bun", "osascript", "awk", "gawk", "sed"],
     "git_read_subcommands": ["status", "diff", "log", "show", "branch", "ls-files", "blame", "rev-parse", "grep", "describe", "shortlog", "ls-tree", "cat-file", "reflog", "remote", "tag", "stash"]

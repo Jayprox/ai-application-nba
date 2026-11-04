@@ -542,3 +542,15 @@ test('Sec R1 with real git: a bare-repo layout (HEAD, objects/, refs/, config, n
     assert.equal(judge(real, 'Bash', { command: 'cd sub/b && git log' }, { ctx }).decision, 'ask');
   } finally { cleanup(real); }
 });
+
+test('Sec C2-2: every allowed gh command goes through the same rev-parse git-dir gate', () => {
+  const bad = path.join(env.repo, 'sub', 'g');
+  const ctxFor = (gitDir) => mkCtx(env, { runGit: (args) => (args.includes('rev-parse') ? { status: 0, stdout: gitDir + '\n' } : { status: 0 }) });
+  const good = path.join(env.repo, '.git');
+  for (const cmd of ['gh pr create --title t --body b', 'gh pr view 7', 'gh pr checks 7', 'gh pr diff 7', 'gh pr comment 7 --body hi']) {
+    assert.equal(judge(env, 'Bash', { command: cmd }, { ctx: ctxFor(good) }).rule_id, 'L-GH', cmd);
+    assert.equal(judge(env, 'Bash', { command: cmd }, { ctx: ctxFor(bad) }).decision, 'ask', cmd);
+    assert.equal(judge(env, 'Bash', { command: cmd }, { ctx: mkCtx(env, { runGit: () => { throw new Error('x'); } }) }).decision, 'ask', cmd);
+    assert.equal(judge(env, 'Bash', { command: 'cd nested && ' + cmd }, { ctx: ctxFor(good) }).decision, 'ask', 'nested .git: ' + cmd);
+  }
+});

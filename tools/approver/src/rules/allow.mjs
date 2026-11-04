@@ -237,6 +237,8 @@ export function branchNameOk(name, S) {
 
 // ---- gh ----
 function ghAllow(c, S) {
+  // gh runs git in the cwd: the same git-dir gate as for git itself (Sec C2-2)
+  if (c.cwds.some((d) => nestedGit(d, S)) || !c.cwds.every((d) => gitDirOk(d, S))) return null;
   const w = words1(c);
   if (w.some((x) => x.dynamic || x.glob)) return null;
   if (w[0]?.text !== 'pr') return null;

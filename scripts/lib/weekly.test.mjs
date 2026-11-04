@@ -341,7 +341,7 @@ test('parseResultLine: valid line parses; wrong step, bad enum, oversized, non-J
 });
 
 test('aggregator: clean run -> OK with Highlightly requests and quota', () => {
-  const st = newRunState({ cap: 600, nba: true });
+  const st = newRunState({ hlCap: 600, nba: true });
   applyResult(st, sub['schedule:nba'], parseResultLine(nbaRes('schedule:nba'), 'schedule:nba'));
   applyResult(st, sub['schedule:hl'], parseResultLine(hlRes('schedule:hl'), 'schedule:hl'));
   applyResult(st, sub['backfill:hl'], parseResultLine(hlRes('backfill:hl', { hl: { requests: 10, limit: 7500, remaining: 7400 } }), 'backfill:hl'));
@@ -351,7 +351,7 @@ test('aggregator: clean run -> OK with Highlightly requests and quota', () => {
 });
 
 test('aggregator: NBA.com down -> OK-DEGRADED with nba=down and the full skipped list', () => {
-  const st = newRunState({ cap: 600, nba: true });
+  const st = newRunState({ hlCap: 600, nba: true });
   const all = ['nba:arena', 'nba:tv', 'nba:cup', 'nba:season_type', 'nba:new_games'];
   applyResult(st, sub['schedule:nba'], parseResultLine(nbaRes('schedule:nba', { degraded: true, nba: 'down', skipped: all, reason: 'nba.com unreachable: timeout' }), 'schedule:nba'));
   applyResult(st, sub['schedule:hl'], parseResultLine(hlRes('schedule:hl'), 'schedule:hl'));
@@ -363,16 +363,16 @@ test('aggregator: NBA.com down -> OK-DEGRADED with nba=down and the full skipped
 });
 
 test('aggregator: Highlightly cap stop -> OK-DEGRADED with stop=cap', () => {
-  const st = newRunState({ cap: 600, nba: true });
+  const st = newRunState({ hlCap: 600, nba: true });
   applyResult(st, sub['schedule:hl'], parseResultLine(hlRes('schedule:hl', { degraded: true, stop: 'cap', reason: 'request cap reached', hl: { requests: 600, limit: 7500, remaining: 6000 } }), 'schedule:hl'));
   assert.match(finalLine({ iso: 'T', season: 's', backup: 'b', st, duration: '1s' }), / OK-DEGRADED .* hl_requests=600 quota=6000\/7500 stop=cap reason="request cap reached" duration=1s$/);
 });
 
 test('aggregator: a clean NBA.com schedule gives the tip-off authority to NBA.com for the Highlightly step', () => {
-  const st = newRunState({ cap: 600, nba: true });
+  const st = newRunState({ hlCap: 600, nba: true });
   applyResult(st, sub['schedule:nba'], parseResultLine(nbaRes('schedule:nba'), 'schedule:nba'));
   assert.equal(stepExtra(sub['schedule:hl'], st, 'rid').WEEKLY_HL_TIPOFF, '0');
-  const down = newRunState({ cap: 600, nba: true });
+  const down = newRunState({ hlCap: 600, nba: true });
   applyResult(down, sub['schedule:nba'], parseResultLine(nbaRes('schedule:nba', { degraded: true, nba: 'down' }), 'schedule:nba'));
   assert.equal(stepExtra(sub['schedule:hl'], down, 'rid').WEEKLY_HL_TIPOFF, '1');
   assert.equal(stepExtra(sub['positions:nba'], down, 'rid').WEEKLY_NBA_STATE, 'down', 'later NBA.com steps make no request');
@@ -380,7 +380,7 @@ test('aggregator: a clean NBA.com schedule gives the tip-off authority to NBA.co
 });
 
 test('budget hand-off: the cap is per run (600 - 71 used = 529 for the next Highlightly step; never negative)', () => {
-  const st = newRunState({ cap: 600, nba: true });
+  const st = newRunState({ hlCap: 600, nba: true });
   assert.equal(stepExtra(sub['schedule:hl'], st, 'r').WEEKLY_HL_BUDGET, '600');
   assert.ok(!('WEEKLY_HL_LAST_REMAINING' in stepExtra(sub['schedule:hl'], st, 'r')));
   applyResult(st, sub['schedule:hl'], parseResultLine(hlRes('schedule:hl'), 'schedule:hl'));

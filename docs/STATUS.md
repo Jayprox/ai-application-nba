@@ -231,3 +231,42 @@ PA skipped: requirements are concrete and owner-specified.
   1. **Pre-write backup: yes, abort the weekly run if it fails.** If a *validated* backup from the last 24 hours already exists, use it instead of taking a new one. If a backup run is in progress (lock held), wait up to 10 minutes for it to finish instead of failing. (Context: the Mac is often asleep at 03:17, so the daily backup and the Monday 09:07 weekly job can both fire at wake.)
   2. **Keep `db:positions`**: order schedule -> positions -> backfill -> status.
   3. **Weekly plist sets the production opt-in flag** (like the backup plist). Team does not install/reload the plist; owner does that after the manual first run.
+
+## Mission M6 — Weekly job without NBA.com (opened 2026-11-03)
+
+**Mission (owner):** The first real weekly run (2026-11-03) failed at stage=schedule: stats.nba.com times out and cdn.nba.com returns Akamai "Access Denied" from home wifi and cellular. Make the weekly job (schedule, positions, backfill, status) complete with Highlightly as the primary source and NBA.com as best-effort fallback or not at all, without removing behaviour that works.
+
+**M5 note:** PR #6 is merged on `main` (`cb4a13c`); the owner's first real run is the one in `logs/weekly.log` that failed at schedule (backup reuse and cleanup worked).
+
+**Path:** Feature (full workflow). PA -> Gate 1 -> Lead plan -> Dev -> CI -> QA + Sec (Sec required: new external source, API key handling, input parsing) -> Lead review -> readiness report -> Gate 2.
+
+**Branch:** `feat/m6-highlightly-weekly`.
+
+**Constraints:** no production, Railway tunnel, or live Highlightly/NBA API calls without owner approval; fixtures and recorded responses only; do not touch `.env` or print keys.
+
+### Tasks
+- [x] T1 PA: `docs/requirements/M6-highlightly-weekly.md` (DRAFT). Weekly path hits stats.nba.com only (14 calls/run; cdn.nba.com is used only by `seed.mjs`). Highlightly covers box scores (minutes, +/- exact) and schedule time/status for existing games; no arenas, national TV, Cup stage, season type, standings; positions weak. Weekly Highlightly spend ~80-130 typical, ~385 worst, ~505 first run with sweep; plan period (day vs month) unconfirmed. 9 stories, 11 owner questions.
+- [x] Gate 1: owner approved 2026-11-03 (answers below)
+- [x] T2 Lead plan: `docs/plans/M6-highlightly-weekly.md`. Highlightly weekly code in `worker/` (new modules + `worker/scripts/weekly-hl.js`), reusing worker matching/box-score code; no schema change, no new dependency. One quota-guarded client per run (cap 600, reserve 1,000, header check on every response, clean stop; fetch-then-short-transaction writes). Single 15 s NBA.com probe; `OK-DEGRADED` exit 0 when skipped. Update-only (no game inserts). Q11 sweep behind `WEEKLY_HL_FULL_SEASON=1` + live remaining > 3,000. Concurrency: skip live/active-window games, lock and re-read before write; two residual races logged (need worker change). No owner gate needed per Lead. Items for Gate 2: O1 (PR touches `worker/` so merge redeploys the Railway worker), O2 (tip-off follows whichever source answered that week), O3 (`.env.example` not edited; flags documented), O4 (Q11 opt-in stays an owner action). For Sec: S1 (key redaction when the key exists only in `.env`).
+- [ ] T3 Dev implementation + PR (in progress, started 2026-11-03)
+- [ ] T4 QA review
+- [ ] T5 Security review
+- [ ] T6 Lead review
+- [ ] T7 Readiness report -> Gate 2
+
+### Approvals
+- 2026-11-03 — Owner (Gate 1): "Continue with the Lead's plan." Requirements `docs/requirements/M6-highlightly-weekly.md` approved. Final answers:
+
+| Q | Final answer | Source |
+|---|---|---|
+| Q1 | Update-only: Highlightly schedule stage updates existing games and reports unmatched matches; it never creates games. | PA default, accepted |
+| Q2 | Yes: Highlightly done + NBA.com skipped = exit 0, `OK-DEGRADED`, notification "OK with warnings". Only a Highlightly or database failure is `FAIL`. | PA default, accepted |
+| Q3 | Plan upgraded; response header shows `x-ratelimit-requests-limit: 7500` (remaining 7498 at check). **Period still unconfirmed: keep the monthly assumption** (per-run cap 600, reserve 1,000). Keep runtime checks of the rate-limit headers on every response and a clean stop (stage ends, run reports why, no partial-write damage) when remaining would drop below the reserve or the cap is reached. | **Owner** |
+| Q4 | Positions stay NBA.com best-effort only; stage always completes (skipped with a warning when blocked). | PA default, accepted |
+| Q5 | **Not approved** (owner did not authorise a live recording). No live Highlightly/NBA.com calls; error fixtures (401/429/5xx) are synthetic and labelled as such. Ask the owner again if a named recording session is needed. | Coordinator (constraint holds) |
+| Q6 | Window 7 days back, 60 days ahead. | PA default, accepted |
+| Q7 | Cap 600 requests per run, reserve 1,000 remaining, pacing 4 req/s. | PA default, accepted |
+| Q8 | Try NBA.com best-effort with one short probe; `WEEKLY_NBA=0` disables it. | PA default, accepted |
+| Q9 | NBA.com wins when it answered completely; otherwise Highlightly. | PA default, accepted |
+| Q10 | Standings rank stays NBA.com-only; app falls back to win % with a note. | PA default, accepted |
+| Q11 | **On hold** until the owner confirms the plan period. Once confirmed, approved to run the one-time full-season sweep if more than 3,000 requests remain. Build it behind an explicit opt-in that is off by default and re-checks remaining > 3,000 from the live header before starting. | **Owner** |

@@ -8,27 +8,34 @@ export const LOG_FILE = 'decisions.jsonl';
 export const MAX_RECORD_BYTES = 8192;
 export const MAX_INPUT_CHARS = 2048;
 const MAX_FIELD_CHARS = 500;
+export const REDACT_INPUT_CAP = 4096;
 const MAX_SHORT_CHARS = 300;
 // Fields that are identifiers or hashes and must stay byte-exact for matching.
 const EXACT_KEYS = new Set(['input_hash', 'record_id', 'session_id', 'ts', 'type']);
 const SHORT_KEYS = new Set(['reason', 'error', 'model_reason']);
 
-const NAME_RE = '(?:[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD)[A-Za-z0-9_]*|DATABASE_[A-Za-z0-9_]*)';
+const NAME_RE = '(?:[A-Za-z0-9_]{0,40}(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD)[A-Za-z0-9_]{0,40}|DATABASE_[A-Za-z0-9_]{1,40})';
+// Every pattern is linear: bounded repeats, no nested quantifiers, and redact() works on a capped slice.
+// `sk-` also occurs inside words (task-list), so it needs 16+ key characters that include a digit or capital
+const KEYPREFIX = '(?:sk[-_](?=[A-Za-z0-9_-]{15,}$|(?=[A-Za-z0-9_-]{0,60}[0-9A-Z])[A-Za-z0-9_-]{15,})|ghp_|gho_|ghs_|ghu_|github_pat_|xox[a-z]-|AKIA)';
 const PATTERNS = [
   [/(Authorization\s*[:=]\s*)(?:Bearer\s+|Basic\s+|Token\s+)?[^\s"']+/gi, '$1[REDACTED]'],
   [/\bBearer\s+[A-Za-z0-9._~+\/=-]+/gi, 'Bearer [REDACTED]'],
-  [/([a-z][a-z0-9+.-]*:\/\/)[^\/\s:@]+:[^@\s\/]*@/gi, '$1[REDACTED]@'],
+  [/([a-z][a-z0-9+.-]{0,30}:\/\/)[^\/\s:@]{1,100}:[^@\s\/]{0,100}@/gi, '$1[REDACTED]@'],
   [new RegExp(`\\b(${NAME_RE})(\\s*=\\s*)("[^"]*"|'[^']*'|[^\\s;&|]+)`, 'gi'), '$1$2[REDACTED]'],
   [new RegExp(`("${NAME_RE}"\\s*:\\s*)"[^"]*"`, 'gi'), '$1"[REDACTED]"'],
   [/(--?(?:password|passwd|token|secret|api[-_]?key)[= ]+)(?:"[^"]*"|'[^']*'|\S+)/gi, '$1[REDACTED]'],
-  [/(?<![A-Za-z0-9])(?:sk-|ghp_|gho_|ghs_|ghu_|github_pat_|xox[a-z]-|AKIA)[A-Za-z0-9_-]+/g, '[REDACTED]'],
+  // key prefixes anywhere (also glued to preceding text), plus following words that still look like key material
+  [new RegExp(`${KEYPREFIX}[A-Za-z0-9_-]+(?:\\s+(?=[A-Za-z0-9_-]{0,40}[0-9A-Z])[A-Za-z0-9_-]{8,})*`, 'g'), '[REDACTED]'],
   [/(?<![A-Fa-f0-9])[A-Fa-f0-9]{32,}(?![A-Fa-f0-9])/g, '[REDACTED]'],
   [/(?<![A-Za-z0-9+\/_-])[A-Za-z0-9+\/]{40,}={0,2}(?![A-Za-z0-9+\/_-])/g, (m) => (/[a-z]/.test(m) && /[A-Z]/.test(m) && /[0-9]/.test(m) ? '[REDACTED]' : m)],
+  [/(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{40,}(?![A-Za-z0-9_-])/g, (m) => (/[a-z]/.test(m) && /[A-Z]/.test(m) && /[0-9]/.test(m) ? '[REDACTED]' : m)],
 ];
 
 export function redact(s) {
   if (typeof s !== 'string') return s;
-  let out = s;
+  // bounded work: anything past the cap is dropped before the patterns run (it would be truncated anyway)
+  let out = s.length > REDACT_INPUT_CAP ? s.slice(0, REDACT_INPUT_CAP) + '...[cut]' : s;
   for (const [re, rep] of PATTERNS) out = out.replace(re, rep);
   return out;
 }

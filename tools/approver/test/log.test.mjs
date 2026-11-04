@@ -122,3 +122,41 @@ test('rotate keeps recent records and drops old ones and old ledgers', () => {
   assert.equal(fs.existsSync(path.join(env.logDir, 'spend-2026-11-03.jsonl')), true);
   assert.equal(fs.statSync(path.join(env.logDir, 'decisions.jsonl')).mode & 0o777, 0o600);
 });
+
+test('Sec 12: keys glued to preceding text, the sk_ spelling and keys split across words are redacted', () => {
+  const k = 'sk-ant-api03-FAKEFAKEFAKE1234567890';
+  const cases = [`X${k}`, `token9${k} end`, 'sk_live_FAKEFAKEFAKE1234567', 'abcghp_FAKEFAKEFAKEFAKE12345', 'prefixAKIAFAKEFAKEFAKE1234',
+    'sk-ant-api03-FAKEFAKE12 345FAKEFAKEFAKE Zz9FAKEFAKEFAKE next', 'KEYLONG=abcdefghij1234567890ABCDEFGHIJ-_abcdef12345 x', 'a'.repeat(10) + 'Aa1'.repeat(20)];
+  for (const c of cases) {
+    const out = redact(c);
+    assert.ok(!/FAKE|api03|Aa1Aa1Aa1/.test(out), `${c} -> ${out}`);
+  }
+  assert.equal(redact('git commit -m "fix the task-list loader" feat/some-long-branch-name-without-digits-or-capitals'), 'git commit -m "fix the task-list loader" feat/some-long-branch-name-without-digits-or-capitals');
+});
+
+test('perf: redaction and a whole hook call on 1 MB inputs finish in well under 1 s (no quadratic patterns)', async () => {
+  const shapes = {
+    'url-like': 'http://' + 'a'.repeat(1024 * 1024),
+    'one token': 'a'.repeat(1024 * 1024),
+    'many schemes': 'ab://x:'.repeat(150000),
+    'key words': 'KEY'.repeat(350000),
+    'hex': 'ab'.repeat(500000),
+    'words': 'word '.repeat(200000),
+    'sk spaces': 'sk-aaaaaaaa1 '.repeat(80000),
+  };
+  for (const [name, text] of Object.entries(shapes)) {
+    const t0 = performance.now();
+    redact(text);
+    const ms = performance.now() - t0;
+    assert.ok(ms < 1000, `${name} redact ${ms.toFixed(0)} ms`);
+  }
+  const e = mk({ mode: 'shadow' });
+  for (const [name, command] of [['single token', 'ls ' + 'a'.repeat(1024 * 1024)], ['unbalanced quote', 'echo "' + 'a'.repeat(1024 * 1024)], ['semicolons', 'ls;'.repeat(300000)], ['url', 'echo http://' + 'a'.repeat(1024 * 1024)]]) {
+    const t0 = performance.now();
+    const r = await runHook(e, payload(e, { tool_input: { command } }));
+    const ms = performance.now() - t0;
+    assert.equal(r.stdout, '', name);
+    assert.ok(ms < 1000, `${name} hook ${ms.toFixed(0)} ms`);
+    assert.ok(r.record.decision !== 'allow', name);
+  }
+});

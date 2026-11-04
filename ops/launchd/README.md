@@ -1,6 +1,6 @@
-# Weekly NBA.com run on JD's Mac (launchd)
+# Weekly run on JD's Mac (launchd)
 
-NBA.com blocks cloud IPs, so the weekly reconcile runs from the Mac. Since M5
+NBA.com blocks cloud IPs, so the weekly job runs from the Mac. Since M6 (`docs/plans/M6-highlightly-weekly.md`) it is Highlightly first, NBA.com best-effort. Since M5
 (`docs/plans/M5-weekly-tunnel.md`) `scripts/weekly.sh` hands over to
 `scripts/weekly.mjs`, which reaches the database through the Railway CLI tunnel
 (local port 55434, set `WEEKLY_TUNNEL_PORT` to change) instead of
@@ -10,9 +10,19 @@ NBA.com blocks cloud IPs, so the weekly reconcile runs from the Mac. Since M5
 2. Backup first (the run aborts if it fails): a validated backup under 24 h old is
    reused; if a backup is running (its lock is held) the weekly job waits up to
    10 minutes; otherwise it runs `scripts/backup-db.mjs`.
-3. Open the tunnel, then `db:schedule` -> `db:positions` -> `db:backfill -- --season 2026-27`
-   -> `db:status`, stopping at the first failure, then close the tunnel (on every exit path,
-   including failure and a signal).
+3. Open the tunnel, then `schedule` (one 15 s NBA.com probe, then the Highlightly schedule pass) -> `positions`
+   (NBA.com) -> `backfill` (Highlightly box scores, then the NBA.com reconcile for `--season 2026-27`) -> `db:status`,
+   stopping at the first failure, then close the tunnel (on every exit path, including failure and a signal).
+4. The last log line is `OK`, `OK-DEGRADED` (exit 0; NBA.com was skipped, or the Highlightly 600-request cap or
+   1,000-request reserve was reached: the line says `nba=down`, `skipped=...`, `stop=...`) or `FAIL stage=... reason="..."`
+   (a Highlightly or database failure). The notification says "OK", "OK with warnings" or "FAILED".
+
+Needs `npm --prefix worker ci` once (the Highlightly step runs from `worker/`). Optional variables (put them in the
+plist only if you want them): `WEEKLY_NBA=0` (do not try NBA.com), `WEEKLY_HL_CAP`, `WEEKLY_HL_RESERVE`, `WEEKLY_HL_RPS`,
+`WEEKLY_HL_DAYS_BACK`, `WEEKLY_HL_DAYS_AHEAD`, `WEEKLY_DRY_RUN=1`. **Do not set `WEEKLY_HL_FULL_SEASON=1` in the plist.**
+It is a one-time sweep (about 505 requests on the first run) that only runs when more than 3,000 requests remain; first
+check the Highlightly dashboard to see whether the 7,500 requests are per day or per month. Typical weekly use is about
+80 requests (385 worst case). The plist is unchanged by M6.
 
 Log: `logs/weekly.log` (+ a macOS notification). launchd's own output goes to
 `~/Library/Logs/chalk-that-nba/weekly.launchd.{out,err}`.
@@ -67,6 +77,10 @@ skipped (run `npm run db:weekly` by hand).
   cleaned up automatically; anything else is left alone. Do not use 55432-55434 for manual tunnels.
   If `BACKUP_TUNNEL_PORT` or `WEEKLY_TUNNEL_PORT` is set in either plist, the two must differ and neither may be 55432 or 55433
   (the weekly job only checks this against its own environment).
+- **NBA.com blocked** is not a failure any more: the run ends `OK-DEGRADED ... nba=down` and arenas, national TV, Cup stage,
+  new games, standings rank and positions stay as they were until NBA.com answers again. Highlightly rejects the key:
+  `FAIL stage=schedule reason="highlightly auth rejected (401)"`. Highlightly down: `... reason="highlightly unreachable (...)"`.
+  `worker/node_modules` missing: `FAIL stage=preflight reason="worker dependencies missing (run: npm --prefix worker ci)"`.
 - **Another backup is running** for more than 10 minutes: `FAIL stage=backup reason="backup still running after 600s"`.
 - **Known noise at wake.** If the Mac wakes with both jobs due and the weekly job's backup takes the lock first, the daily
   backup logs `FAIL stage=preflight reason="another backup is running"` and notifies, even though a backup was taken.

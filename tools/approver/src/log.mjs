@@ -48,6 +48,13 @@ export function summarizeInput(tool, input) {
   }
 }
 
+// What the model is shown: the command, or just the file path. Never content.
+export function modelTarget(tool, input) {
+  if (tool === 'Bash') return typeof input?.command === 'string' ? input.command : '[not a string]';
+  const p = input?.file_path ?? input?.notebook_path;
+  return typeof p === 'string' ? p : '[not a string]';
+}
+
 export function prepareRecord(record) {
   const r = { ...record };
   let truncated = !!r.truncated;

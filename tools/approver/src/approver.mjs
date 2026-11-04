@@ -10,8 +10,9 @@ import { readStdin, outputForMode, writeStdout } from './hook-io.mjs';
 import { loadInstall, readMode, loadPolicy, APPROVER_VERSION } from './config.mjs';
 import { inScope, readBranch } from './paths.mjs';
 import { prefilter as defaultPrefilter } from './prefilter.mjs';
-import { appendRecord, summarizeInput } from './log.mjs';
+import { appendRecord, summarizeInput, modelTarget } from './log.mjs';
 import { runGit as defaultRunGit } from './git-run.mjs';
+import { spawnWorker as defaultSpawnWorker } from './model/spawn.mjs';
 import { sha256, canonicalJson, isPlainObject } from './util.mjs';
 
 export const TOOLS = ['Bash', 'Edit', 'Write', 'NotebookEdit'];
@@ -53,7 +54,7 @@ function baseRecord(mode, payload, extra) {
 
 export async function run({ stdin, installDir, deps = {} }) {
   const t0 = performance.now();
-  const d = { prefilter: defaultPrefilter, appendRecord, readBranch, runGit: defaultRunGit, home: os.homedir(), ...deps };
+  const d = { prefilter: defaultPrefilter, appendRecord, readBranch, runGit: defaultRunGit, spawnWorker: defaultSpawnWorker, home: os.homedir(), ...deps };
   const inst = loadInstall(installDir);
   const logIt = (rec) => {
     if (!inst.ok) return;
@@ -115,6 +116,15 @@ export async function run({ stdin, installDir, deps = {} }) {
     input_redacted: summarizeInput(tool, input),
   });
   logIt(record);
+  // Model opinion for undecided requests only, in the background, log only. The answer is already final.
+  if (result.undecided && install.model?.enabled === true && typeof install.node_path === 'string') {
+    try {
+      await d.spawnWorker({
+        install, installDir, home: d.home,
+        request: { record_id: record.record_id, session_id: record.session_id, tool, command_or_path: modelTarget(tool, input), cwd: payload.cwd, branch },
+      });
+    } catch { /* the model is optional */ }
+  }
   return { stdout: outputForMode(mode, result), record };
 }
 

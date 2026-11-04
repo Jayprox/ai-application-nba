@@ -32,10 +32,16 @@ export function makeEnv({ branch = 'feat/test', mode = 'shadow', visibility = 'p
   return env;
 }
 
+export const MODEL_DEFAULTS = {
+  enabled: true, name: 'test-model', max_tokens: 150, per_call_cap_usd: 0.02, daily_cap_usd: 1.0, timeout_ms: 8000,
+  prices: { input_per_mtok: 1, output_per_mtok: 5 }, breaker: { failures: 3, cooldown_ms: 600000 },
+};
+
 export function writeInstall(env, { visibility = 'private', extra = {} } = {}) {
   const rec = {
     approver_version: APPROVER_VERSION, repo_root: env.repo, repo_visibility: visibility, node_path: process.execPath,
-    install_dir: env.installDir, log_dir: env.logDir, files: hashInstalled(env.installDir), ...extra,
+    install_dir: env.installDir, log_dir: env.logDir, files: hashInstalled(env.installDir),
+    keychain: { service: 'claude-approver-anthropic', account: 'claude-approver' }, model: { ...MODEL_DEFAULTS, enabled: false }, ...extra,
   };
   fs.writeFileSync(path.join(env.installDir, 'install.json'), JSON.stringify(rec, null, 2));
 }

@@ -2,8 +2,12 @@
 // `npm run db:weekly` (via scripts/weekly.sh), or Mondays via ops/launchd/com.chalkthat.nba.weekly.plist.
 //
 //   guard -> lock -> preflight -> backup (reuse a validated one < 24 h old, wait for a running one,
-//   else take one; abort if it fails) -> tunnel -> schedule -> positions -> backfill -> status ->
+//   else take one; abort if it fails) -> tunnel -> schedule (NBA.com probe, then Highlightly) -> positions
+//   (NBA.com) -> backfill (Highlightly box scores, then the NBA.com reconcile) -> status ->
 //   close the tunnel on every exit path (scripts/lib/tunnel.mjs, the M4 sequence) and verify the port.
+// M6 (docs/plans/M6-highlightly-weekly.md): Highlightly is the primary source, NBA.com is best-effort.
+//   The run ends OK, OK-DEGRADED (exit 0: NBA.com skipped or the Highlightly cap/reserve reached) or FAIL
+//   (a Highlightly or database failure). Each sub-step reports through one "@@WEEKLY {json}" stdout line.
 //
 // The tunnel credentials stay in memory. The step children get them as DATABASE_PUBLIC_URL in their
 // own env only (never argv, a file, tunnel.json or a log); all child output is redacted line by line.
@@ -14,8 +18,8 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createTunnel, TunnelError } from './lib/tunnel.mjs';
 import {
-  loadWeeklyConfig, weeklyGuard, fakeIsolationError, isFakeBin, findFreshBackup, backupLockState, buildTunnelUrl,
-  stepEnv, stepArgv, lineRedactor, STEPS, BACKUP_BUSY_LINE,
+  loadWeeklyConfig, weeklyGuard, fakeIsolationError, fixtureGuardError, isFakeBin, findFreshBackup, backupLockState, buildTunnelUrl,
+  stepEnv, stepArgv, lineRedactor, planSteps, parseResultLine, newRunState, applyResult, stepExtra, finalLine, NOTIFY_TEXT, BACKUP_BUSY_LINE,
 } from './lib/weekly.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -38,6 +42,7 @@ let tunnel = null;
 let lockHeld = false;
 let active = null;       // { child, group, exited } for the running backup or step child
 let secrets = [];
+let runId = '';
 let finishing = false;
 let season = '2026-27';
 
@@ -49,9 +54,9 @@ function logLine(line) {
 }
 const note = (msg) => logLine(`${iso()} NOTE ${msg}`);
 
-function notify(ok) {
+function notify(kind) {
   if (!notifyOn) return;
-  const msg = ok ? 'Weekly NBA.com run OK' : 'Weekly NBA.com run FAILED — see logs/weekly.log';
+  const msg = NOTIFY_TEXT[kind];
   try {
     const c = spawn('/usr/bin/osascript', ['-e', `display notification "${msg}" with title "Chalk That Hardwood"`], { stdio: 'ignore' });
     c.on('error', () => {}); c.unref();
@@ -91,11 +96,11 @@ process.on('exit', () => {
   releaseLock();
 });
 
-async function finish(line, code, ok) {
+async function finish(line, code, kind) {
   logLine(line);
   logLine(`=== exit ${code} ===`);
   (code === 0 ? console.log : console.error)(line);
-  notify(ok);
+  notify(kind);
   process.exit(code);
 }
 
@@ -104,7 +109,7 @@ async function finishFail(f) {
   finishing = true;
   await cleanup();
   if (tunnel?.portStillHeld && f.stage !== 'cleanup') f.reason += `; tunnel port ${cfg.port} still in use after cleanup`;
-  await finish(`${iso()} FAIL stage=${f.stage} reason="${oneLine(f.reason)}" duration=${duration()}`, f.exitCode ?? 1, false);
+  await finish(`${iso()} FAIL stage=${f.stage} reason="${oneLine(f.reason)}" duration=${duration()}`, f.exitCode ?? 1, 'fail');
 }
 for (const [sig, code] of [['SIGINT', 130], ['SIGTERM', 143], ['SIGHUP', 129]]) {
   process.on(sig, () => { finishFail(new Fail(stage, `interrupted by ${sig}`, code)); });
@@ -123,14 +128,14 @@ function runCapture(cmd, args, { env, timeoutMs }) {
 }
 
 // Run node `argv` in its own process group; output is redacted line by line into the weekly log.
-// Resolves { code, signal, timedOut, lastErr }.
+// Resolves { code, signal, timedOut, lastErr, lastOut } (lastOut = the step's last "@@WEEKLY" stdout line, redacted).
 function runNode(kind, argv, env, { timeoutS = 0 } = {}) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, argv, { cwd: REPO_ROOT, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     const a = { child, kind, exited: false };
     active = a;
-    let lastErr = ''; let timedOut = false; let killTimer = null;
-    const out = lineRedactor(secrets, (l) => logLine(l));
+    let lastErr = ''; let lastOut = ''; let timedOut = false; let killTimer = null;
+    const out = lineRedactor(secrets, (l) => { if (l.startsWith('@@WEEKLY ')) lastOut = l; logLine(l); });
     const err = lineRedactor(secrets, (l) => { if (l.trim()) lastErr = l; logLine(l); });
     child.stdout.on('data', (d) => out.push(d));
     child.stderr.on('data', (d) => err.push(d));
@@ -146,7 +151,7 @@ function runNode(kind, argv, env, { timeoutS = 0 } = {}) {
       sigGroup(a, 'SIGKILL'); // nothing from this step's group outlives it
       out.flush(); err.flush();
       if (active === a) active = null;
-      resolve({ code, signal, timedOut, lastErr });
+      resolve({ code, signal, timedOut, lastErr, lastOut });
     };
     child.on('error', () => done(-1, null));
     child.on('exit', (code, signal) => { setTimeout(() => done(code, signal), 300); }); // let the pipes drain
@@ -185,6 +190,8 @@ function resolveRailway() {
 }
 
 async function preflight() {
+  // The Highlightly steps run worker/scripts/weekly-hl.js, which imports pg from worker/node_modules.
+  if (!cfg.stepFixture && !fs.existsSync(path.join(REPO_ROOT, 'worker/node_modules/pg'))) throw new Fail('preflight', 'worker dependencies missing (run: npm --prefix worker ci)');
   await takeLock();
   const bin = resolveRailway();
   tunnel.setRailwayBin(bin);
@@ -243,6 +250,8 @@ async function main() {
   const notIsolated = fakeIsolationError(cfg, process.env);
   if (notIsolated) throw new Fail('preflight', notIsolated);
   if (cfg.stepFixture && !isFakeBin(process.env, 'WEEKLY_RAILWAY_BIN')) throw new Fail('preflight', 'step fixture requires the fake railway');
+  const fixtureBlocked = fixtureGuardError(cfg, process.env);
+  if (fixtureBlocked) throw new Fail('preflight', fixtureBlocked);
 
   tunnel = createTunnel({
     railwayBin: cfg.railwayBin, service: cfg.service, railwayEnv: cfg.railwayEnv, port: cfg.port,
@@ -260,18 +269,25 @@ async function main() {
     if (e instanceof TunnelError) throw new Fail('tunnel', e.reason);
     throw e;
   }
-  secrets = [creds.password];
+  secrets = [creds.password, ...(process.env.HIGHLIGHTLY_API_KEY ? [process.env.HIGHLIGHTLY_API_KEY] : [])];
   let url = buildTunnelUrl(creds, cfg.port);
   creds = null;
+  runId = `${iso().replace(/[-:]/g, '')}-${process.pid}`;
+  const st = newRunState(cfg);
   try {
-    for (const step of STEPS) {
+    for (const step of planSteps(cfg)) {
       await checkpoint();
-      stage = step.name;
+      stage = step.stage;
+      // Dry run: Highlightly steps run and roll back; NBA.com steps (they write) are skipped.
+      if (cfg.dryRun && step.kind === 'nba') { note(`dry run: ${step.name} skipped`); continue; }
       const argv = stepArgv(step, season, { fixture: cfg.stepFixture });
-      const r = await runNode(step.name, argv, stepEnv(process.env, url), { timeoutS: cfg.stepTimeoutS });
+      const r = await runNode(step.name, argv, stepEnv(process.env, url, stepExtra(step, st, runId)), { timeoutS: cfg.stepTimeoutS });
       await checkpoint();
-      if (r.timedOut) throw new Fail(step.name, `timed out after ${cfg.stepTimeoutS}s`);
-      if (r.code !== 0) throw new Fail(step.name, `exit ${r.code ?? r.signal}`);
+      const res = parseResultLine(r.lastOut, step.name);
+      if (r.timedOut) throw new Fail(step.stage, `timed out after ${cfg.stepTimeoutS}s`);
+      if (r.code !== 0) throw new Fail(step.stage, res?.reason ?? `exit ${r.code ?? r.signal}`);
+      if (!res && (step.kind === 'hl' || step.kind === 'nba')) note(`${step.name}: no result line`);
+      applyResult(st, step, res);
     }
   } finally {
     url = null; secrets = [];
@@ -282,7 +298,7 @@ async function main() {
   if (tunnel.portStillHeld) throw new Fail('cleanup', `tunnel port ${cfg.port} still in use after run`, 2);
   finishing = true;
   releaseLock();
-  await finish(`${iso()} OK season=${season} backup=${backup.reused ? 'reused' : 'new'}:${backup.name} duration=${duration()}`, 0, true);
+  await finish(finalLine({ iso: iso(), season, backup: `${backup.reused ? 'reused' : 'new'}:${backup.name}`, st, duration: duration(), dryRun: cfg.dryRun }), 0, st.degraded ? 'degraded' : 'ok');
 }
 
 main().catch(async (e) => {

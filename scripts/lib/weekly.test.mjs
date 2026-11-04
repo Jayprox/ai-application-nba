@@ -8,6 +8,8 @@ import { loadConfig, dumpName, prodGuard } from './backup.mjs';
 import {
   loadWeeklyConfig, weeklyGuard, WEEKLY_GUARD_MSG, BACKUP_BIN_SET_MSG, FAKE_ISOLATION_MSG, LONG_LINE_MARKER, fakeIsolationError, findFreshBackup, backupLockState,
   buildTunnelUrl, stepEnv, stepArgv, lineRedactor, STEPS, BACKUP_BUSY_LINE,
+  SUBSTEPS, planSteps, INTERNAL_ENV, parseResultLine, newRunState, applyResult, budgetLeft, stepExtra, finalLine, NOTIFY_TEXT,
+  fixtureGuardError, FIXTURES_ON_PROD_MSG, FAKE_NEEDS_FIXTURES_MSG,
 } from './weekly.mjs';
 import { parseTunnelOutput } from './backup.mjs';
 
@@ -289,4 +291,156 @@ test('stepArgv: season steps get --season; fixture mode swaps all but status', (
 
 test('loadConfig port is what weekly compares against (BACKUP_TUNNEL_PORT)', () => {
   assert.equal(loadConfig({ BACKUP_TUNNEL_PORT: '58000' }).port, 58000);
+});
+
+// ---- M6: sub-steps, result lines, run state, final line ----
+const sub = Object.fromEntries(SUBSTEPS.map((x) => [x.name, x]));
+const hlRes = (step, o = {}) => `@@WEEKLY ${JSON.stringify({ v: 1, step, degraded: false, nba: 'n/a', skipped: [], stop: null, hl: { requests: 71, limit: 7500, remaining: 7410 }, reason: null, ...o })}`;
+const nbaRes = (step, o = {}) => `@@WEEKLY ${JSON.stringify({ v: 1, step, degraded: false, nba: 'ok', skipped: [], stop: null, hl: { requests: 0, limit: null, remaining: null }, reason: null, ...o })}`;
+
+test('SUBSTEPS: NBA.com probe first, then Highlightly; stage names stay schedule / positions / backfill / status', () => {
+  assert.deepEqual(SUBSTEPS.map((x) => x.name), ['schedule:nba', 'schedule:hl', 'positions:nba', 'backfill:hl', 'backfill:nba', 'status']);
+  assert.deepEqual(SUBSTEPS.map((x) => x.stage), ['schedule', 'schedule', 'positions', 'backfill', 'backfill', 'status']);
+  assert.deepEqual(stepArgv(sub['schedule:nba'], '2026-27'), ['scripts/load-schedule.mjs', '--season', '2026-27', '--nba-best-effort']);
+  assert.deepEqual(stepArgv(sub['positions:nba'], '2026-27'), ['scripts/load-positions.mjs', '--nba-best-effort']);
+  assert.deepEqual(stepArgv(sub['backfill:nba'], '2026-27'), ['scripts/backfill.mjs', '--season', '2026-27', '--nba-best-effort']);
+  assert.deepEqual(stepArgv(sub['schedule:hl'], '2026-27'), ['worker/scripts/weekly-hl.js', 'schedule', '--season', '2026-27']);
+  assert.deepEqual(stepArgv(sub['backfill:hl'], '2026-27'), ['worker/scripts/weekly-hl.js', 'backfill', '--season', '2026-27']);
+  assert.deepEqual(stepArgv(sub.status, '2026-27'), ['scripts/db-status.mjs']);
+  assert.equal(planSteps({ stepFixture: false }), SUBSTEPS);
+  assert.deepEqual(planSteps({ stepFixture: true }).map((x) => x.stage), ['schedule', 'positions', 'backfill', 'status'], 'the M5 drill keeps its three fake stages');
+});
+
+test('SUBSTEPS scripts exist', () => { for (const x of SUBSTEPS) assert.ok(fs.existsSync(path.join(ROOT, x.script)), x.script); });
+
+test('stepEnv drops internal variables the user set, keeps removing the prod flags, then adds the runner\'s own', () => {
+  const base = { PATH: '/bin', WEEKLY_CONFIRM_PROD: '1', BACKUP_CONFIRM_PROD: '1', WEEKLY_RUN_ID: 'evil', WEEKLY_NBA_STATE: 'ok', WEEKLY_HL_BUDGET: '99999', WEEKLY_HL_LAST_REMAINING: '99999', WEEKLY_HL_TIPOFF: '1', WEEKLY_NBA: '0' };
+  const e = stepEnv(base, 'postgres://u:p@127.0.0.1:1/d', { WEEKLY_RUN_ID: 'r1' });
+  for (const k of INTERNAL_ENV) assert.ok(!(k in e) || k === 'WEEKLY_RUN_ID', k);
+  assert.equal(e.WEEKLY_RUN_ID, 'r1');
+  assert.equal(e.WEEKLY_NBA, '0', 'documented user flags pass through');
+  assert.ok(!('WEEKLY_CONFIRM_PROD' in e) && !('BACKUP_CONFIRM_PROD' in e));
+});
+
+test('parseResultLine: valid line parses; wrong step, bad enum, oversized, non-JSON and unknown skipped items are handled', () => {
+  const ok = parseResultLine(hlRes('schedule:hl'), 'schedule:hl');
+  assert.deepEqual(ok.hl, { requests: 71, limit: 7500, remaining: 7410 });
+  assert.equal(parseResultLine(hlRes('schedule:hl'), 'backfill:hl'), null);
+  assert.equal(parseResultLine(hlRes('schedule:hl', { stop: 'banana' }), 'schedule:hl'), null);
+  assert.equal(parseResultLine(hlRes('schedule:hl', { nba: 'maybe' }), 'schedule:hl'), null);
+  assert.equal(parseResultLine(hlRes('schedule:hl', { hl: { requests: -1, limit: null, remaining: null } }), 'schedule:hl'), null);
+  assert.equal(parseResultLine(hlRes('schedule:hl', { hl: { requests: 1, limit: 1e12, remaining: null } }), 'schedule:hl'), null);
+  assert.equal(parseResultLine(hlRes('schedule:hl', { reason: 'x'.repeat(5000) }), 'schedule:hl'), null, 'oversized');
+  assert.equal(parseResultLine('@@WEEKLY {not json', 'schedule:hl'), null);
+  assert.equal(parseResultLine('hello', 'schedule:hl'), null);
+  assert.equal(parseResultLine(undefined, 'schedule:hl'), null);
+  const mixed = parseResultLine(nbaRes('schedule:nba', { degraded: true, nba: 'down', skipped: ['nba:arena', 'nba:evil', 42, '../x'] }), 'schedule:nba');
+  assert.deepEqual(mixed.skipped, ['nba:arena']);
+  const r = parseResultLine(nbaRes('positions:nba', { reason: 'line\nbreak "quoted"' }), 'positions:nba');
+  assert.equal(r.reason, "line break 'quoted'");
+});
+
+test('aggregator: clean run -> OK with Highlightly requests and quota', () => {
+  const st = newRunState({ cap: 600, nba: true });
+  applyResult(st, sub['schedule:nba'], parseResultLine(nbaRes('schedule:nba'), 'schedule:nba'));
+  applyResult(st, sub['schedule:hl'], parseResultLine(hlRes('schedule:hl'), 'schedule:hl'));
+  applyResult(st, sub['backfill:hl'], parseResultLine(hlRes('backfill:hl', { hl: { requests: 10, limit: 7500, remaining: 7400 } }), 'backfill:hl'));
+  assert.equal(st.degraded, false);
+  assert.equal(finalLine({ iso: '2026-11-09T13:00:00Z', season: '2026-27', backup: 'reused:x.dump', st, duration: '75s' }),
+    '2026-11-09T13:00:00Z OK season=2026-27 backup=reused:x.dump hl_requests=81 quota=7400/7500 duration=75s');
+});
+
+test('aggregator: NBA.com down -> OK-DEGRADED with nba=down and the full skipped list', () => {
+  const st = newRunState({ cap: 600, nba: true });
+  const all = ['nba:arena', 'nba:tv', 'nba:cup', 'nba:season_type', 'nba:new_games'];
+  applyResult(st, sub['schedule:nba'], parseResultLine(nbaRes('schedule:nba', { degraded: true, nba: 'down', skipped: all, reason: 'nba.com unreachable: timeout' }), 'schedule:nba'));
+  applyResult(st, sub['schedule:hl'], parseResultLine(hlRes('schedule:hl'), 'schedule:hl'));
+  applyResult(st, sub['positions:nba'], parseResultLine(nbaRes('positions:nba', { degraded: true, nba: 'down', skipped: ['nba:positions'] }), 'positions:nba'));
+  applyResult(st, sub['backfill:nba'], parseResultLine(nbaRes('backfill:nba', { degraded: true, nba: 'down', skipped: ['nba:reconcile', 'nba:standings'] }), 'backfill:nba'));
+  const line = finalLine({ iso: 'T', season: '2026-27', backup: 'new:b', st, duration: '3s' });
+  assert.match(line, /^T OK-DEGRADED season=2026-27 backup=new:b hl_requests=71 quota=7410\/7500 nba=down skipped=nba:arena,nba:tv,nba:cup,nba:season_type,nba:new_games,nba:positions,nba:reconcile,nba:standings reason="nba.com unreachable: timeout" duration=3s$/);
+  assert.equal(st.nbaLoaded, false, 'Highlightly then owns tip-off times (Q9)');
+});
+
+test('aggregator: Highlightly cap stop -> OK-DEGRADED with stop=cap', () => {
+  const st = newRunState({ cap: 600, nba: true });
+  applyResult(st, sub['schedule:hl'], parseResultLine(hlRes('schedule:hl', { degraded: true, stop: 'cap', reason: 'request cap reached', hl: { requests: 600, limit: 7500, remaining: 6000 } }), 'schedule:hl'));
+  assert.match(finalLine({ iso: 'T', season: 's', backup: 'b', st, duration: '1s' }), / OK-DEGRADED .* hl_requests=600 quota=6000\/7500 stop=cap reason="request cap reached" duration=1s$/);
+});
+
+test('aggregator: a clean NBA.com schedule gives the tip-off authority to NBA.com for the Highlightly step', () => {
+  const st = newRunState({ cap: 600, nba: true });
+  applyResult(st, sub['schedule:nba'], parseResultLine(nbaRes('schedule:nba'), 'schedule:nba'));
+  assert.equal(stepExtra(sub['schedule:hl'], st, 'rid').WEEKLY_HL_TIPOFF, '0');
+  const down = newRunState({ cap: 600, nba: true });
+  applyResult(down, sub['schedule:nba'], parseResultLine(nbaRes('schedule:nba', { degraded: true, nba: 'down' }), 'schedule:nba'));
+  assert.equal(stepExtra(sub['schedule:hl'], down, 'rid').WEEKLY_HL_TIPOFF, '1');
+  assert.equal(stepExtra(sub['positions:nba'], down, 'rid').WEEKLY_NBA_STATE, 'down', 'later NBA.com steps make no request');
+  assert.equal('WEEKLY_NBA_STATE' in stepExtra(sub['positions:nba'], st, 'rid'), false);
+});
+
+test('budget hand-off: the cap is per run (600 - 71 used = 529 for the next Highlightly step; never negative)', () => {
+  const st = newRunState({ cap: 600, nba: true });
+  assert.equal(stepExtra(sub['schedule:hl'], st, 'r').WEEKLY_HL_BUDGET, '600');
+  assert.ok(!('WEEKLY_HL_LAST_REMAINING' in stepExtra(sub['schedule:hl'], st, 'r')));
+  applyResult(st, sub['schedule:hl'], parseResultLine(hlRes('schedule:hl'), 'schedule:hl'));
+  const x = stepExtra(sub['backfill:hl'], st, 'r');
+  assert.deepEqual([x.WEEKLY_HL_BUDGET, x.WEEKLY_HL_LAST_REMAINING], ['529', '7410']);
+  st.used = 900;
+  assert.equal(budgetLeft(st), 0);
+});
+
+test('a failed Highlightly step is a FAIL: the reason can come from the result line', () => {
+  const res = parseResultLine(hlRes('schedule:hl', { reason: 'highlightly auth rejected (401)', hl: { requests: 1, limit: null, remaining: null } }), 'schedule:hl');
+  assert.equal(res.reason, 'highlightly auth rejected (401)');
+});
+
+test('notification texts: OK / OK with warnings / FAILED, none says NBA.com', () => {
+  assert.deepEqual(NOTIFY_TEXT, { ok: 'Weekly run OK', degraded: 'Weekly run OK with warnings — see logs/weekly.log', fail: 'Weekly run FAILED — see logs/weekly.log' });
+  assert.ok(fs.readFileSync(path.join(ROOT, 'scripts/weekly.sh'), 'utf8').includes('Weekly run FAILED'));
+});
+
+test('config: Highlightly limits only move in the safe direction (cap 601 and reserve 999 are rejected)', () => {
+  assert.throws(() => loadWeeklyConfig({ WEEKLY_HL_CAP: '601' }, { home: '/h' }), /WEEKLY_HL_CAP/);
+  assert.throws(() => loadWeeklyConfig({ WEEKLY_HL_CAP: '0' }, { home: '/h' }), /WEEKLY_HL_CAP/);
+  assert.throws(() => loadWeeklyConfig({ WEEKLY_HL_RESERVE: '999' }, { home: '/h' }), /WEEKLY_HL_RESERVE/);
+  assert.throws(() => loadWeeklyConfig({ WEEKLY_HL_RPS: '11' }, { home: '/h' }), /WEEKLY_HL_RPS/);
+  assert.throws(() => loadWeeklyConfig({ WEEKLY_HL_DAYS_BACK: '31' }, { home: '/h' }), /WEEKLY_HL_DAYS_BACK/);
+  assert.throws(() => loadWeeklyConfig({ WEEKLY_NBA: 'maybe' }, { home: '/h' }), /WEEKLY_NBA/);
+  const c = loadWeeklyConfig({}, { home: '/h' });
+  assert.deepEqual([c.hlCap, c.hlReserve, c.hlRps, c.hlDaysBack, c.hlDaysAhead, c.nba, c.fullSeason, c.dryRun], [600, 1000, 4, 7, 60, true, false, false]);
+  const d = loadWeeklyConfig({ WEEKLY_HL_CAP: '3', WEEKLY_HL_RESERVE: '1500', WEEKLY_NBA: '0', WEEKLY_HL_FULL_SEASON: '1', WEEKLY_DRY_RUN: '1' }, { home: '/h' });
+  assert.deepEqual([d.hlCap, d.hlReserve, d.nba, d.fullSeason, d.dryRun], [3, 1500, false, true, true]);
+  assert.equal(loadWeeklyConfig({ WEEKLY_HL_FULL_SEASON: 'true' }, { home: '/h' }).fullSeason, false, 'exactly "1" opts in');
+});
+
+test('fixture guards (D12): a production run refuses fixtures; a fake run needs Highlightly fixtures and (NBA fixtures or WEEKLY_NBA=0)', () => {
+  const prod = { WEEKLY_CONFIRM_PROD: '1', BACKUP_CONFIRM_PROD: '1' };
+  const cfg = (env) => loadWeeklyConfig(env, { home: '/h' });
+  assert.equal(fixtureGuardError(cfg(prod), prod), null);
+  for (const k of ['HIGHLIGHTLY_FIXTURES', 'SEED_FIXTURES', 'WEEKLY_STEP_FIXTURE']) {
+    const env = { ...prod, [k]: k === 'WEEKLY_STEP_FIXTURE' ? '1' : '/some/dir' };
+    assert.equal(fixtureGuardError(cfg(env), env), FIXTURES_ON_PROD_MSG, k);
+  }
+  const fake = { WEEKLY_RAILWAY_BIN: FAKE_BIN };
+  assert.equal(fixtureGuardError(cfg(fake), fake), FAKE_NEEDS_FIXTURES_MSG, 'no Highlightly fixtures');
+  const hlOnly = { ...fake, HIGHLIGHTLY_FIXTURES: '/d' };
+  assert.equal(fixtureGuardError(cfg(hlOnly), hlOnly), FAKE_NEEDS_FIXTURES_MSG, 'NBA.com would be called');
+  assert.equal(fixtureGuardError(cfg({ ...hlOnly, SEED_FIXTURES: '/n' }), { ...hlOnly, SEED_FIXTURES: '/n' }), null);
+  assert.equal(fixtureGuardError(cfg({ ...hlOnly, WEEKLY_NBA: '0' }), { ...hlOnly, WEEKLY_NBA: '0' }), null);
+  const step = { ...fake, WEEKLY_STEP_FIXTURE: '1' };
+  assert.equal(fixtureGuardError(cfg(step), step), null, 'only the fake step runs');
+});
+
+test('redactor masks the Highlightly key as well as the tunnel password', () => {
+  const out = [];
+  const r = lineRedactor(['tunnel-pw', 'hl-key-0123456789'], (l) => out.push(l));
+  r.push('key hl-key-0123456789 and tunnel-pw\n');
+  assert.ok(!out[0].includes('hl-key-0123456789') && !out[0].includes('tunnel-pw'));
+});
+
+test('the Highlightly child and the best-effort loaders print a result line the parser accepts (contract with worker/ and scripts/)', async () => {
+  const { weeklyLine } = await import('./nba-best-effort.mjs');
+  const r = parseResultLine(weeklyLine({ step: 'backfill:nba', degraded: true, nba: 'down', skipped: ['nba:reconcile', 'nba:standings'], reason: 'nba.com unreachable: timeout' }), 'backfill:nba');
+  assert.deepEqual([r.degraded, r.nba, r.skipped.length], [true, 'down', 2]);
 });

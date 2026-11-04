@@ -81,7 +81,7 @@ export function gitParts(words) {
   let i = 1; const globals = [];
   while (i < words.length) {
     const t = words[i].text;
-    if (t === '-C' || t === '-c' || t === '--git-dir' || t === '--work-tree' || t === '--namespace') { globals.push(t, words[i + 1]?.text); i += 2; continue; }
+    if (t === '-C' || t === '-c' || t === '--git-dir' || t === '--work-tree' || t === '--namespace' || t === '--config-env' || t === '--super-prefix') { globals.push(t, words[i + 1]?.text); i += 2; continue; }
     if (t.startsWith('-')) { globals.push(t); i++; continue; }
     break;
   }

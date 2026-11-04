@@ -1,7 +1,7 @@
 // Parser for the subset of bash the approver understands. It never executes anything. Anything it
 // cannot follow sets ok=false (the caller then refuses to allow) but the readable part is still
 // returned so a visible deny item can still deny (story 2.5).
-import { normalizeText, baseLower } from './normalize.mjs';
+import { normalizeText, baseLower, expandBraces } from './normalize.mjs';
 
 export const MAX_NEST = 4;
 const BLANK = new Set([' ', '\t']);
@@ -25,10 +25,21 @@ const WRAPPERS = {
   timeout: { value: ['-s', '-k'], positional: 1 },
   stdbuf: { value: ['-i', '-o', '-e'] },
   sudo: { value: ['-u', '-g', '-h', '-p', '-C', '-D', '-R', '-T'], assigns: true },
-  doas: { value: ['-u', '-C'] },
   xargs: { value: ['-I', '-n', '-P', '-d', '-L', '-s', '-E', '-a', '-J'] },
   npx: { value: ['-p', '--package', '-c', '--call'] },
   watch: { value: ['-n', '--interval', '-d'], script: true },
+  arch: { value: ['-arch', '-c'] },
+  noglob: { value: [] },
+  nocorrect: { value: [] },
+  '-': { value: [] },
+  repeat: { value: [], positional: 1 },
+  script: { value: ['-t', '-F'], positional: 1 },
+  'sandbox-exec': { value: ['-f', '-p', '-n', '-D'] },
+  flock: { value: ['-w', '-E'], positional: 1 },
+  unbuffer: { value: [] },
+  parallel: { value: ['-j', '-n', '-a'] },
+  chronic: { value: [] },
+  doas: { value: ['-u', '-C'] },
 };
 
 export class Word {
@@ -49,7 +60,7 @@ function newCommand(parser) {
 class Parser {
   constructor(src, st, nest) {
     this.s = src; this.i = 0; this.st = st; this.nest = nest;
-    this.pending = []; this.deferred = []; this.prevOp = null; this.pipeIdx = 0; this.last = null;
+    this.pending = []; this.deferred = []; this.root = false; this.prevOp = null; this.pipeIdx = 0; this.last = null;
   }
 
   err(msg) { this.st.errors.push(msg); }
@@ -79,7 +90,7 @@ class Parser {
       this.skipBlanks();
       if (this.i >= s.length) { if (closer) this.err('unterminated_' + (closer === ')' ? 'paren' : 'brace')); return; }
       const c = s[this.i];
-      if (c === '#' && this.atWordStart()) { while (this.i < s.length && s[this.i] !== '\n') this.i++; continue; }
+      if (c === '#' && this.atWordStart()) { const from = this.i; while (this.i < s.length && s[this.i] !== '\n') this.i++; if (this.root) this.st.comments.push([from, this.i]); continue; }
       if (c === '\n') { this.i++; this.readHeredocs(); this.setOp('\n'); continue; }
       if (c === ';') { this.i++; if (s[this.i] === ';') this.i++; if (s[this.i] === '&') this.i++; this.setOp(';'); continue; }
       if (c === '&' && s[this.i + 1] !== '>') {
@@ -145,6 +156,7 @@ class Parser {
       this.skipBlanks();
       if (this.i >= s.length) break;
       const c = s[this.i];
+      if (c === '#' && this.atWordStart()) { const from = this.i; while (this.i < s.length && s[this.i] !== '\n') this.i++; if (this.root) this.st.comments.push([from, this.i]); continue; }
       if (c === '\n' || c === ';' || c === '|' || c === ')') break;
       if (c === '&' && s[this.i + 1] !== '>') break;
       if (c === '(') {
@@ -193,7 +205,13 @@ class Parser {
   }
 
   finish(cmd) {
-    const w0 = cmd.words[0];
+    let w0 = cmd.words[0];
+    if (w0 && w0.expansions && !cmd.opaque) {
+      // {curl,x} and curl{,} are literal words after expansion: the first is the command, the rest are arguments
+      const lit = (t) => Object.assign(new Word(), { text: t, raw: t });
+      cmd.words = [...w0.expansions.map(lit), ...cmd.words.slice(1)];
+      w0 = cmd.words[0];
+    }
     if (w0 && !cmd.opaque) {
       if (w0.dynamic && !w0.ansi) cmd.dynamicName = true; else cmd.name = w0.text; // ANSI-C quoting decodes statically
     }
@@ -290,7 +308,10 @@ class Parser {
       } else { w.text += c; this.i++; }
     }
     w.raw = s.slice(start, this.i);
-    if (/(?<![\\$])\{[^{}]*(,|\.\.)[^{}]*\}/.test(w.raw.replace(/'[^']*'|"[^"]*"/g, ''))) w.dynamic = true; // brace expansion
+    if (/(?<![\\$])\{[^{}]*(,|\.\.)[^{}]*\}/.test(w.raw.replace(/'[^']*'|"[^"]*"/g, ''))) {
+      if (!w.dynamic && !w.quoted && /\{[^{}]*,[^{}]*\}/.test(w.raw)) w.expansions = expandBraces(w.raw);
+      w.dynamic = true; // brace expansion
+    }
     return w;
   }
 
@@ -492,8 +513,12 @@ class Parser {
 // Returns { ok, errors, commands, normalized, nonAscii, control }.
 export function parseShell(raw) {
   const { text, nonAscii, control } = normalizeText(raw);
-  const st = { commands: [], errors: [], depth: 0, kind: null, vars: [] };
+  const st = { commands: [], errors: [], depth: 0, kind: null, vars: [], comments: [] };
   const p = new Parser(text, st, 0);
+  p.root = true;
   try { p.parseSequence(null); p.readHeredocs(); p.flushDeferred(); } catch (e) { if (e instanceof ParseError) st.errors.push(e.message); else st.errors.push('internal_parse_error'); }
-  return { ok: st.errors.length === 0, errors: st.errors, commands: st.commands, vars: st.vars, normalized: text, nonAscii, control };
+  // `code` is the text with the comments the parser found blanked out: comment text must never change a decision (QA 6)
+  let code = text;
+  for (const [a, b] of st.comments.slice().reverse()) code = code.slice(0, a) + ' '.repeat(b - a) + code.slice(b);
+  return { ok: st.errors.length === 0, errors: st.errors, commands: st.commands, vars: st.vars, normalized: text, code, nonAscii, control };
 }

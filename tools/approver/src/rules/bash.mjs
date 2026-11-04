@@ -361,7 +361,7 @@ export function bashRules({ input, cwd, ctx }) {
 
   const tooLong = command.length > MAX_PARSE;
   const parsed = tooLong ? { ok: false, errors: ['too_long'], commands: [], normalized: command, nonAscii: /[^\x00-\x7f]/.test(command), control: false } : parseShell(command);
-  if (prodRe.test(parsed.normalized)) add(F.deny, 'D-PROD-VARS');
+  if (prodRe.test(parsed.code ?? parsed.normalized)) add(F.deny, 'D-PROD-VARS');
   for (const v of parsed.vars || []) if (S.secretVarRes.some((re) => re.test(v))) add(F.deny, 'D-SECRET-ENVDUMP');
   if (!parsed.ok) add(F.notAllow, 'parse:' + parsed.errors[0]);
   if (parsed.nonAscii) add(F.notAllow, 'non_ascii');
@@ -372,7 +372,7 @@ export function bashRules({ input, cwd, ctx }) {
     setupCwds(parsed, S);
     for (const c of parsed.commands) judgeCommand(c, S, F);
     if (F.pendingAttr) {
-      const low = parsed.normalized.toLowerCase();
+      const low = (parsed.code ?? parsed.normalized).toLowerCase();
       if (F.anyTouch || pc.markers.some((m) => low.includes(m))) add(F.deny, 'D-SELF'); else add(F.ask, 'K-ATTR');
     }
     if (parsed.commands.some((c) => c.dynamicName)) {
@@ -380,7 +380,7 @@ export function bashRules({ input, cwd, ctx }) {
       looseDenyScan(parsed.commands.flatMap((c) => [...c.words, ...c.assigns.map((a) => a.value)]).filter((w) => !w.dynamic).map((w) => w.text), S, F);
     }
   }
-  if (!parsed.ok) looseDenyScan(looseWords(parsed.normalized), S, F);
+  if (!parsed.ok) looseDenyScan(looseWords(parsed.code ?? parsed.normalized), S, F);
 
   const allowed = parsed.ok && parsed.commands.length > 0 && !F.notAllow.length && parsed.commands.every((c) => c.allow);
   if (F.deny.length) return { decision: 'deny', rule_id: F.deny[0], undecided: false, reason: policy.rules[F.deny[0]]?.reason || 'Denied.', rules: F.deny };

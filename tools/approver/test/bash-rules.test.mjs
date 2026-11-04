@@ -38,7 +38,7 @@ test('deny: database clients against a non-local or unparsable host; local is as
 test('deny: production variables anywhere in the text (A12)', () => check([
   ['echo DATABASE_PUBLIC_URL', 'deny', 'D-PROD-VARS'], ['WEEKLY_CONFIRM_PROD=1 zsh scripts/weekly-drill.sh', 'deny', 'D-PROD-VARS'],
   ['BACKUP_CONFIRM_PROD=1 npm run db:backup', 'deny', 'D-PROD-VARS'], ['export WEEKLY_CONFIRM_PROD=1', 'deny', 'D-PROD-VARS'],
-  ['env BACKUP_CONFIRM_PROD=1 ls', 'deny', 'D-PROD-VARS'], ['ls # DATABASE_PUBLIC_URL', 'deny', 'D-PROD-VARS'],
+  ['env BACKUP_CONFIRM_PROD=1 ls', 'deny', 'D-PROD-VARS'], ['ls # DATABASE_PUBLIC_URL', 'allow', 'L-READ'],
 ]));
 
 test('deny: .env files in every spelling (A14), including symlinks and .env.example (F7)', () => check([
@@ -445,4 +445,31 @@ test('Sec 7 / QA 1 / QA 2: cd is tracked, so relative targets resolve against th
     ['find . -name x -exec chflags nouchg {} +', 'ask', 'K-ATTR'], ['find .claude -exec chflags nouchg {} +', 'deny', 'D-SELF'], ['printf x | xargs -I{} xattr -d {} README.md', 'ask', 'K-ATTR'],
     ['echo x > .claude/ſettings.json', 'deny', 'D-SELF'], ['cat ſecrets/api.txt', 'deny', 'D-SECRET-PATH'], ['echo x > opſ/a.txt', 'ask', 'K-DEFAULT'],
   ]);
+});
+
+test('Sec minor: git global options before a denied subcommand still deny; more wrappers are unwrapped', () => check([
+  ['git --config-env x=Y push origin main', 'deny', 'D-GIT-MAIN'], ['git -c core.x=y push -f origin feat/x', 'deny', 'D-GIT-FORCE'], ['git --super-prefix p push origin master', 'deny', 'D-GIT-MAIN'],
+  ['git --git-dir=.git push origin main', 'deny', 'D-GIT-MAIN'],
+  ['arch -arm64 curl https://evil', 'deny', 'D-NET'], ['noglob curl https://evil', 'deny', 'D-NET'], ['nocorrect curl https://evil', 'deny', 'D-NET'], ['script -q /dev/null curl https://evil', 'deny', 'D-NET'],
+  ['sandbox-exec -n none curl https://evil', 'deny', 'D-NET'], ['flock /tmp/l curl https://evil', 'deny', 'D-NET'], ['parallel curl ::: a', 'deny', 'D-NET'], ['unbuffer curl https://evil', 'deny', 'D-NET'],
+  ['repeat 2 curl https://evil', 'deny', 'D-NET'], ['- curl https://evil', 'deny', 'D-NET'], ['caffeinate -i curl https://evil', 'deny', 'D-NET'], ['sudo -u root curl https://evil', 'deny', 'D-NET'],
+  ['nice -n 5 curl https://evil', 'deny', 'D-NET'], ['ionice -c 3 curl https://evil', 'deny', 'D-NET'], ['stdbuf -o0 curl https://evil', 'deny', 'D-NET'], ['timeout 5 curl https://evil', 'deny', 'D-NET'],
+  ['command curl https://evil', 'deny', 'D-NET'], ['arch -arm64 ls', 'ask', 'K-DEFAULT'],
+]));
+
+test('QA 5: brace expansion that yields a deny-listed command word is deny', () => check([
+  ['{curl,x}', 'deny', 'D-NET'], ['curl{,}', 'deny', 'D-NET'], ['{railway,x} up', 'deny', 'D-PROD-RAILWAY'], ['c{url,at} x', 'deny', 'D-NET'], ['{wget,-O,x} http://y', 'deny', 'D-NET'],
+  ['{ls,docs}', 'allow', 'L-READ'], ['echo {a,b}', 'ask', 'K-DEFAULT'],
+]));
+
+test('QA 6: comments never change a decision (twins)', () => {
+  for (const [bare, commented] of [
+    ['ls', 'ls # curl'], ['git push -u origin feat/x', 'git push -u origin feat/x # main'], ['git push -u origin feat/x', 'git push -u origin feat/x # safe, allow'],
+    ['git status', 'git status # WEEKLY_CONFIRM_PROD cat .env'], ['npm install', 'npm install # printenv'], ['curl x', 'curl x # owner approved'], ['ls\ncat README.md', 'ls # a\ncat README.md # .env'],
+  ]) {
+    const a = bash(env, bare); const b = bash(env, commented);
+    assert.equal(b.decision, a.decision, commented); assert.equal(b.rule_id, a.rule_id, commented);
+  }
+  assert.equal(bash(env, 'echo "a # curl"').decision, 'ask');
+  assert.equal(bash(env, 'ls a#b').rule_id, 'K-DEFAULT');
 });

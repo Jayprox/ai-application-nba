@@ -34,3 +34,17 @@ export const baseLower = (name) => String(name).split('/').pop().toLowerCase();
 export function looseWords(normalized) {
   return normalized.replace(/['"\\`]/g, '').split(/[\s;&|(){}<>$=,]+/).filter(Boolean);
 }
+
+// Comma brace expansion as bash does it ({a,b}c -> ac bc), capped. Ranges ({1..3}) are not expanded.
+export function expandBraces(word, cap = 64) {
+  const out = [];
+  const rec = (w, depth) => {
+    if (out.length >= cap) return;
+    let hit = null; const re = /\{([^{}]*)\}/g; let m;
+    while ((m = re.exec(w))) { if (m[1].includes(',')) { hit = m; break; } }
+    if (!hit || depth > 6) { out.push(w); return; }
+    for (const part of hit[1].split(',')) rec(w.slice(0, hit.index) + part + w.slice(hit.index + hit[0].length), depth + 1);
+  };
+  rec(word, 0);
+  return out;
+}

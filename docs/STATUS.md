@@ -290,3 +290,30 @@ PA skipped: requirements are concrete and owner-specified.
 | Q9 | NBA.com wins when it answered completely; otherwise Highlightly. | PA default, accepted |
 | Q10 | Standings rank stays NBA.com-only; app falls back to win % with a note. | PA default, accepted |
 | Q11 | **On hold** until the owner confirms the plan period. Once confirmed, approved to run the one-time full-season sweep if more than 3,000 requests remain. Build it behind an explicit opt-in that is off by default and re-checks remaining > 3,000 from the live header before starting. | **Owner** |
+
+**M6 closed:** owner merged PR #7 into `main` (`77b71b6`).
+
+## Mission M7 — Independent permission approver (opened 2026-11-03)
+
+**Mission (owner):** Reduce permission prompts without auto mode. A Claude Code `PermissionRequest` hook calls a small approver that checks each request against a written policy (APPROVAL POLICY v1, owner draft) and answers allow, ask or deny. Uncertain, failed or timed-out = ask (fail closed). The deny list must not be weakened.
+
+**Requirements to cover (owner):** shadow mode first (log approver decision next to the owner's actual answer, no effect on prompts) for at least a week before it may approve anything; a decision log stored outside the repo; a cheap pattern pre-filter before any model call; prompt-injection test cases; a test suite of at least 50 sample requests with expected decisions, including attempts to talk the approver into yes; policy and scripts live outside the repo's agent-writable paths, installed by the owner.
+
+**Constraints:** nothing touches production, Railway, live APIs or `.env`. Agents do not edit settings, hooks or the live policy. Feature branch + PR; owner merges and installs.
+
+**Path:** Feature (full workflow). PA (incl. Claude Code docs check on PermissionRequest hooks and headless model calls) -> Gate 1 -> Lead plan -> Dev -> CI -> QA + Sec (Sec required: permission and security tooling, input parsing, prompt injection) -> Lead review -> readiness report -> Gate 2.
+
+**Branch:** `feat/m7-permission-approver`.
+
+### Tasks
+- [x] T0 Docs check (claude-code-guide, 2026-11-03): no "ask" output value (ask = no decision, empty stdout, exit 0); timeout/crash/bad exit/invalid output fall to the normal prompt, never allow; default command-hook timeout 600 s (set short); in `-p`/background subagents no decision = deny; payload has no git branch and no `tool_use_id`; no hook reports the human's answer (shadow mode must infer it from PreToolUse/PostToolUse); `prompt` hook type cannot deny; headless `claude -p --tools "" --json-schema --bare` possible, but `--bare` needs an API key. Unconfirmed: Edit/Write/WebFetch payloads, transcript recording of denials, `async` on PermissionRequest, foreground subagents.
+- [x] T1 PA: `docs/requirements/M7-permission-approver.md` (DRAFT). 13 stories, 16 policy ambiguities (A1-A16, safer reading by default), 14 owner questions, deny list unchanged (policy verbatim in Appendix A). Coordinator edits: removed the `enforce-allow` stage and rewrote Q11 so deny is always hard once enforcing (the PA's default let deny fall back to ask); added a note to Q8 (model-may-never-allow makes the model nearly useless for fewer prompts; options a/b/c).
+- [x] Gate 1: owner approved 2026-11-04 (answers below and in requirements section 7.0)
+- [ ] T2 Lead plan
+- [ ] T3 Dev: PR + CI
+- [ ] T4 QA, T5 Security (parallel)
+- [ ] T6 Lead review
+- [ ] T7 Readiness report -> Gate 2
+
+### Approvals
+- 2026-11-04 — Owner (Gate 1): "Approved." Q8 (b) model logs only, decides nothing. Q2 dedicated API key in macOS Keychain only (never `.env`, never an exported variable, never printed or logged), US$1/day script cap plus a low Console spend limit; owner creates the key after the code exists. Q9 acts only in this repo, silent elsewhere. Q10 safer readings as proposed; `gh pr comment` is ask if the repo is public. Q1 default (Bash, Edit, Write, NotebookEdit). Q12 owner edits settings personally. Lead to verify Edit/Write payloads and transcript-denial behaviour before design.

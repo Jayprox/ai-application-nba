@@ -44,7 +44,7 @@ export function fileRules({ tool, input, cwd, branch, ctx }) {
   if (k.secret) return res('deny', 'D-SECRET-PATH', policy);
   if (!isInside(r.real, pc.repoRoot)) return res('ask', 'K-OUTSIDE', policy);
   if (matchGlobs(k.rel, policy.paths.approver_src_globs)) return res('ask', 'K-SELF-SRC', policy);
-  if (matchGlobs(k.rel, policy.paths.ask_globs)) return res('ask', 'K-PATH', policy);
+  if (k.secretish || matchGlobs(k.rel, policy.paths.ask_globs)) return res('ask', 'K-PATH', policy);
   if (branchIsProtected(branch, policy)) return res('ask', 'K-BRANCH', policy);
   return res('allow', 'L-EDIT', policy);
 }

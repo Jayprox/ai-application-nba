@@ -55,7 +55,7 @@
     "git_read_subcommands": ["status", "diff", "log", "show", "branch", "ls-files", "blame", "rev-parse", "grep", "describe", "shortlog", "ls-tree", "cat-file", "reflog", "remote", "tag", "stash"]
   },
   "paths": {
-    "ask_globs": [".github/**", "ops/**", "**/package.json", "**/package-lock.json", "**/yarn.lock", "**/pnpm-lock.yaml", "**/bun.lockb", "**/npm-shrinkwrap.json", "db/schema.sql", "db/migrations/**", "**/Dockerfile*", "**/*.plist", "**/CLAUDE.md"],
+    "ask_globs": [".github/**", "ops/**", "**/package.json", "**/package-lock.json", "**/yarn.lock", "**/pnpm-lock.yaml", "**/bun.lockb", "**/npm-shrinkwrap.json", "db/schema.sql", "db/migrations/**", "**/Dockerfile*", "**/*.plist", "**/CLAUDE.md", "**/CLAUDE.local.md", "**/.ignore", "**/.rgignore", "**/.gitignore", "**/.gitattributes", "**/.npmrc", "**/.yarnrc*", "**/.mcp.json"],
     "approver_src_globs": ["tools/approver/**"],
     "secretish_globs": ["*.pem", "*.key", "*.p12", "*.pfx", "*.keystore", "credentials*", ".npmrc", ".netrc", "id_*"],
     "managed_dirs": ["/Library/Application Support/ClaudeCode"],

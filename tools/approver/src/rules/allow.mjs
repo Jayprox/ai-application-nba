@@ -296,20 +296,19 @@ export function allowRule(c, S) {
       const files = hasE ? r.pos : r.pos.slice(1);
       if (!hasE && !r.pos.length) return null;
       const recursive = hasFlag(r.flags, '-r') || hasFlag(r.flags, '-R') || hasFlag(r.flags, '--recursive');
-      if (recursive) {
-        // A14: recursive grep is allowed only when it provably skips .env* (and .git, which holds config)
-        const ex = r.flags.filter((x) => x.name === '--exclude').map((x) => x.value);
-        const exd = r.flags.filter((x) => x.name === '--exclude-dir').map((x) => x.value);
-        if (!ex.includes('.env*') || !exd.includes('.git') || !files.length) return null;
-      }
+      // A14: a recursive grep cannot be shown to skip .env* (case-insensitive volume, .claude/, agent-written config), so it is ask
+      if (recursive) return null;
       return (files.length ? allPaths(files, S, c) : stdinOk(c) && !recursive) ? ok('L-READ') : null;
     }
     case 'rg': {
       const r = parseFlags(w, {
         short: 'nivwFlcSsoIH', shortVal: 'ABCemtT',
-        long: { '--no-heading': true, '--heading': true, '--line-number': true, '--no-line-number': true, '--ignore-case': true, '--smart-case': true, '--fixed-strings': true, '--word-regexp': true, '--files-with-matches': true, '--count': true, '--only-matching': true, '--color': 'value', '--max-count': 'value', '--type': 'value', '--type-not': 'value', '--files': true, '--invert-match': true, '--context': 'value', '--after-context': 'value', '--before-context': 'value', '--with-filename': true, '--no-filename': true },
+        long: { '--no-heading': true, '--heading': true, '--line-number': true, '--no-line-number': true, '--ignore-case': true, '--smart-case': true, '--fixed-strings': true, '--word-regexp': true, '--files-with-matches': true, '--count': true, '--only-matching': true, '--color': 'value', '--max-count': 'value', '--type': 'value', '--type-not': 'value', '--files': true, '--invert-match': true, '--context': 'value', '--after-context': 'value', '--before-context': 'value', '--with-filename': true, '--no-filename': true, '--no-ignore': true },
       });
       if (!r.ok) return null;
+      // Sec 3: ripgrep honours .ignore/.rgignore/.gitignore whitelists (`!.env`) that an agent can write, so every
+      // search must switch ignore files off. Hidden files (.env, .claude) then stay skipped by rg's default.
+      if (!hasFlag(r.flags, '--no-ignore')) return null;
       const files = hasFlag(r.flags, '--files') || hasFlag(r.flags, '-e') ? r.pos : r.pos.slice(1);
       if (!hasFlag(r.flags, '--files') && !hasFlag(r.flags, '-e') && !r.pos.length) return null;
       return allPaths(files, S, c) ? ok('L-READ') : null;

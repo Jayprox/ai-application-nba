@@ -167,7 +167,7 @@ test('ask: installs and process/system commands', () => check([
 test('allow: read-only inspection inside the repo (L-READ), A1 and A11', () => check([
   ['ls', 'allow', 'L-READ'], ['ls -la docs', 'allow', 'L-READ'], ['ls -R', 'allow', 'L-READ'], ['cat README.md', 'allow', 'L-READ'], ['cat -n docs/a.md docs/b.md', 'allow', 'L-READ'],
   ['head -n 5 README.md', 'allow', 'L-READ'], ['head -5 README.md', 'allow', 'L-READ'], ['tail -n 20 docs/a.md', 'allow', 'L-READ'], ['wc -l README.md', 'allow', 'L-READ'],
-  ['grep -n foo README.md', 'allow', 'L-READ'], ['grep -rn foo docs --exclude=\'.env*\' --exclude-dir=.git', 'allow', 'L-READ'], ['rg foo', 'allow', 'L-READ'], ['rg -n foo docs', 'allow', 'L-READ'],
+  ['grep -n foo README.md', 'allow', 'L-READ'], ['rg --no-ignore foo', 'allow', 'L-READ'], ['rg --no-ignore -n foo docs', 'allow', 'L-READ'], ['rg foo', 'ask', 'K-DEFAULT'], ['rg -n foo docs', 'ask', 'K-DEFAULT'],
   ['sed -n 5p README.md', 'allow', 'L-READ'], ['sed -n 1,10p README.md', 'allow', 'L-READ'], ['sed -n "$p" README.md', 'ask'], ['sed -n \'/foo/p\' README.md', 'allow', 'L-READ'],
   ['find . -name "*.md"', 'allow', 'L-READ'], ['find docs -type f -maxdepth 1', 'allow', 'L-READ'], ['find . -name x -o -name y', 'allow', 'L-READ'], ['find . -name x -print', 'allow', 'L-READ'],
   ['ls | wc -l', 'allow', 'L-READ'], ['cat README.md | head -3', 'allow', 'L-READ'], ['git log --oneline | head -5', 'allow'], ['ls 2>&1', 'allow', 'L-READ'], ['ls > /dev/null', 'allow', 'L-READ'],
@@ -200,9 +200,14 @@ test('A9: find with -exec, -delete, -ok, -execdir, -fprint and friends is not al
 
 test('A14: recursive grep/rg only when .env* is provably skipped', () => check([
   ['grep -r foo .', 'ask', 'K-DEFAULT'], ['grep -R foo docs', 'ask', 'K-DEFAULT'], ['grep -rn foo . --exclude=\'.env*\'', 'ask', 'K-DEFAULT'],
-  ['grep -rn foo . --exclude-dir=.git', 'ask', 'K-DEFAULT'], ['grep -rn foo . --exclude=\'.env*\' --exclude-dir=.git', 'allow', 'L-READ'],
-  ['grep -r foo', 'ask', 'K-DEFAULT'], ['rg --hidden foo', 'ask', 'K-DEFAULT'], ['rg -uu foo', 'ask', 'K-DEFAULT'], ['rg --no-ignore foo', 'ask', 'K-DEFAULT'], ['rg -g "*" foo', 'ask', 'K-DEFAULT'],
-  ['rg --pre cat foo', 'ask', 'K-DEFAULT'], ['rg -L foo', 'ask', 'K-DEFAULT'], ['rg foo .claude', 'ask', 'K-SELF-READ'], ['rg foo .env', 'deny', 'D-SECRET-ENVFILE'],
+  ['grep -rn foo . --exclude-dir=.git', 'ask', 'K-DEFAULT'], ['grep -rn foo . --exclude=\'.env*\' --exclude-dir=.git --exclude-dir=.claude', 'ask', 'K-DEFAULT'],
+  ['grep -r foo', 'ask', 'K-DEFAULT'], ['rg --hidden foo', 'ask', 'K-DEFAULT'], ['rg -uu foo', 'ask', 'K-DEFAULT'], ['rg -g "*" foo', 'ask', 'K-DEFAULT'],
+  ['rg --pre cat foo', 'ask', 'K-DEFAULT'], ['rg -L foo', 'ask', 'K-DEFAULT'], ['rg --no-ignore foo .claude', 'ask', 'K-SELF-READ'], ['rg --no-ignore foo .env', 'deny', 'D-SECRET-ENVFILE'],
+]));
+
+test('Sec 3: rg needs --no-ignore (agent-written .ignore whitelists), recursive grep is ask, tool config files are ask-listed edits', () => check([
+  ['rg -n KEY', 'ask', 'K-DEFAULT'], ['rg TOKEN', 'ask', 'K-DEFAULT'], ['rg --no-ignore-dot TOKEN', 'ask', 'K-DEFAULT'], ['rg --no-ignore TOKEN', 'allow', 'L-READ'],
+  ['grep -rn token . --exclude=\'.env*\' --exclude-dir=.git', 'ask', 'K-DEFAULT'], ['grep -R x docs', 'ask', 'K-DEFAULT'],
 ]));
 
 test('git read and local (L-GIT-*): allowed forms', () => check([

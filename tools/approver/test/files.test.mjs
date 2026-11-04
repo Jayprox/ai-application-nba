@@ -76,6 +76,8 @@ test('row 5: the ask list (A: Appendix A "Edits to ...") is ask', () => expectAl
   [P('package.json'), 'ask', 'K-PATH'], [P('worker/package.json'), 'ask', 'K-PATH'], [P('new/package.json'), 'ask', 'K-PATH'], [P('package-lock.json'), 'ask', 'K-PATH'], [P('backend/yarn.lock'), 'ask', 'K-PATH'],
   [P('pnpm-lock.yaml'), 'ask', 'K-PATH'], [P('db/schema.sql'), 'ask', 'K-PATH'], [P('db/migrations/009_x.sql'), 'ask', 'K-PATH'], [P('Dockerfile'), 'ask', 'K-PATH'], [P('backend/Dockerfile.prod'), 'ask', 'K-PATH'],
   [P('x.plist'), 'ask', 'K-PATH'], [P('CLAUDE.md'), 'ask', 'K-PATH'], [P('docs/CLAUDE.md'), 'ask', 'K-PATH'], [P('.GITHUB/x.yml'), 'ask', 'K-PATH'], [P('PACKAGE.JSON'), 'ask', 'K-PATH'],
+  [P('.ignore'), 'ask', 'K-PATH'], [P('.rgignore'), 'ask', 'K-PATH'], [P('docs/.gitignore'), 'ask', 'K-PATH'], [P('.gitattributes'), 'ask', 'K-PATH'], [P('.npmrc'), 'ask', 'K-PATH'], [P('worker/.npmrc'), 'ask', 'K-PATH'],
+  [P('.yarnrc.yml'), 'ask', 'K-PATH'], [P('.mcp.json'), 'ask', 'K-PATH'], [P('CLAUDE.local.md'), 'ask', 'K-PATH'], [P('certs/new.pem'), 'ask', 'K-PATH'], [P('.editorconfig'), 'allow', 'L-EDIT'],
   [P('db/schema.sql.bak'), 'allow', 'L-EDIT'], [P('docs/db/schema.sql'), 'allow', 'L-EDIT'],
 ]));
 

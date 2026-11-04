@@ -135,3 +135,13 @@ test('a symlink created in the repo toward a protected path is judged by where i
   assert.equal(edit(link).rule_id, 'L-EDIT');
   fs.rmSync(link);
 });
+
+test('Sec 4: non-ASCII paths (APFS case folding: U+017F, U+FB01) are never allowed; a folded deny stays deny', () => {
+  for (const fn of [edit, write, nb]) expectAll([
+    [P('package.jſon'), 'ask', 'K-UNICODE'], [P('opſ/deploy.sh'), 'ask', 'K-UNICODE'], [P('db/schema.ſql'), 'ask', 'K-UNICODE'], [P('Dockerﬁle'), 'ask', 'K-UNICODE'],
+    [P('src/café.js'), 'ask', 'K-UNICODE'], [P('ſecrets/x'), 'deny', 'D-SECRET-PATH'], [P('.ènv'), 'ask', 'K-UNICODE'], [P('.\u212Aey'), 'ask', 'K-UNICODE'],
+    [path.join(env.root, 'Library', 'Application ſupport', 'claude-approver', 'mode'), 'deny', 'D-SELF'], [path.join(env.root, 'Library', 'Logſ', 'claude-approver', 'decisions.jsonl'), 'deny', 'D-SELF'],
+    [P('.ꜱclaude/x'), 'ask', 'K-UNICODE'],
+  ], fn);
+  expectAll([[P('.claude/ſettings.json'), 'deny', 'D-SELF'], [P('.ENV'), 'deny', 'D-SECRET-ENVFILE'], ['~jayprox_pro/.zshrc', 'ask', 'K-OUTSIDE'], ['~root/x', 'ask', 'K-OUTSIDE']]);
+});

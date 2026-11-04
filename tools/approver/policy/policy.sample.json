@@ -22,6 +22,7 @@
     "K-OUTSIDE": { "decision": "ask", "reason": "Path outside the repo." },
     "K-PATH": { "decision": "ask", "reason": "Path on the ask list." },
     "K-BRANCH": { "decision": "ask", "reason": "Branch is main, master or unknown." },
+    "K-UNICODE": { "decision": "ask", "reason": "Non-ASCII characters in the path." },
     "K-SHAPE": { "decision": "ask", "reason": "Unexpected request shape." },
     "K-DEFAULT": { "decision": "ask", "reason": "Not clearly matched by an allow rule." },
     "L-READ": { "decision": "allow", "reason": "Read-only inspection inside the repo." },

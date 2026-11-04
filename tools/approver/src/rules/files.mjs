@@ -1,5 +1,6 @@
 // Edit, Write, NotebookEdit (plan table 3.6). Contents (content, old_string, new_string, new_source) are
 // never read here: only the path, the branch and the repo layout matter.
+import { normalizeText } from '../shell/normalize.mjs';
 import { realResolve, isInside, buildPathCtx, classifyPath, matchGlobs, textSecret, expandHome, branchIsProtected } from '../paths.mjs';
 
 const SPECS = {
@@ -10,7 +11,7 @@ const SPECS = {
 
 const res = (decision, rule_id, policy, undecided = false) => ({ decision, rule_id, undecided, reason: policy.rules[rule_id]?.reason || rule_id });
 
-export function fileRules({ tool, input, cwd, branch, ctx }) {
+export function fileRules({ tool, input, cwd, branch, ctx, folded = false }) {
   const policy = ctx.policy;
   const spec = SPECS[tool];
   const shape = () => res('ask', 'K-SHAPE', policy);
@@ -22,6 +23,15 @@ export function fileRules({ tool, input, cwd, branch, ctx }) {
   if ('replace_all' in input && typeof input.replace_all !== 'boolean') return shape();
   const target = input[spec.path];
   if (target === '' || target.includes('\0')) return shape();
+
+  // Sec 4: APFS folds case with Unicode rules (U+017F, U+FB01 ...), so a non-ASCII path can alias an ask-listed or
+  // protected one. Judge the folded form: a deny there stays deny, everything else is ask, never allow.
+  if (!folded && /[^\x00-\x7f]/.test(target)) {
+    const f = fileRules({ tool, input: { ...input, [spec.path]: normalizeText(target).text }, cwd, branch, ctx, folded: true });
+    return f.decision === 'deny' ? f : res('ask', 'K-UNICODE', policy);
+  }
+  // `~user/...` is not expanded by the approver: anything but `~` or `~/` is ask
+  if (/^~[^/]/.test(target)) return res('ask', 'K-OUTSIDE', policy);
 
   const pc = buildPathCtx(ctx);
   const cw = realResolve(cwd);

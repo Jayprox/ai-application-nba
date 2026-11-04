@@ -98,6 +98,18 @@ test('C1: a key that exists ONLY in the env file (not the process env) is masked
   assert.ok(!r.out.includes(KEY) && !r.err.includes(KEY));
 });
 
+test('R3-3: unterminated output before the result line does not swallow it (result line starts on a fresh line)', { skip }, async () => {
+  const { dir, season } = await setup();
+  const hook = path.join(mkdtempSync(path.join(os.tmpdir(), 'cli_hook_')), 'hook.mjs');
+  writeFileSync(hook, "process.stdout.write('no newline here');\n");
+  const r = await new Promise((resolve) => {
+    const c = spawn(process.execPath, ['--import', hook, SCRIPT, 'schedule', '--season', season], { env: { PATH: process.env.PATH, ...baseEnv(dir) }, stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = ''; c.stdout.on('data', (d) => { out += d; }); c.on('close', (code) => resolve({ code, out }));
+  });
+  assert.equal(r.code, 0);
+  assert.ok(r.out.split('\n').some((l) => l.startsWith('@@WEEKLY {')), r.out);
+});
+
 test('dry run writes no ingestion_runs row and changes nothing', { skip }, async () => {
   const { dir, season } = await setup();
   const snap = [await fingerprint(db, 'games'), await count(db, 'entity_id_crosswalk')];

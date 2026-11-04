@@ -18,6 +18,7 @@ PW=$(openssl rand -hex 16)
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/chalk-wdrill.XXXXXX") || exit 1
 chmod 700 $WORK
 mkdir -p $WORK/priv $WORK/vol $WORK/wstate
+: > $WORK/empty.env                      # Highlightly step env file: empty, so drills never read the real .env
 VOL=$WORK/vol
 DIR=$VOL/db-backups
 LOG=$WORK/backup.log
@@ -67,7 +68,7 @@ hdiutil create -size 64m -fs APFS -volname WDRILL $WORK/drive.dmg >/dev/null 2>&
 
 # One env for both scripts. %p in the pidfiles becomes the tunnel port (weekly and backup keep separate files).
 BENV=(BACKUP_VOLUME=$VOL BACKUP_DIR=$DIR BACKUP_LOG=$LOG BACKUP_RAILWAY_BIN=$FAKE BACKUP_TUNNEL_PORT=$BP BACKUP_NOTIFY=0
-  WEEKLY_RAILWAY_BIN=$FAKE WEEKLY_TUNNEL_PORT=$WP WEEKLY_LOG=$WLOG WEEKLY_STATE_DIR=$WORK/wstate WEEKLY_NOTIFY=0 WEEKLY_STEP_FIXTURE=1
+  WEEKLY_RAILWAY_BIN=$FAKE WEEKLY_TUNNEL_PORT=$WP WEEKLY_LOG=$WLOG WEEKLY_STATE_DIR=$WORK/wstate WEEKLY_NOTIFY=0 WEEKLY_STEP_FIXTURE=1 WEEKLY_HL_ENV_FILE=$WORK/empty.env
   FAKE_RAILWAY_PASSWORD=$PW FAKE_RAILWAY_USER=postgres FAKE_RAILWAY_DB=backup_test FAKE_RAILWAY_TARGET_PORT=$SP
   FAKE_RAILWAY_PIDFILE=$WORK/fake.%p.pid FAKE_RAILWAY_SSH_PIDFILE=$WORK/ssh.%p.pid)
 

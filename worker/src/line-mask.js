@@ -8,8 +8,15 @@ export function createLineMasker(secret, write) {
       buf += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
       const nl = buf.lastIndexOf('\n');
       if (nl >= 0) { write(mask(buf.slice(0, nl + 1))); buf = buf.slice(nl + 1); }
-      else if (buf.length > 65536) { write(mask(buf.slice(0, buf.length - secret.length))); buf = buf.slice(buf.length - secret.length); } // bounded memory; keep a key-length tail
+      else if (buf.length > 65536) {
+        // Over-long line: mask everything first, then write all but the last (key length - 1) characters, which is
+        // the longest prefix of a key that could still be completed by the next write.
+        const m = mask(buf), keep = secret && secret.length >= 4 ? secret.length - 1 : 0;
+        write(m.slice(0, m.length - keep)); buf = m.slice(m.length - keep);
+      }
     },
+    /** End the current line: pending text is written masked, followed by a newline, so the next output starts fresh. */
+    endLine() { if (buf) { write(mask(buf) + '\n'); buf = ''; } },
     flush() { if (buf) { write(mask(buf)); buf = ''; } },
   };
 }

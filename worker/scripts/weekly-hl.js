@@ -48,7 +48,7 @@ const { clean } = await import('../src/weekly-util.js');
 
 const STEP = process.argv[2] === 'backfill' ? 'backfill:hl' : 'schedule:hl';
 let result = { v: 1, step: STEP, degraded: false, nba: 'n/a', skipped: [], stop: null, hl: { requests: 0, limit: null, remaining: null }, reason: null };
-const emit = () => process.stdout.write(`@@WEEKLY ${JSON.stringify(result)}\n`);
+const emit = () => { for (const m of maskers) m.endLine(); process.stdout.write(`@@WEEKLY ${JSON.stringify(result)}\n`); };
 function die(reason, code = 1) {
   result = { ...result, reason: clean(reason, 200) };
   console.error(`[hl ${STEP.split(':')[0]}] FAILED: ${result.reason}`);

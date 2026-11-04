@@ -8,13 +8,13 @@ import { starterIds, statLine, statusOf, STAT_COLS, teamTotals, totalScore } fro
 
 const HOUR = 3600e3;
 
-async function teamMap(db) {
+export async function teamMap(db) {
   const { rows } = await db.query(`SELECT source_id, canonical_id FROM entity_id_crosswalk WHERE entity_type = 'team' AND source = 'highlightly' AND match_status = 'matched'`);
   return new Map(rows.map((r) => [String(r.source_id), Number(r.canonical_id)]));
 }
 
 /** Find our game for a Highlightly match: crosswalk first, then teams + tip-off within 8h. */
-async function findGame(db, m, home, away) {
+export async function findGame(db, m, home, away) {
   const cols = 'g.id, g.season, g.season_type, g.status, g.home_team_id, g.away_team_id, g.home_score, g.away_score, g.box_score_checks, g.box_score_synced_at';
   const { rows: [x] } = await db.query(
     `SELECT ${cols} FROM entity_id_crosswalk c JOIN games g ON g.id::text = c.canonical_id
@@ -73,10 +73,67 @@ export async function syncDate(db, hl, etDate, { now = new Date(), log = () => {
 export const boxDue = (g, now = new Date()) =>
   g.box_score_checks === 0 || (g.box_score_checks === 1 && g.box_score_synced_at && now - new Date(g.box_score_synced_at) >= 3 * HOUR);
 
+/** Both teams present and every team has player lines (a 404/empty box score is "not ready"). */
+export const boxReady = (box) => Array.isArray(box) && box.length >= 2 && box.every((t) => t.boxScores?.length);
+
+/**
+ * Resolve every box-score player to a canonical player (may create crosswalk rows / new players,
+ * outside any transaction, as the live worker always has).
+ * @returns {{sides:Array}|{problem:string}}
+ */
+export async function resolveSides(db, { box, game, teams }) {
+  const sides = [];
+  for (const t of box) {
+    const teamId = teams.get(String(t.team.id));
+    if (teamId !== game.home_team_id && teamId !== game.away_team_id) return { problem: `box team ${t.team.name} isn't in game ${game.id}` };
+    const entries = t.boxScores.map((b) => ({ hlId: String(b.player.id), name: b.player.name, line: statLine(b) }));
+    const who = await resolvePlayers(db, { teamId, season: game.season, entries });
+    sides.push({ teamId, entries, who });
+  }
+  return { sides };
+}
+
+/**
+ * The box-score SQL: player_game_stats (only over source = 'highlightly' rows), team_games totals for
+ * this game, box_score_checks. MUST run inside a transaction the caller owns.
+ * @returns {string[]} ids of players who played (for the player-rest recompute after COMMIT)
+ */
+export async function writeSides(db, { game, sides, starters, periods, out }) {
+  const touched = [];
+  for (const { teamId, entries, who } of sides) {
+    for (const e of entries) {
+      const r = who.get(e.hlId);
+      if (r.status !== 'matched') { out.held.push(`${e.name} (${r.reason})`); continue; }
+      if (r.created) out.created.push(e.name);
+      if (r.autolinked) out.autolinked.push(e.name);
+      const s = e.line.stats;
+      await db.query(
+        `INSERT INTO player_game_stats (game_id, player_id, team_id, started, dnp, ${STAT_COLS.join(', ')}, source, updated_at)
+         VALUES ($1, $2, $3, $4, $5, ${STAT_COLS.map((_, i) => `$${i + 6}`).join(', ')}, 'highlightly', now())
+         ON CONFLICT (game_id, player_id) DO UPDATE SET team_id = EXCLUDED.team_id, started = EXCLUDED.started, dnp = EXCLUDED.dnp,
+           ${STAT_COLS.map((c) => `${c} = EXCLUDED.${c}`).join(', ')}, updated_at = now()
+         WHERE player_game_stats.source = 'highlightly'`,
+        [game.id, r.playerId, teamId, starters.size ? starters.has(e.hlId) : null, e.line.dnp, ...STAT_COLS.map((c) => s[c])]);
+      out.rows++;
+      if (!e.line.dnp) touched.push(r.playerId);
+    }
+    const tot = teamTotals(entries.map((e) => e.line), periods);
+    const mine = teamId === game.home_team_id ? game.home_score : game.away_score;
+    const theirs = teamId === game.home_team_id ? game.away_score : game.home_score;
+    const cols = Object.keys(tot).filter((c) => c !== 'pts');
+    await db.query(
+      `UPDATE team_games SET won = $3, pts = $4, plus_minus = $5, ${cols.map((c, i) => `${c} = $${i + 6}`).join(', ')}
+        WHERE game_id = $1 AND team_id = $2`,
+      [game.id, teamId, mine > theirs, mine, mine - theirs, ...cols.map((c) => tot[c])]);
+  }
+  await db.query('UPDATE games SET box_score_synced_at = now(), box_score_checks = least(box_score_checks + 1, 2) WHERE id = $1', [game.id]);
+  return touched;
+}
+
 export async function loadBoxScore(db, hl, { game, match, teams, log = () => {} }) {
   const out = { loaded: false, rows: 0, created: [], autolinked: [], held: [] };
   const box = await hl.boxScore(match.id);
-  if (!Array.isArray(box) || box.length < 2 || !box.every((t) => t.boxScores?.length)) { log(`box score not ready for match ${match.id}`); return out; }
+  if (!boxReady(box)) { log(`box score not ready for match ${match.id}`); return out; }
   const lineups = await hl.lineups(match.id).catch(() => null);
   const starters = starterIds(lineups);
   const periods = Math.max(match.state?.score?.homeTeam?.length ?? 4, 4);
@@ -88,45 +145,12 @@ export async function loadBoxScore(db, hl, { game, match, teams, log = () => {} 
     return out;
   }
 
-  const sides = [];
-  for (const t of box) {
-    const teamId = teams.get(String(t.team.id));
-    if (teamId !== game.home_team_id && teamId !== game.away_team_id) { log(`box team ${t.team.name} isn't in game ${game.id}`); return out; }
-    const entries = t.boxScores.map((b) => ({ hlId: String(b.player.id), name: b.player.name, line: statLine(b) }));
-    const who = await resolvePlayers(db, { teamId, season: game.season, entries });
-    sides.push({ teamId, entries, who });
-  }
+  const resolved = await resolveSides(db, { box, game, teams });
+  if (resolved.problem) { log(resolved.problem); return out; }
 
   await db.query('BEGIN');
   try {
-    const touched = [];
-    for (const { teamId, entries, who } of sides) {
-      for (const e of entries) {
-        const r = who.get(e.hlId);
-        if (r.status !== 'matched') { out.held.push(`${e.name} (${r.reason})`); continue; }
-        if (r.created) out.created.push(e.name);
-        if (r.autolinked) out.autolinked.push(e.name);
-        const s = e.line.stats;
-        await db.query(
-          `INSERT INTO player_game_stats (game_id, player_id, team_id, started, dnp, ${STAT_COLS.join(', ')}, source, updated_at)
-           VALUES ($1, $2, $3, $4, $5, ${STAT_COLS.map((_, i) => `$${i + 6}`).join(', ')}, 'highlightly', now())
-           ON CONFLICT (game_id, player_id) DO UPDATE SET team_id = EXCLUDED.team_id, started = EXCLUDED.started, dnp = EXCLUDED.dnp,
-             ${STAT_COLS.map((c) => `${c} = EXCLUDED.${c}`).join(', ')}, updated_at = now()
-           WHERE player_game_stats.source = 'highlightly'`,
-          [game.id, r.playerId, teamId, starters.size ? starters.has(e.hlId) : null, e.line.dnp, ...STAT_COLS.map((c) => s[c])]);
-        out.rows++;
-        if (!e.line.dnp) touched.push(r.playerId);
-      }
-      const tot = teamTotals(entries.map((e) => e.line), periods);
-      const mine = teamId === game.home_team_id ? game.home_score : game.away_score;
-      const theirs = teamId === game.home_team_id ? game.away_score : game.home_score;
-      const cols = Object.keys(tot).filter((c) => c !== 'pts');
-      await db.query(
-        `UPDATE team_games SET won = $3, pts = $4, plus_minus = $5, ${cols.map((c, i) => `${c} = $${i + 6}`).join(', ')}
-          WHERE game_id = $1 AND team_id = $2`,
-        [game.id, teamId, mine > theirs, mine, mine - theirs, ...cols.map((c) => tot[c])]);
-    }
-    await db.query('UPDATE games SET box_score_synced_at = now(), box_score_checks = least(box_score_checks + 1, 2) WHERE id = $1', [game.id]);
+    const touched = await writeSides(db, { game, sides: resolved.sides, starters, periods, out });
     await db.query('COMMIT');
     out.loaded = true;
     await recomputePlayerRest(db, game.season, touched);

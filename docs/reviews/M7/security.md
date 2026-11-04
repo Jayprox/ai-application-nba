@@ -218,3 +218,95 @@ Rationale:
   - Does the Write tool expand `~user`? This decides finding 14.
   - Was any `.env*` file ever tracked in git history? This decides the impact of finding 10.
 - Next role: Dev (fix findings 1-7 and add corpus cases), then Sec re-review. This is fix cycle 1 of 3.
+
+---
+
+## Re-review (fix cycle 1)
+
+Date: 2026-11-04. Reviewer: Sec.
+
+### R.1 Scope and tools
+
+- Code HEAD: `a6e7f9a74caf93b5836797db63c4ed5cfc272073`.
+- Fix commits reviewed: `b4304f5`, `9f5d141`, `bd47faa`, `c905f74`, `555cc69`, `55b96d5`, `13ad1bd`, `37acbc5`, `a6e7f9a`. I read every source change (`git diff 8b0aba3 a6e7f9a -- tools/approver/src tools/approver/policy`).
+- Install: a fresh `enforce` temp install of the fixed `src/` and policy (temp HOME and repo under `scratchpad/m7-sec/r2`). Same harness and payload as in section 1. No real HOME, Keychain, network, model or settings were used.
+- Tests: `sandbox-exec` with outbound network denied gives **155 pass, 0 fail**.
+- Shell facts:
+  - Claude Code's own Bash tool runs in non-interactive zsh 5.9, so `echo A # ; echo B` prints only `A` and comments are honoured. The parser's comment model matches.
+  - Brace and here-doc behaviour was checked with `zsh -fc` and `/bin/bash -c`, using harmless `echo` scripts in scratch.
+
+### R.2 Round-1 findings, re-tested
+
+| # | Round-1 repro | Now | Status |
+|---|---|---|---|
+| 1 | `git diff /dev/null ~/.config/gh/hosts.yml`, `… ~/.railway/config.json`, `git diff --stat README.md /etc/hosts` | ask (`K-DEFAULT`) | Fixed |
+| 2 | unquoted `gh pr create --title $(cat <<'EOF'…)`, `gh pr comment … --repo …`, `git commit -m $(…--amend --no-verify…)` | ask. The quoted form with `.env` in the body is now deny (`D-SECRET-ENVFILE`). The normal quoted commit message is still allowed. | Fixed |
+| 3 | Write `.ignore`, then `rg -n KEY` | `.ignore` is `K-PATH` ask. `rg` without `--no-ignore` is ask. Locally, `rg --no-ignore` ignores an `.ignore` whitelist and still skips hidden files. | Fixed |
+| 4 | Write `package.jſon`, `opſ/…`, `Dockerﬁle` / `ſecrets/x` / `Application ſupport/…/mode` | `K-UNICODE` ask / `D-SECRET-PATH` deny / `D-SELF` deny | Fixed |
+| 5 | Write `sub/.git/config`, `sub/.git` (gitdir file); `cd sub/n1 && git status` with a nested `.git` | deny / deny / ask | Fixed for `.git`, **bypassed: see R1 below** |
+| 6 | here-doc `EOF)` smuggling | ask (`heredoc_ambiguous_terminator`) | Fixed |
+| 7 | `cd <install dir> && chflags nouchg mode`; `echo <install>/mode \| xargs chflags nouchg` | deny (`D-SELF`) | Fixed |
+| 8 | `git --config-env x=Y push origin main`, `arch … curl`, `noglob curl` | deny | Fixed |
+| 9 | Write `.npmrc`, `.mcp.json`, `CLAUDE.local.md` | ask (`K-PATH`) | Fixed. The drill commands still have no integrity guard; I accept that as residual, per A12. |
+| 10 | `grep -r --exclude=… .`, `git log -p -- '.e*'` | ask | Fixed |
+| 11 | redaction ReDoS | `redact()` of 4 MiB in about 1 ms. A payload over 4 MiB fails closed at once (`stdin_oversized`). | Fixed |
+| 12 | redaction gaps (glued key, `sk_`, split key, JSON, quoted, after 5,000 characters) | all redacted | Fixed |
+| 14 | Write `~jayprox_pro/.zshrc` | ask (`K-OUTSIDE`) | Fixed |
+
+### R.3 New findings
+
+**R1. Major (Sec 5 bypass, still open): an implicit git directory needs no `.git` name**
+- Location: `allow.mjs` `nestedGit()` (from `555cc69`) only `lstat`s `<dir>/.git`. `paths.mjs:124` protects only path segments named `.git`.
+- How git behaves: during discovery git also accepts **the directory itself** as a git dir when it contains `HEAD`, `objects/` and `refs/`. With `core.bare=false` and `core.worktree` in its `config`, git then works on it like a normal repository, using that config: `core.fsmonitor`, `core.hooksPath`, `diff.external`.
+- Local check (no command config used): in `sub/g` containing `HEAD`, `objects/`, `refs/` and `config` (`worktree=<sub/g>`, plus a harmless probe key), `git rev-parse --git-dir --show-toplevel` printed `.` and `<repo>/sub/g`, and `git config --get probe.marker` returned the value from `sub/g/config`.
+- Repro (enforce):
+  - Write `<repo>/sub/g2/HEAD`, `<repo>/sub/g2/config`, `<repo>/sub/g2/objects/k` and `<repo>/sub/g2/refs/k` each give ALLOW (`L-EDIT`).
+  - `cd sub/g && git status`, `cd sub/g && git diff`, `cd sub/g && git commit -m x` and `cd sub/g && git log` each give ALLOW (`L-GIT-READ` / `L-GIT-COMMIT`).
+- Impact: the same as round-1 finding 5. Arbitrary command execution through allowed "read-only" git, by way of agent-written config and hooks.
+- Fix:
+  - Before any git allow, run `git rev-parse --absolute-git-dir` through the injected `runGit` in each candidate cwd. Use `GIT_CEILING_DIRECTORIES=<parent of repo root>`; `rev-parse` does not run fsmonitor or hooks. Require the result to equal `<repoRoot>/.git`, otherwise ask.
+  - Alternatively, extend `nestedGit` to treat a directory with `HEAD` plus `objects` plus `refs` (or a `config`/`commondir` file) as a git dir.
+  - Add a corpus case.
+
+**R2. Blocker (regression from `13ad1bd`): brace expansion of the command word does not match zsh, so a different program runs than the one judged**
+- Location: `parse.mjs` `finish()`. A command word such as `{ls,X}` is replaced by literal, non-dynamic words `ls X`, which the allow rules then accept. zsh, the shell Claude Code actually uses, parses `{ls,X}` at command position as a `{ … }` group that runs the single command word `ls,X`.
+- Local check:
+  - With dirs `A/` and `ls,A/` and an executable `run.sh`, `zsh -fc '{ls,A/../run.sh}'` printed `RAN-OTHER-PROGRAM`, so zsh executed `ls,A/../run.sh`, which is `./run.sh`.
+  - `/bin/bash` ran `ls A/../run.sh`.
+  - `zsh -fc '{echo,hi}'` gives `command not found: echo,hi`.
+- Repro (enforce):
+  1. Write `<repo>/ls,A/keep` gives ALLOW (`L-EDIT`; this creates the directory `ls,A`). A directory `A` must exist; any existing directory name works with the matching `ls,<name>` directory.
+  2. `CMD = {ls,A/../test/run.sh}` gives ALLOW (`L-READ`). `{cat,A/../test/run.sh}` gives ALLOW too.
+- Impact: any executable inside the repo runs silently, with no edit needed. The repo has 4 tracked executables, including `scripts/backup-db.sh` and `scripts/weekly.sh`. Combined with an allowed Edit of an existing executable's content (Edit keeps the mode), this is arbitrary code execution. It is not on the allow list in any form.
+- Fix: keep brace-expanded words `dynamic` for allow purposes, so `allowRule` refuses them, and use `expansions` **only** for the deny scan. That keeps the useful part of `13ad1bd` (`{cu,}rl` → deny). Add corpus cases `{ls,.}` → ask and `{ls,A/../x}` → ask.
+
+**R3. Minor: quadratic brace-detection regex** (`parse.mjs` readWord, `/(?<![\\$])\{[^{}]*(,|\.\.)[^{}]*\}/`)
+- `ls {` followed by 30,000 commas takes about 1.5 s of parse time at the 32 KB `MAX_PARSE` limit (measured 1.6 s end to end, decision ask).
+- It stays within the 5 s hook timeout, so it can only delay a prompt. Note that the 3 s watchdog cannot interrupt synchronous work.
+- Fix: bound the scan, for example only test words of 4 KB or less, and treat longer brace words as dynamic.
+
+**R4. Note: things checked that hold**
+- Comment blanking (`code`): `a#b`, `${x#y}`, `'#'`, `"#"`, `$#`, `\#`, `#` after a here-doc operator, `#` then backslash-newline, `|#…⏎`, and `<(#…⏎curl)` never hide a later command; each of these with `; curl x` is deny. `ls # WEEKLY_CONFIRM_PROD=1` and `ls #$(curl x)` are allowed, which is correct because zsh treats them as comments. Nested parsers (`bash -c`, eval) do not blank anything, which is conservative.
+- `cd` tracking: `cd -` gives ask, `(cd sub) && cat a.txt` gives ask, and `cd sub; cat a.txt` gives ask (wider set). `cd sub && cd .. && ls` is allowed, which is correct. `CDPATH` from the owner's environment remains an untracked residual (round-1 note).
+- Git boundary: `--git-dir=`, `-C`, `GIT_DIR=`, `--work-tree=`, `:/`, `:(top)` and `HEAD:../x` all give ask. `git diff A/../../outside` is allowed only when the path does not exist, and git cannot read a file that does not exist.
+- `MAX_PARSE` 32 KB: an over-long `…; curl x` or `…; c\url x` is deny through the loose scan, and `$'\x63url'` is ask. Nothing over the limit is allowed.
+- `rg --no-ignore`: hidden files (`.env`, `.claude`) are still skipped. Gitignored, non-hidden files (`logs/`, `node_modules/`) become searchable, but `cat` could already read them; nothing new is exposed.
+- Round-1 notes 13 (mode file and pty) and 15 (zsh snapshot aliases and functions) are unchanged. R2 is a concrete case of note 15: the parser models bash, but zsh executes.
+
+### R.4 Verdict (fix cycle 1)
+
+`VERDICT: NOT READY`
+
+Rationale:
+- Every round-1 Blocker and Major is fixed except finding 5, which a variant (R1) still bypasses.
+- The cycle introduced a new Blocker (R2): a zsh/parser differential in the new brace expander that silently allows running in-repo executables, including `scripts/backup-db.sh`.
+- Both fixes are small (R2: one line, keep brace words dynamic for allow; R1: a `rev-parse --absolute-git-dir` equality check).
+- Shadow-mode install still adds no risk; `enforce-deny` and `enforce` must wait for R1 and R2.
+- Confidence: R2 was confirmed end to end (approver ALLOW and zsh executing the other program). For R1, the approver ALLOW and git's use of the implicit git dir's config are confirmed; I did not run a command-executing config key.
+
+### Handoff (fix cycle 1)
+
+- Done: re-ran every round-1 repro on a fresh enforce temp install; attacked the new code (comments, braces, cd/pushd, `rg --no-ignore`, git boundary, nested `.git`, APFS fold, `MAX_PARSE`, redaction); ran the tests offline (155/155).
+- Files touched: `docs/reviews/M7/security.md` (this section, not committed). Scratch is under `scratchpad/m7-sec/r2`, `brace1` and `harness/`.
+- Open questions: none new. The questions from round 1 about the executing shell and Write tool expansion are now answered: zsh, and `~user` is ask.
+- Next role: Dev, to fix R1 and R2 and add corpus cases (fix cycle 2 of 3), then Sec re-review.

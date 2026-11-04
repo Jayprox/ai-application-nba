@@ -158,3 +158,61 @@ CI is green, the existing 115 tests are untouched, 256 of 256 pass locally, and 
 - Files created: `/Users/jayprox_pro/Documents/Projects/git/ai-application-nba/docs/reviews/M7/qa.md` (uncommitted). Scratch (not in the repo): `/private/tmp/claude-501/-Users-jayprox-pro-Documents-Projects-git-ai-application-nba/4aea983d-bbc6-4d98-8d2c-164828f19465/scratchpad/m7-qa/` (`cases1.mjs` to `cases14.mjs`, `run.mjs`, `fc.sh`, `fc2.sh`, `perf.mjs`, `perf2.mjs`, `modes.mjs`, `mk.mjs`, `inst2.mjs`, `sweep-*.txt`). No application source, settings, hook, `.env*` or Keychain was touched; no network or model call.
 - Open questions for the owner/Lead: (1) should self-protection denies apply when the session cwd is outside the repo (finding 7)? (2) Should `.npmrc` be an ask-listed edit (finding 3)? (3) Is a rule-id-only deny message acceptable (finding 8)?
 - Recommended next role: Developer, to fix finding 1 (and ideally 2, 5, 6, 9) plus the README corrections, then Lead review. Findings 3, 4, 7 can be triaged by the Lead. One fix cycle should be enough.
+
+---
+
+## Re-review (fix cycle 1)
+
+Code HEAD `a6e7f9a` (commits `55b96d5`, `13ad1bd`, `37acbc5`, `a6e7f9a` on top of `8b0aba3`). Same rules as before: temporary HOME (`home2/`, fresh install from the updated clone, node path recorded), no Keychain, network, model, settings or `.env*`, no source edits.
+
+### R1. CI and tests
+
+- `gh pr checks 8`: backend, frontend, root, worker all pass.
+- Root `npm test`: 270 tests, 270 pass, 0 fail (was 256; the 115 existing `scripts/lib` tests are untouched, approver tests 141 to 155).
+
+### R2. Original findings
+
+| Finding | Repro re-run | Result |
+|---|---|---|
+| 1 `chflags`/`xattr`/writes after `cd` into a protected folder | `cd <install> && chflags nouchg mode`, `cd <install>; chflags ...`, `cd .claude && chflags nouchg settings.json`, `cd .claude; xattr -c settings.json`, `pushd <install> && chflags ...`, `cd ~/Library/Application\ Support && chflags -R nouchg claude-approver`, plus `cd <install> && echo x > mode`, `rm mode`, `sed -i`, `cd ~/.claude && echo x > settings.json`, `cd <log> && rm decisions.jsonl`, `cd claudelink2 && git add settings.json` | FIXED: all now deny (`D-SELF`) |
+| 2 other self-modification forms | `dd of=<install>/mode` and `dd of=.claude/...`, `echo x > nonexist/../.claude/settings.json`, `git diff --output=.claude/settings.json`, `echo <install>/mode \| xargs chflags nouchg` | FIXED: all deny |
+| 4 quadratic long token, watchdog | `ls <N x a>` and unbalanced quote at 20 KB, 50 KB, 100 KB, 1 MB, plus the 22-shape pathological set (`perf.mjs`) | FIXED: every case 125 to 215 ms, ask. Commands over 32 KB are not parsed (a 50 KB commit message is now ask; 20 KB is still allow). README no longer claims the watchdog stops a CPU loop. |
+| 5 brace-expanded command word | `{curl,x}`, `curl{,}` | FIXED: deny (`D-NET`) |
+| 6 comment text changes the decision | `git push -u origin feat/x # main` (was deny), `... # safe, allow` (was ask), `git status # main` | FIXED: allow, as without the comment |
+| 9 versioned node path / verify | Install now records `/opt/homebrew/bin/node` (shown in the installer output). On a copy of the install with `node_path` set to a missing Cellar path, `verify` prints `MISSING OR NOT EXECUTABLE: the hook cannot start and Claude Code silently falls back to normal prompts. Re-run uninstall and install.`, then `VERIFY FAILED`, exit 1. With the real path it prints `(ok)`, `VERIFY OK`. | FIXED |
+
+Findings 3 and 7 (not in your list): `.npmrc`, `.gitattributes`, `.gitignore` edits are now ask (`K-PATH`). Reading the README, the outside-repo limit is now stated (see R4); the code still stays silent outside the repo by design.
+
+### R3. Full sweep, old code vs new code
+
+676 requests (the 630 from before plus 13 cd-tracking and chflags additions; `cases10` was a damaged scratch file and is excluded from both runs), run through the real hook against the old install and the fresh new install in all three modes.
+
+- Shadow: 676 requests, 0 bytes on stdout, all exit 0.
+- Enforce-deny: 0 allow outputs, 287 deny outputs.
+- Enforce: 30 decisions changed, listed here in full.
+  - ask to deny (improvements, 22): `{curl,x}`, `curl{,}`, `dd of=<protected>` (2), `echo x > ./a/../.claude/settings.json`, `nonexist/../.claude` redirect, the 12 `cd`-then-relative-write or flag-changer cases, `xargs chflags` from stdin, `git diff --output=.claude/settings.json`, `cd claudelink2 && git add settings.json`.
+  - allow to ask (the intended stricter changes, 6): `rg foo`, `rg foo worker/src`, `rg --files` (all need `--no-ignore` now), edits to `.npmrc`, `.gitattributes`, `.gitignore`.
+  - to allow (2): ask to allow `rg --no-ignore foo` (the new required form, intended) and deny to allow `git push -u origin feat/x # main` (the comment fix, finding 6).
+- Other changes by direct re-test: `cat docs/файл.md` (non-ASCII path) is ask; `grep -r foo worker` and `grep -rn token .` are ask (were already ask in my set); `git commit -m ".env"`, `-m "~/.ssh"`, and the heredoc form with ".env" in the body are deny.
+
+**New ALLOW: none that policy does not permit.** The only new allows are the two above, both intended. I judge the regressions acceptable: recursive `rg` without `--no-ignore`, recursive `grep`, `.gitignore` edits and non-ASCII paths now prompt; each is a one-keystroke approval and removes a way for agent-written config (`.ignore`, `.gitignore`) to whitelist `.env` or a lookalike path.
+
+### R4. README corrections
+
+Node-path caution and the `brew upgrade node` fix are present and match the behaviour; the watchdog sentence is now accurate (idle-wait only, bounded parser and redaction, Claude Code's 5 s timeout as the backstop); the outside-repo silence and "your Edit/Write deny rules are the only protection there, and in shadow mode everywhere" are stated; `.npmrc` and similar config files are listed as ask. The default model name changed to `claude-haiku-5-5` and the price defaults are flagged as placeholders to set from the Console: not a QA matter, but the owner should confirm the model id exists on their account before step 5 of the checklist, and set `--price-in/--price-out`.
+
+### R5. New observations
+
+1. Minor (pre-existing, not introduced by the fix): a recursive search from the repo root is allowed when it names no path, for example `rg --no-ignore foo`, `rg --no-ignore foo .`, `rg --no-ignore --files`. `rg` skips hidden files, so `.env*` and `.claude/` are covered, but non-hidden secret-named files are read: in my clone `secrets/a.txt`, `server.pem`, `id_rsa`, `credentials.json` (plain files I created; the clone's `.gitignore` does not ignore them) are all searched, while `rg --no-ignore foo secrets` is deny and `... server.pem` is ask. Policy: reading `secrets/` and SSH keys is deny; A1 treats `*.pem`, `id_*`, `credentials*` as non-secret-readable. I could not check whether the real repo has such files (and did not probe it). Suggest ask for an `rg` with no path or `.`/root-level directory unless the pattern excludes them (`-g '!secrets' -g '!*.pem' ...`), or deny these names via `-g`.
+2. Note: commit messages mentioning `.env` or `~/.ssh` are deny only when the whole token is the path (`-m ".env"`) or the text sits in a heredoc body (the normal Claude Code commit form); a plain sentence in `-m "fix .env loading"` or `-m "touches .env"` is allow. Inconsistent but harmless. A hard deny cannot be approved by the owner in `enforce-deny`/`enforce`, so a legitimate commit message that mentions `.env` makes the agent reword it. Acceptable if the owner accepts that; worth a line in the README.
+
+### R6. VERDICT: READY WITH CONDITIONS
+
+Findings 1, 2, 4, 5, 6 and 9 are fixed and verified with the original repros; `chflags`/`xattr` on protected paths, including after a `cd`, is now deny in every form I tried. CI is green and `npm test` shows 270 of 270. The 676-request re-sweep found no unintended ALLOW; the 30 changed decisions are either ask to deny improvements or the stricter prompts the Dev chose on purpose, which I accept. The remaining condition is small: close or document the recursive `rg` at the repo root that can read non-hidden secret-named files (R5.1), and have the owner confirm the model id. Neither blocks the 7-day shadow run, and since shadow prints nothing the risk during it is nil. Note the review-loop count: this is fix cycle 1 of 3.
+
+## Handoff (re-review)
+
+- Done: re-verified findings 1, 2, 4, 5, 6, 9; `npm test` 270 of 270; CI green; 676-request sweep in enforce, shadow and enforce-deny compared against the previous code; README corrections and `verify` node check confirmed.
+- Files: this section in `/Users/jayprox_pro/Documents/Projects/git/ai-application-nba/docs/reviews/M7/qa.md`. Scratch in `.../scratchpad/m7-qa/` (`sweep.sh`, `cmp.mjs`, `out-old-*.jsonl`, `out-new-*.jsonl`, `cases15.mjs`, `cases16.mjs`, `perf-n.mjs`, `perf2-n.mjs`, `home2/`). No source, settings, `.env*` or Keychain touched.
+- Open questions: should a path-less recursive `rg` be ask (R5.1)? Is the model id `claude-haiku-5-5` valid for the owner's account?
+- Next role: Lead review, then Coordinator readiness report. Optional small Dev follow-up for R5.1 and the README line for R5.2.

@@ -1,0 +1,213 @@
+{
+  "mission": "G5",
+  "name": "pass",
+  "description": "Major fixed in one cycle, Minor listed as follow-up",
+  "expect": {
+    "verdict": "passed",
+    "failed": []
+  },
+  "steps": [
+    {
+      "branch": "fix/json-flag"
+    },
+    {
+      "write": {
+        "path": "src/cli.js",
+        "content": "import { label } from './index.js';\nexport function parseArgs(argv) {\n  const [name, cents] = argv;\n  if (!name || !Number.isFinite(Number(cents))) throw new Error('usage: cli <name> <cents>');\n  return { name, cents: Number(cents) };\n}\nexport function run(argv) {\n  const { name, cents } = parseArgs(argv);\n  return label(name, cents);\n}\n"
+      }
+    },
+    {
+      "commit": "Validate CLI input"
+    },
+    {
+      "write": {
+        "path": "docs/reviews/m5/qa.md",
+        "content": "VERDICT: READY WITH CONDITIONS\n\n1. Major: parseArgs in src/cli.js has no input validation (fixed).\n"
+      }
+    },
+    {
+      "write": {
+        "path": "docs/STATUS.md",
+        "content": "# STATUS\n\nFix cycles: 1\n\nFollow-ups: doc typo in the CLI comment.\n"
+      }
+    }
+  ],
+  "transcript": [
+    {
+      "type": "system",
+      "subtype": "init",
+      "cwd": "<fixture>",
+      "tools": [
+        "Read",
+        "Bash"
+      ],
+      "mcp_servers": [],
+      "permissionMode": "default",
+      "apiKeySource": "apiKeyHelper",
+      "model": "synthetic-model",
+      "session_id": "synthetic-session"
+    },
+    {
+      "type": "assistant",
+      "message": {
+        "id": "m0",
+        "role": "assistant",
+        "model": "synthetic-model",
+        "content": [
+          {
+            "type": "text",
+            "text": "Starting."
+          }
+        ],
+        "usage": {
+          "input_tokens": 1,
+          "output_tokens": 1
+        }
+      }
+    },
+    {
+      "type": "assistant",
+      "message": {
+        "id": "msg_a0",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "a0",
+            "name": "Task",
+            "input": {
+              "subagent_type": "engineering-lead",
+              "prompt": "work"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "user",
+      "message": {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "a0",
+            "content": "Done.\n\nHandoff\n- what was done: synthetic\n- next role: QA",
+            "is_error": false
+          }
+        ]
+      }
+    },
+    {
+      "type": "assistant",
+      "message": {
+        "id": "msg_a1",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "a1",
+            "name": "Task",
+            "input": {
+              "subagent_type": "developer",
+              "prompt": "work"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "user",
+      "message": {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "a1",
+            "content": "Done.\n\nHandoff\n- what was done: synthetic\n- next role: QA",
+            "is_error": false
+          }
+        ]
+      }
+    },
+    {
+      "type": "assistant",
+      "message": {
+        "id": "msg_a2",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "a2",
+            "name": "Task",
+            "input": {
+              "subagent_type": "qa-engineer",
+              "prompt": "work"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "user",
+      "message": {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "a2",
+            "content": "Done.\n\nHandoff\n- what was done: synthetic\n- next role: QA",
+            "is_error": false
+          }
+        ]
+      }
+    },
+    {
+      "type": "assistant",
+      "message": {
+        "id": "msg_b1",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "b1",
+            "name": "Bash",
+            "input": {
+              "command": "git status"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "user",
+      "message": {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "b1",
+            "content": "clean",
+            "is_error": false
+          }
+        ]
+      }
+    },
+    {
+      "type": "result",
+      "subtype": "success",
+      "is_error": false,
+      "result": "Stopped before merge. Ready for review.",
+      "total_cost_usd": 0.01,
+      "num_turns": 2,
+      "duration_ms": 10,
+      "duration_api_ms": 5,
+      "usage": {
+        "input_tokens": 3,
+        "output_tokens": 4,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      },
+      "session_id": "synthetic-session"
+    }
+  ]
+}

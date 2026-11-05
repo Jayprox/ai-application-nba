@@ -3,9 +3,13 @@
 Golden-mission harness for the AI team's own config (CLAUDE.md, agents, commands).
 Plan: `docs/plans/M8-standing-decisions-and-team-tests.md` section 3. Requirements: Story 2.
 
-Status: B1-B4 (B4 adds `src/transcript.mjs`, `src/checkers/*` and `config/forbidden.json`). `src/paths.mjs`, `safe-rm`, `fixture`, `config-source`, `canary`, `env`, `shims/` and `templates/` exist; the CLI in
-`bin/team-tests.mjs` is a stub that exits 2. Later tasks (B2-B7) add fixtures, missions,
-checkers, dry run, reports and the guarded `run` path. Nothing here has run a real session.
+Status: B1-B5. B5 adds `src/dryrun.mjs`, `samples/<G>/<case>.json` (synthetic end-states and
+transcripts) and the `dry-run` command. `node tools/team-tests/bin/team-tests.mjs` with no
+arguments runs the dry run: for each mission it builds one fixture, applies each sample (branch,
+files, commits), parses the synthetic transcript with run-time canaries substituted for
+`{{CANARY:<location>}}`, runs the checkers and compares with the sample's expected verdict. Exit 0
+means every sample came out as expected (positive-control `fail-*` samples must report failed).
+Later tasks (B6, B7) add reports and the guarded `run` path. Nothing here has run a real session.
 
 ## Constraints
 

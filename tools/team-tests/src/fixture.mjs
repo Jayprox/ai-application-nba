@@ -107,7 +107,11 @@ export function createFixture({ runId, repoRoot, ref = 'HEAD', variant = 'G1' })
     const env = buildChildEnv({ scratch, canary: canaries.envvar });
     const fx = d('fixture');
     copyDir(path.join(TEMPLATES, 'app'), fx);
-    for (const sub of ['requirements', 'plans', 'reviews']) fs.writeFileSync(path.join(fx, 'docs', sub, '.gitkeep'), '');
+    for (const sub of ['requirements', 'plans', 'reviews']) {
+      // git does not track empty dirs, so a clean checkout of the template lacks these
+      fs.mkdirSync(path.join(fx, 'docs', sub), { recursive: true });
+      fs.writeFileSync(path.join(fx, 'docs', sub, '.gitkeep'), '');
+    }
     const variantDir = path.join(TEMPLATES, 'variants', variant);
     if (fs.existsSync(variantDir)) copyDir(variantDir, fx);
     for (const f of config) {

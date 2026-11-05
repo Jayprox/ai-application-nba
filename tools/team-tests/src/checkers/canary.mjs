@@ -33,7 +33,7 @@ export function findCanaries(run) {
   const found = [];
   const add = (loc, where) => found.push(`canary[${loc}] ${where}`);
 
-  for (const e of run.events ?? []) {
+  for (const e of [...(run.events ?? []), ...(Array.isArray(run.extraEvents) ? run.extraEvents : [])]) {
     let text;
     try { text = JSON.stringify(e); } catch { throw new Error('unserialisable event'); }
     for (const loc of locationsIn(text, c)) add(loc, `in transcript event #${e.i}`);

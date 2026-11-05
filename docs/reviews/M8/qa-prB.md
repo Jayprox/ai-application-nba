@@ -168,3 +168,38 @@ I found no Blocker or Major.
 VERDICT: READY
 
 Rationale: At `b7f0d30` CI is green, root `npm test` is 518/518 with nothing skipped, the dry run is 28/28 as expected with exit 0, and my 18 negative cases pass. Each of R2-1, R2-2 and R2-4 has direct tests that pass, including the error-within-15-s cases for special files, the replace-ref cases that still fail the manifest and config criteria, and the four ignore-file hiding methods that still fail G4 scope. The test directory diff has no removed lines and no skips, so nothing was weakened. Story 2 AC1-AC7 and G1-G7 show no regression; the only behavioural trade-off is the by-name exclusion of the harness's own `.env` and `.fake-keychain`, noted above. Remaining items are Minors and Notes for follow-up. QA still cannot certify real `claude` behaviour.
+
+## Spot check cycle 4 (at e4d2f31)
+
+Scope: PR #11, branch `feat/m8b-team-tests`, code at `e4d2f31` (checkout HEAD is `c7d70bb`; `git diff --stat e4d2f31 HEAD` is `docs/STATUS.md` only). All runs were in a scratch `git clone --local` checked out at `e4d2f31`; the main checkout was not touched. CI run 42081941404: `gh run view --json` gives attempt 2, success, headSha `e4d2f31`; all 4 jobs green. No CI re-run was triggered.
+
+### Results
+
+| Check | Result |
+|---|---|
+| Root `npm test`, scratch clone | 522 tests, 521 pass, **1 fail**, 0 skipped, 244.0 s (wall 4:05). Failure: `Sec F5: a timeout kills the whole process group` (`checkers-tests-before-after.test.mjs:168`, ENOENT on the grandchild pid file, 8.7 s). Not the AC6 test. See Finding 1. |
+| Dry run x5, same clone | 5 of 5 `dry run OK`, 28/28 as expected, 45 s each (plan target 30 s, carried Note) |
+| No test weakened | `git diff b7f0d30..e4d2f31 -- 'tools/**/test/**'` touches 2 files and only adds, except 3 changed lines that add failure messages. AC6: `assert.deepEqual(mismatched, [], formatSummary(r))` keeps the same empty-list assertion and adds a message; `assert.equal(r.ok, true)` and the case-count assertion are unchanged. No skip, `only`, retry, raised timeout or tolerance. The CLI test only adds stdout to its failure message. 4 new tests (R3-1 x2, git failure reason, `mismatches`), matching 518 to 522. |
+| R3-1 regression | Two tests (`.env`, `.fake-keychain` committed with `add -f` on a side branch, non-canary content). Each has a control (planted untracked files alone give `passed` and are not listed), then asserts the file is listed and `G4.only-g1-files` is `failed`. Both passed in my full run. The fix filters the `ls-files --others` output only (`util.mjs` diff), as Lead Finding 2 asked. I did not re-run them against `b7f0d30`; the Dev reports they fail there. |
+| Diagnostics, forced mismatch | In the scratch clone I edited `G2/fail-fakeprod.json` to expect `G2.no-network` instead of `G2.fakeprod-empty`. The dry run printed, per criterion, `G2.fakeprod-empty: failed (expected passed)` and `G2.no-network: passed (expected failed)`, each with up to 2 evidence lines, and exited non-zero. `dryrun.test.mjs` printed the same through the assert message (`G2/fail-fakeprod: G2.fakeprod-empty=failed, G2.no-network=passed`). No path in the output. |
+| Dry-run test under load | 24 busy-loop node processes on a 10-core machine: `dryrun.test.mjs` 10/10 pass, 97.8 s. The AC6 failure did not recur. |
+
+### Findings
+
+1. **Major (not caused by cycle 4; test present since cycle 2) - the `Sec F5` grandchild test is load-sensitive and fails without a product defect.**
+   - Repro: (a) full `npm test` in the scratch clone: 1 failure as above. (b) With 24 busy-loop `node` processes running, `node --test tools/team-tests/test/checkers-tests-before-after.test.mjs` failed 2 of 4 times, same test, 7.0 s and 7.1 s. The same file passed 3 of 3 with no load.
+   - Cause (from reading `checkers-tests-before-after.test.mjs:147-175`): the checker timeout is `testTimeoutMs = 1500`, and the test child must start node, run `spawn` and write the pid file inside that window. Under CPU contention the timeout fires first, no pid file exists, and `readFileSync` throws ENOENT. Nothing leaks; the test cannot tell "slow start" from "broken".
+   - Why it matters: a second intermittent failure in the same suite, which can fail CI with a misleading ENOENT. The Dev's 522/522 and the two green CI attempts do not rule it out. It may belong to the same family as the AC6 flake (checker child processes under contention), but I cannot confirm that.
+   - Fix: in the test only, poll for the pid file for several seconds, or raise `testTimeoutMs` for it, and make the failure say "child never started". Keep the `dead === true` assertion. Because it edits a test to be more tolerant, treat it under always-ask 11 and get owner awareness.
+
+2. **Minor - mismatch diagnostics omit an expected-failed id that matches no result.** `mismatches()` iterates `results`, so a sample whose `expect.failed` names a nonexistent criterion (I tried `G2.canary-never`) shows the case-level MISMATCH line and no criterion line. `validateSample` does not check ids against the mission. Low impact for the CI flake. Follow-up: validate ids in `validateSample`.
+
+3. **Note - diagnostic coverage of the original AC6 flake.** If `G1/pass` or `G4/fail-cart` mismatches again, the log now shows criterion id, actual vs expected status, an error code (git spawn error, signal or status plus a fixed stderr category: `bad-object`, `index-lock`, `corrupt-object`, `other`, `empty`, and similar) and 2 evidence lines. That tells an `error` from a wrong `passed` or `failed`. Gaps: an exception that is not a `CheckerInputError` and has no short `code` reports only `checker raised an exception`, and `other` hides git's text by design. The root cause of the AC6 flake is still unknown and did not recur in 5 dry runs, 1 full run and 1 loaded test run. Lead Finding 1 parts (b) and (c) stay open.
+
+4. **Note - dry run 45 s vs the 30 s target** (carried from Lead Note 5).
+
+### Verdict
+
+VERDICT: READY WITH CONDITIONS
+
+Cycle 4 does what the brief says: no test was weakened, the R3-1 regression tests are sound, the new diagnostics show enough to diagnose a recurrence of the AC6 failure, and the dry run was stable (5 of 5, and the dry-run test passed under heavy load). My one full local run did not match the Dev's 522/522. It failed on a different, load-sensitive test (Finding 1), which I reproduced 2 of 4 times under CPU load. That test predates this cycle and CI is green on the head, so I do not block this cycle's diff on it. The condition: the Coordinator reports Finding 1 to the owner as a known flaky test, then either gets a fix in a separately authorized cycle or records a follow-up, and does not present 522/522 as stable. The original AC6 flake's root cause is still unknown; this cycle only made it diagnosable.

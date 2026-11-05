@@ -260,6 +260,48 @@ function rmDeny(c, F) {
   if (rec && force) add(F.deny, 'D-RM-RF');
 }
 
+// ---- K-CLAUDE: any claude run other than the exact read-only `claude --help` / `claude --version` asks (M8 B8) ----
+// An older installed policy has no bash.claude list, so the default list keeps the rule on.
+const claudeNames = (B) => (B.claude || ['claude']).map((n) => String(n).toLowerCase());
+const CLAUDE_PKG = /^(@anthropic-ai\/claude-code)(@[^/]*)?$/i;
+const CLAUDE_EXEMPT = ['--help', '--version'];
+const RUNNERS_ALWAYS = new Set(['npx', 'bunx', 'pnpx']);
+const RUNNERS_SUB = { pnpm: ['dlx', 'exec'], yarn: ['dlx', 'exec'], npm: ['exec', 'x'], bun: ['x'] };
+const isAssignWord = (w) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(w.raw ?? w.text);
+
+// The program itself: plain `claude` (any path), unless it is exactly the program plus one read-only flag.
+function claudeProgramAsk(c, B) {
+  if (!c.nm || !claudeNames(B).includes(c.nm)) return false;
+  const exact = c.words.length === 2 && !c.words[1].dynamic && CLAUDE_EXEMPT.includes(c.words[1].text)
+    && c.assigns.length === 0 && !(c.nested === 'wrapper' && c.pipeIndex > 0);
+  return !exact;
+}
+
+// Wrapper / opaque / package-runner words: a claude word anywhere asks, except the exact `... claude --help|--version`
+// tail with no env assignment in front of it. A package spec of the CLI always asks.
+function claudeWordsAsk(words, B) {
+  const names = claudeNames(B);
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    if (w.dynamic) continue;
+    if (CLAUDE_PKG.test(w.text)) return true;
+    const base = baseLower(w.text).replace(/@[^/@]*$/, '');
+    if (names.includes(baseLower(w.text))) {
+      const tail = i === words.length - 2 && !words[i + 1].dynamic && CLAUDE_EXEMPT.includes(words[i + 1].text);
+      if (!tail || words.slice(0, i).some(isAssignWord)) return true;
+    } else if (names.includes(base) && w.text.includes('@') && !w.text.startsWith('@')) return true; // claude@latest
+  }
+  return false;
+}
+
+function claudeRunnerAsk(c, B) {
+  const nm = c.nm;
+  if (!nm || !(RUNNERS_ALWAYS.has(nm) || RUNNERS_SUB[nm])) return false;
+  const words = arg(c);
+  if (RUNNERS_SUB[nm] && !words.some((w) => !w.dynamic && RUNNERS_SUB[nm].includes(w.text))) return false;
+  return claudeWordsAsk(words, B);
+}
+
 function psEnv(c) {
   return arg(c).some((a) => !a.dynamic && /^[A-Za-z]*e[A-Za-z]*$/.test(a.text) && !a.text.startsWith('-'));
 }
@@ -295,6 +337,7 @@ function judgeCommand(c, S, F) {
       if (first && inst.includes(first.text)) add(F.ask, 'K-INSTALL');
     }
     if (B.system.includes(nm)) add(F.ask, 'K-SYS');
+    if (claudeProgramAsk(c, B) || claudeRunnerAsk(c, B)) add(F.ask, 'K-CLAUDE');
     if (B.attr_changers.includes(nm)) {
       // The user-immutable flag can be cleared without sudo, so flag/attribute changers are fenced hard: any target on a
       // protected path (or above one), a target we cannot resolve, or a directory we cannot track is deny. Targets fed from
@@ -317,6 +360,7 @@ function judgeCommand(c, S, F) {
       if (B.keychain.includes(wn)) add(F.deny, 'D-SECRET-KEYCHAIN');
       if (B.env_dump.includes(wn)) add(F.deny, 'D-SECRET-ENVDUMP');
     }
+    if (claudeWordsAsk(arg(c), B)) add(F.ask, 'K-CLAUDE');
   }
   if (touches.length) {
     if (nm && (B.read_commands.includes(nm) || readOnlyForSelf(c))) add(F.ask, 'K-SELF-READ');
@@ -333,6 +377,7 @@ function looseDenyScan(texts, S, F) {
     if (B.net.includes(wn)) add(F.deny, 'D-NET');
     if (B.keychain.includes(wn)) add(F.deny, 'D-SECRET-KEYCHAIN');
     if (B.env_dump.includes(wn)) add(F.deny, 'D-SECRET-ENVDUMP');
+    if (claudeNames(B).includes(wn) || CLAUDE_PKG.test(t)) add(F.ask, 'K-CLAUDE');
     const ts = textSecret(t);
     if (ts.envfile) add(F.deny, 'D-SECRET-ENVFILE');
     if (ts.secret) add(F.deny, 'D-SECRET-PATH');

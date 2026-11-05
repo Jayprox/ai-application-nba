@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { makeEnv, seedRepo, cleanup, bash, judge, mkCtx, fakeGit } from './helpers.mjs';
+import { makeEnv, seedRepo, cleanup, bash, judge, mkCtx, fakeGit, SAMPLE_POLICY } from './helpers.mjs';
 import { runGit } from '../src/git-run.mjs';
 
 let env;
@@ -553,4 +553,50 @@ test('Sec C2-2: every allowed gh command goes through the same rev-parse git-dir
     assert.equal(judge(env, 'Bash', { command: cmd }, { ctx: mkCtx(env, { runGit: () => { throw new Error('x'); } }) }).decision, 'ask', cmd);
     assert.equal(judge(env, 'Bash', { command: 'cd nested && ' + cmd }, { ctx: ctxFor(good) }).decision, 'ask', 'nested .git: ' + cmd);
   }
+});
+
+// ---- K-CLAUDE (M8 B8): any claude run asks, except the exact read-only `claude --help` / `claude --version` ----
+test('K-CLAUDE: claude as a plain argument is not a run and is unchanged', () => check([
+  ['which claude', 'ask', 'K-DEFAULT'], ['grep claude x', 'ask', 'K-DEFAULT'], ['echo claude', 'ask', 'K-DEFAULT'],
+]));
+
+test('K-CLAUDE: exact --help and --version keep today\'s result; anything else asks', () => check([
+  ['claude --help', 'ask', 'K-DEFAULT'], ['claude --version', 'ask', 'K-DEFAULT'], ['claude --version | cat', 'ask', 'K-DEFAULT'],
+  ['ls; claude --version', 'ask', 'K-DEFAULT'], ['env claude --help', 'ask', 'K-DEFAULT'], ['sh -c "claude --help"', 'ask', 'K-DEFAULT'],
+  ['claude -h', 'ask', 'K-CLAUDE'], ['claude -v', 'ask', 'K-CLAUDE'], ['claude --help --version', 'ask', 'K-CLAUDE'],
+  ['claude --version x', 'ask', 'K-CLAUDE'], ['FOO=1 claude --help', 'ask', 'K-CLAUDE'], ['env FOO=1 claude --help', 'ask', 'K-CLAUDE'],
+  ['claude', 'ask', 'K-CLAUDE'], ['claude -p hello', 'ask', 'K-CLAUDE'],
+]));
+
+test('K-CLAUDE: absolute, relative, quoted and escaped program names ask', () => check([
+  ['/usr/local/bin/claude -p x', 'ask', 'K-CLAUDE'], ['./bin/claude x', 'ask', 'K-CLAUDE'], ['./node_modules/.bin/claude', 'ask', 'K-CLAUDE'],
+  ['"claude" -p x', 'ask', 'K-CLAUDE'], ['cl""aude -p x', 'ask', 'K-CLAUDE'], ['\\claude -p x', 'ask', 'K-CLAUDE'], ['echo hi | claude', 'ask', 'K-CLAUDE'],
+]));
+
+test('K-CLAUDE: wrappers and opaque launchers ask', () => check([
+  ['env claude', 'ask', 'K-CLAUDE'], ['timeout 5 claude -p x', 'ask', 'K-CLAUDE'], ['nohup claude', 'ask', 'K-CLAUDE'],
+  ["bash -c 'claude -p x'", 'ask', 'K-CLAUDE'], ['xargs claude', 'ask', 'K-CLAUDE'], ['eval claude', 'ask', 'K-CLAUDE'],
+]));
+
+test('K-CLAUDE: package runners of the Claude Code CLI ask', () => check([
+  ['pnpm dlx @anthropic-ai/claude-code', 'ask', 'K-CLAUDE'], ['yarn dlx @anthropic-ai/claude-code', 'ask', 'K-CLAUDE'],
+  ['bunx @anthropic-ai/claude-code', 'ask', 'K-CLAUDE'], ['npx @anthropic-ai/claude-code@latest', 'ask', 'K-CLAUDE'],
+  ['npx claude@latest', 'ask', 'K-CLAUDE'], ['npx @anthropic-ai/claude-code', 'ask', 'K-CLAUDE'], ['npm exec claude', 'ask', 'K-CLAUDE'],
+  ['npx prettier .', 'ask', 'K-DEFAULT'], ['pnpm install', 'ask', 'K-INSTALL'],
+]));
+
+test('K-CLAUDE: dynamic command names that resolve to claude in the text ask', () => check([
+  ['$(echo claude) -p x', 'ask', 'K-CLAUDE'], ['"$(echo claude)" -p x', 'ask', 'K-CLAUDE'], ['c=claude; $c -p x', 'ask', 'K-CLAUDE'],
+]));
+
+test('K-CLAUDE: a policy without a bash.claude list still asks (older installed policy)', () => {
+  const policy = structuredClone(SAMPLE_POLICY);
+  assert.deepEqual(policy.bash.claude, ['claude']);
+  assert.equal(policy.rules['K-CLAUDE'].decision, 'ask');
+  delete policy.bash.claude;
+  const ctx = mkCtx(env, { policy });
+  const r = bash(env, 'claude -p x', { ctx });
+  assert.equal(r.decision, 'ask');
+  assert.equal(r.rule_id, 'K-CLAUDE');
+  assert.equal(bash(env, 'claude --version', { ctx }).rule_id, 'K-DEFAULT');
 });

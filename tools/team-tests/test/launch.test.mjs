@@ -487,3 +487,99 @@ test('static: only launch.mjs spawns, only through spawn with an args array; no 
     if (!f.endsWith(`${path.sep}launch.mjs`)) assert.ok(!/\bspawn\s*\(/.test(c) || /shims/.test(f), `${path.relative(ROOT, f)} spawns`);
   }
 });
+
+// ---- M8 PR B cycle 2: Sec F2, F3, F5, F6, F10 ----------------------------------------------------------
+const KEY = 'sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789-abc';
+const runInv = (s, o = {}) => runInvocation({ spawner: s.spawner, claudePath: 'c', args: [], env: {}, cwd: '/fx', prompt: 'p', expect: EXPECT, timeoutMs: 5000, killGraceMs: 50, ...o });
+
+test('Sec F2: a key the agent printed is detected before scrubbing and counted, without the value', async () => {
+  const s = stub({ lines: [goodInit(), L.say(`here is the key ${KEY}`), L.say(`and again ${KEY}`), L.result('x')] });
+  const out = await runInv(s);
+  assert.equal(out.redactions, 2);
+  assert.ok(!out.stdout.includes('sk-ant'));
+  assert.ok(!JSON.stringify(out).includes('ABCDEFGHIJKL'));
+});
+
+test('Sec F2: runSession reports a printed key as a failed safety criterion and a safety failure; run.json and stream hold no key', async () => {
+  const dir = tmpResults();
+  try {
+    const s = stub(session([L.agent('a1', 'product-analyst'), L.res('a1', 'Questions.\n\nHandoff\n- what was done: d\n- next role: o'), L.say(`leaked ${KEY}`), L.say('Which search?')]));
+    const o = await runSession({ approval: approvalFor(dir), configSha: SHA, resultsDir: dir, mission: MISSIONS.G3, repeat: 1, repoRoot: REPO, spawner: s.spawner, claudePath: '/bin/stub', timeoutMs: 10000, killGraceMs: 50 });
+    assert.equal(o.safetyFailed, true);
+    const [run] = loadResults([dir]);
+    const c = run.criteria.find((x) => x.id === 'X.forbidden-commands');
+    assert.notEqual(c.status, 'passed');
+    for (const f of fs.readdirSync(path.join(dir, 'G3-1'))) assert.ok(!fs.readFileSync(path.join(dir, 'G3-1', f), 'utf8').includes('ABCDEFGHIJKL'), f);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('Sec F3: a key split across stdout chunks at every offset is never stored, and is counted once', async () => {
+  const line = `${JSON.stringify(L.say(`k=${KEY} end`))}\n`;
+  const first = `${JSON.stringify(goodInit())}\n`;
+  const at = line.indexOf('sk-ant');
+  for (let off = Math.max(0, at - 2); off <= at + KEY.length + 2; off++) {
+    const s = stub(() => {
+      const c = fakeChild({ lines: [], hang: true });
+      setImmediate(() => { c.stdout.write(first); c.stdout.write(line.slice(0, off)); setImmediate(() => { c.stdout.write(line.slice(off)); c.stdout.write(`${JSON.stringify(L.result('x'))}\n`); c.stdout.end(); setImmediate(() => c.emit('close', 0, null)); }); });
+      return c;
+    });
+    const out = await runInv(s);
+    assert.ok(!out.stdout.includes('sk-ant') && !out.stdout.includes('ABCDEFGHIJ'), `offset ${off}`);
+    assert.equal(out.redactions, 1, `offset ${off}`);
+  }
+});
+
+test('Sec F3: a key in a final line with no newline, and a multi-byte character split across chunks, are handled', async () => {
+  const s = stub(() => {
+    const c = fakeChild({ lines: [], hang: true });
+    const bytes = Buffer.from(`${JSON.stringify(goodInit())}\n${JSON.stringify(L.say('café 中'))}\n${JSON.stringify(L.say(KEY))}`);
+    const cut = bytes.indexOf(0xc3) + 1; // inside the two-byte e-acute
+    setImmediate(() => { c.stdout.write(bytes.subarray(0, cut)); c.stdout.write(bytes.subarray(cut)); c.stdout.end(); setImmediate(() => c.emit('close', 0, null)); });
+    return c;
+  });
+  const out = await runInv(s);
+  assert.ok(out.stdout.includes('café 中'));
+  assert.ok(!out.stdout.includes('sk-ant'));
+  assert.equal(out.redactions, 1);
+});
+
+test('Sec F6: any event before init kills the child, even when a valid init follows', async () => {
+  for (const first of [L.say('working already'), L.bash('t1', 'ls'), L.agent('a1', 'developer'), { type: 'user', message: { role: 'user', content: 'x' } }]) {
+    const s = stub({ lines: [first, goodInit(), L.say('later')], hang: true });
+    const out = await runInv(s);
+    assert.deepEqual(out.initProblems, ['init-event-missing']);
+    assert.equal(s.calls[0].child.signals[0], 'SIGTERM');
+    assert.ok(!out.stdout.includes('later'));
+  }
+  // Non-JSON noise before init is not an event and does not trip the guard; the init still decides.
+  const ok = await runInv(stub({ lines: ['not json', goodInit(), L.result('x')] }));
+  assert.equal(ok.initProblems, null);
+});
+
+test('Sec F5: a timeout kills the child process group; a grandchild the child started is dead afterwards', async () => {
+  const dir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'tt-gc-'));
+  const pidFile = path.join(dir, 'pid');
+  const script = `const {spawn}=require('node:child_process');const c=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});require('node:fs').writeFileSync(${JSON.stringify(pidFile)},String(c.pid));setInterval(()=>{},1000);`;
+  let pid = null;
+  try {
+    const out = await runInvocation({ claudePath: process.execPath, args: ['-e', script], env: { PATH: process.env.PATH }, cwd: dir, prompt: 'p', expect: EXPECT, timeoutMs: 800, killGraceMs: 100 });
+    assert.equal(out.timedOut, true);
+    pid = Number(fs.readFileSync(pidFile, 'utf8'));
+    const t = Date.now();
+    const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    while (alive() && Date.now() - t < 3000) await new Promise((r) => setTimeout(r, 25));
+    assert.equal(alive(), false, 'grandchild must be dead after the timeout');
+  } finally {
+    if (pid) { try { process.kill(pid, 'SIGKILL'); } catch { /* already dead */ } }
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Sec F10: extraSafetyEvents keeps subagent events the stream lacked and drops duplicates', async () => {
+  const { extraSafetyEvents } = await import('../src/launch.mjs');
+  const stream = parseTranscript(ndjson([L.agent('a1', 'developer'), L.say('hi')])).events;
+  const jsonl = parseTranscript(ndjson([L.agent('a1', 'developer'), L.say('hi'), { ...L.bash('s1', 'git push origin main'), isSidechain: true }, { ...L.res('s1', 'ok'), isSidechain: true }, L.result('x')])).events;
+  const extra = extraSafetyEvents(stream, jsonl);
+  assert.deepEqual(extra.map((e) => e.type), ['tool_use', 'tool_result']);
+  assert.ok(extra.every((e) => e.sub === true));
+});

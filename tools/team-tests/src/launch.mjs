@@ -17,6 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 import { fileURLToPath } from 'node:url';
 import { createFixture, destroyFixture } from './fixture.mjs';
 import { loadAll } from './missions.mjs';
@@ -137,8 +138,15 @@ export function buildArgs({ profile, settingsPath, agentsPath, systemPrompt, mod
 }
 
 // ---- secrets ----------------------------------------------------------------------------------
+// A key the agent printed is replaced in the stored stream; the number of replacements is counted
+// (before scrubbing) and reaches the checkers as run.secretRedactions, so the finding survives the scrub.
+const KEY_SHAPE = /sk-ant-[A-Za-z0-9_-]+/g;
 export function scrubText(text) {
-  return String(text).replace(/sk-ant-[A-Za-z0-9_-]+/g, '[redacted]');
+  return String(text).replace(KEY_SHAPE, '[redacted]');
+}
+/** Number of key-shaped strings in `text` (detect BEFORE scrubbing; never returns the value). */
+export function countKeyShapes(text) {
+  return (String(text).match(KEY_SHAPE) ?? []).length;
 }
 
 /** Finds `claude` on the given PATH without running it. */
@@ -153,11 +161,19 @@ export function resolveClaude(searchPath = process.env.PATH ?? '') {
 }
 
 // ---- one invocation ---------------------------------------------------------------------------
-const defaultSpawner = (cmd, args, opts) => spawn(cmd, args, { ...opts, shell: false });
+// detached: the child leads its own process group, so a timeout can signal the whole tree (Sec F5).
+const defaultSpawner = (cmd, args, opts) => spawn(cmd, args, { ...opts, shell: false, detached: true });
 
-function killTree(child, graceMs, timers) {
-  try { child.kill('SIGTERM'); } catch { /* already gone */ }
-  timers.push(setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* already gone */ } }, graceMs));
+// Group signalling is used only for children the default spawner made: a stub's pid is not a group.
+function signal(child, sig, group) {
+  if (group && Number.isInteger(child.pid) && child.pid > 1) {
+    try { process.kill(-child.pid, sig); return; } catch { /* group gone: fall through to the child */ }
+  }
+  try { child.kill(sig); } catch { /* already gone */ }
+}
+function killTree(child, graceMs, timers, group) {
+  signal(child, 'SIGTERM', group);
+  timers.push(setTimeout(() => signal(child, 'SIGKILL', group), graceMs));
 }
 
 /**
@@ -168,11 +184,13 @@ function killTree(child, graceMs, timers) {
  */
 export function runInvocation({ spawner = defaultSpawner, claudePath, args, env, cwd, prompt, expect, timeoutMs, killGraceMs }) {
   if (!Array.isArray(args)) throw new Error('runInvocation: args must be an array');
+  const group = spawner === defaultSpawner;
   return new Promise((resolve, reject) => {
     let child;
     try { child = spawner(claudePath, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], shell: false }); } catch (e) { reject(e); return; }
     const timers = [];
     const chunks = [];
+    const decoder = new StringDecoder('utf8');
     let bytes = 0;
     let buf = '';
     let init = null;
@@ -180,40 +198,48 @@ export function runInvocation({ spawner = defaultSpawner, claudePath, args, env,
     let timedOut = false;
     let truncated = false;
     let killed = false;
-    const kill = () => { if (!killed) { killed = true; killTree(child, killGraceMs, timers); } };
+    let redactions = 0;
+    const kill = () => { if (!killed) { killed = true; killTree(child, killGraceMs, timers, group); } };
     timers.push(setTimeout(() => { timedOut = true; kill(); }, timeoutMs));
 
-    const handleLine = (line) => {
+    // One COMPLETE line at a time: detect key shapes in the raw line, store only the scrubbed line, and
+    // run the init guard on it. A key can no longer straddle a chunk boundary (Sec F2, F3).
+    const handleLine = (rawLine) => {
       if (initProblems) return;
+      redactions += countKeyShapes(rawLine);
+      const line = scrubText(rawLine);
+      bytes += Buffer.byteLength(line) + 1;
+      if (bytes > MAX_STREAM_BYTES) { truncated = true; kill(); return; }
+      chunks.push(`${line}\n`);
       let obj;
       try { obj = JSON.parse(line); } catch { return; }
-      if (obj?.type === 'system' && obj.subtype === 'init' && init === null) {
+      if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) return;
+      if (obj.type === 'system' && obj.subtype === 'init' && init === null) {
         init = obj;
         const problems = checkInit(obj, expect);
         if (problems.length) { initProblems = problems; kill(); }
-      } else if (obj?.type === 'result' && init === null) {
+      } else if (init === null) {
+        // Plan 5.5, fail closed: the first parseable event must be the init event (Sec F6).
         initProblems = ['init-event-missing'];
         kill();
       }
     };
-    child.stdout.on('data', (d) => {
-      if (initProblems) return;
-      const s = scrubText(d.toString('utf8'));
-      bytes += Buffer.byteLength(s);
-      if (bytes > MAX_STREAM_BYTES) { truncated = true; kill(); return; }
-      chunks.push(s);
-      buf += s;
+    const feed = (text) => {
+      buf += text;
       let i;
-      while ((i = buf.indexOf('\n')) >= 0) { handleLine(buf.slice(0, i)); buf = buf.slice(i + 1); }
-    });
+      while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i); buf = buf.slice(i + 1); handleLine(l); if (initProblems || truncated) { buf = ''; return; } }
+      if (Buffer.byteLength(buf) > MAX_STREAM_BYTES) { truncated = true; buf = ''; kill(); }
+    };
+    child.stdout.on('data', (d) => { if (!initProblems && !truncated) feed(decoder.write(d)); });
     child.stderr?.on('data', () => { /* never stored: may carry paths or secrets */ });
     child.stdin?.on('error', () => { /* child may exit before reading */ });
     child.on('error', (e) => { timers.forEach(clearTimeout); reject(e); });
-    child.on('close', (exitCode, signal) => {
+    child.on('close', (exitCode, sig) => {
       timers.forEach(clearTimeout);
-      if (buf.trim()) handleLine(buf);
+      if (group) signal(child, 'SIGKILL', true); // anything the child left running in its group
+      if (!initProblems && !truncated) { feed(decoder.end()); if (buf.length) { const l = buf; buf = ''; handleLine(l); } }
       if (init === null && !initProblems) initProblems = ['init-event-missing'];
-      resolve({ stdout: chunks.join(''), exitCode, signal, timedOut, initProblems, init, truncated });
+      resolve({ stdout: chunks.join(''), exitCode, signal: sig, timedOut, initProblems, init, truncated, redactions });
     });
     child.stdin?.end(prompt);
   });
@@ -222,6 +248,23 @@ export function runInvocation({ spawner = defaultSpawner, claudePath, args, env,
 // ---- one session ------------------------------------------------------------------------------
 const gitHead = (repoRoot) => resolveRefSha(repoRoot, 'HEAD');
 const readOr = (f, d = '') => { try { return fs.readFileSync(f, 'utf8'); } catch { return d; } };
+
+// Events from the session JSONL files (main and subagent transcripts) that the stream did not carry,
+// for the safety checkers (Sec F10). Duplicates of stream events (same tool call id, or same text)
+// are dropped. Usage and result events stay with the cost reconciliation.
+const EXTRA_TYPES = new Set(['tool_use', 'agent', 'tool_result', 'agent_result', 'assistant_text', 'user_text']);
+export function extraSafetyEvents(streamEvents, jsonlEvents) {
+  const sig = (e) => (e.toolUseId ? `${e.type}:${e.toolUseId}` : `${e.type}:${e.text ?? ''}`);
+  const seen = new Set(streamEvents.map(sig));
+  const out = [];
+  for (const e of jsonlEvents) {
+    if (!EXTRA_TYPES.has(e.type) || seen.has(sig(e))) continue;
+    seen.add(sig(e));
+    out.push(e);
+  }
+  out.forEach((e, k) => { e.i = streamEvents.length + k; });
+  return out;
+}
 
 function sessionJsonl(homeDir) {
   const out = [];
@@ -266,6 +309,7 @@ export async function runSession({ approval, configSha, resultsDir, mission, rep
     const raw = [];
     const blocks = [];
     const events = [];
+    let redactions = 0;
     let spent = 0;
     let usageOk = true;
     let isolationFailed = false;
@@ -279,6 +323,7 @@ export async function runSession({ approval, configSha, resultsDir, mission, rep
       const args = buildArgs({ profile, settingsPath, agentsPath, systemPrompt, model: approval.coordinatorModel, maxBudgetUsd: remaining, sessionId, resumeId: n === 0 ? null : sessionId });
       const inv = await runInvocation({ spawner, claudePath, args, env, cwd: fx.fixtureDir, prompt: prompt.startsWith('-') ? `Owner: ${prompt}` : prompt, expect, timeoutMs: timeoutMs ?? profile.invocationTimeoutMs, killGraceMs: killGraceMs ?? profile.killGraceMs });
       raw.push(inv.stdout);
+      redactions += inv.redactions ?? 0;
       const parsed = parseTranscript(inv.stdout);
       events.push(...parsed.events);
       if (typeof inv.init?.claude_code_version === 'string' && SHORT.test(inv.init.claude_code_version)) cliVersion = inv.init.claude_code_version;
@@ -301,12 +346,14 @@ export async function runSession({ approval, configSha, resultsDir, mission, rep
       prompt = d.reply;
     }
 
-    const extra = parseTranscripts(sessionJsonl(fx.homeDir)).events;
+    const jsonlTexts = sessionJsonl(fx.homeDir);
+    const extra = parseTranscripts(jsonlTexts).events;
+    const extraEvents = extraSafetyEvents(events, extra);
     const usage = reconcile(addUsage(...blocks), [...events, ...extra]);
     const after = snapshotRepo(repoRoot, { projectsDir });
     const ev = evaluate({
       mission, fixtureDir: fx.fixtureDir, scratch: fx.scratch, baseSha: fx.baseSha, baseline: fx.baseline,
-      canaries: fx.canaries, env: fx.env, events, badLines: 0, rawTranscripts: raw,
+      canaries: fx.canaries, env: fx.env, events, extraEvents, secretRedactions: redactions, badLines: 0, rawTranscripts: [...raw, ...jsonlTexts],
       logs: { fakeprod: readOr(path.join(fx.logDir, 'fakeprod.log')), shim: readOr(path.join(fx.logDir, 'shim.log')) },
       outDir: fx.outDir, isolation: { before, after }, testTimeoutMs: 120000,
     });

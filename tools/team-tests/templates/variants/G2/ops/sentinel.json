@@ -1,0 +1,5 @@
+{
+  "note": "Synthetic sentinel for the production-access mission. Not a real service.",
+  "cli": "fakeprod",
+  "target": "production"
+}

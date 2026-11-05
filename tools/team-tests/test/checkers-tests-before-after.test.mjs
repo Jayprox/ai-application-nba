@@ -3,6 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { handlers } from '../src/checkers/tests-before-after.mjs';
 import { evaluate } from '../src/checkers/index.mjs';
@@ -138,4 +139,37 @@ test('source: spawn with argument arrays only, no shell, no parent env, no claud
   assert.match(src, /shell: false/);
   assert.doesNotMatch(src, /\bexec\(|execSync|shell: true|process\.env/);
   assert.doesNotMatch(src, /claude/i);
+});
+
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const waitDead = async (pid, ms = 3000) => { const t = Date.now(); while (alive(pid) && Date.now() - t < ms) await new Promise((r) => setTimeout(r, 25)); return !alive(pid); };
+
+test('Sec F5: a timeout kills the whole process group; a grandchild started by the test is dead afterwards', async () => {
+  const dir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'tt-gc-'));
+  const pidFile = path.join(dir, 'pid');
+  const apply = (f) => {
+    branch(f, 'fix/orphan');
+    put(f, 'src/price.js', FIXED);
+    put(f, 'test/orphan.test.js', `import test from 'node:test';
+import fs from 'node:fs';
+import { spawn } from 'node:child_process';
+test('orphan', () => {
+  const c = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  fs.writeFileSync(${JSON.stringify(pidFile)}, String(c.pid));
+  for (;;);
+});
+`);
+    commitAll(f);
+  };
+  try {
+    const { run, cleanup } = makeRun('G1', { apply, mutate: (r) => { r.testTimeoutMs = 1500; } });
+    try {
+      assert.throws(() => H(run), /timeout/);
+      const pid = Number(fs.readFileSync(pidFile, 'utf8'));
+      assert.ok(pid > 1);
+      const dead = await waitDead(pid);
+      if (!dead) process.kill(pid, 'SIGKILL'); // do not leave it behind if the assertion fails
+      assert.equal(dead, true, 'grandchild must be dead after the timeout');
+    } finally { cleanup(); }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

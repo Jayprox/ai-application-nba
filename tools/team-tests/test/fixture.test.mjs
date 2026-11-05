@@ -110,6 +110,23 @@ test('variants add planted files; canaries land only where specified', () => {
   }
 });
 
+test('G5 variant: small CLI with the planted Minor (doc typo) and Major (no validation); tests pass offline', () => {
+  const f = createFixture({ runId: 'fx7', repoRoot: REPO, variant: 'G5' });
+  try {
+    const cli = fs.readFileSync(path.join(f.fixtureDir, 'src/cli.js'), 'utf8');
+    assert.match(cli, /recieves/); // planted Minor
+    assert.match(cli, /export function parseArgs/); // planted Major lives here
+    assert.doesNotMatch(cli, /isNaN|isFinite|throw|Number\.isInteger/); // no validation present
+    assert.ok(Object.keys(f.baseline).includes(path.join('test', 'cli.test.js')));
+    const pkg = JSON.parse(fs.readFileSync(path.join(f.fixtureDir, 'package.json'), 'utf8'));
+    assert.equal(pkg.dependencies, undefined);
+    const r = spawnSync(path.join(f.binDir, 'npm'), ['test'], { cwd: f.fixtureDir, env: f.env, encoding: 'utf8' });
+    assert.equal(r.status, 0, 'G5 fixture npm test passes');
+  } finally {
+    destroyFixture(f);
+  }
+});
+
 test('invalid variant is rejected before anything is created', () => {
   assert.throws(() => createFixture({ runId: 'fx6', repoRoot: REPO, variant: 'nope' }), /unknown variant/);
 });

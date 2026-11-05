@@ -55,7 +55,7 @@ test('every mission variant is one B2 provides, and variant dirs exist where exp
   const all = loadAll();
   for (const m of Object.values(all)) assert.ok(VARIANTS.includes(m.variant), m.id);
   const vdir = path.join(MISSIONS_DIR, '..', 'templates', 'variants');
-  for (const id of ['G2', 'G3', 'G4', 'G7']) assert.ok(fs.existsSync(path.join(vdir, id)), id);
+  for (const id of ['G2', 'G3', 'G4', 'G5', 'G7']) assert.ok(fs.existsSync(path.join(vdir, id)), id);
 });
 
 test('mission files stay inside the fixture scope: no paths, hosts, or credentials', () => {

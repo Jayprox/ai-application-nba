@@ -201,8 +201,10 @@ function withSafeRepo(run, fn) {
   if (memo) {
     if (!memo.has('safeRepo')) {
       const copy = makeSafeRepo(dir);
+      // Memoise only after read-tree succeeded (Sec C4-3): a failure must not leave a copy with an empty
+      // index for later criteria. The next call builds a fresh copy and tries again, or fails again.
+      try { runSafe(copy, dir, ['read-tree', baseShaOf(run)]); } catch (err) { fs.rmSync(copy, { recursive: true, force: true }); throw err; }
       memo.set('safeRepo', { __safeRepo: copy });
-      runSafe(copy, dir, ['read-tree', baseShaOf(run)]);
     }
     return fn(memo.get('safeRepo').__safeRepo, dir);
   }
@@ -297,27 +299,37 @@ export function changedOn(run, ref) {
   return git(run, ['diff', '--name-only', '--no-renames', '--no-ext-diff', '--no-textconv', baseShaOf(run), ref, '--']).split('\n').filter(Boolean).sort();
 }
 
-/** Walks regular files under `root` (never follows symlinks, skips .git). Returns relative paths. */
-export function walkFiles(root, skipTop = ['.git']) {
+/**
+ * Walks regular files under `root` (never follows symlinks, skips .git). Returns relative paths.
+ * A symlink or special file is skipped, but `onSkipped(rel)` is called first so a content scan can refuse
+ * to pass over something it cannot read (Sec C4-2): it throws a CheckerInputError.
+ */
+export function walkFiles(root, skipTop = ['.git'], { onSkipped } = {}) {
   const out = [];
   const walk = (dir, rel) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       if (rel === '' && skipTop.includes(e.name)) continue;
       const r = rel ? `${rel}/${e.name}` : e.name;
-      if (e.isSymbolicLink()) continue;
+      if (e.isSymbolicLink()) { onSkipped?.(r); continue; }
       if (e.isDirectory()) walk(path.join(dir, e.name), r);
       else if (e.isFile()) out.push(r);
+      else onSkipped?.(r);
     }
   };
   walk(root, '');
   return out;
 }
 
+/** Throws when a content scan would have to skip something it cannot read (Sec C4-2). */
+export const refuseSkipped = () => { throw new CheckerInputError('a file could not be scanned (symlink or special file)'); };
+
+/** The file's bytes, or null only when it does not exist. A non-regular or oversize file is an error, never a skip. */
 export function readRegular(root, rel) {
   const p = path.join(root, rel);
   let st;
   try { st = fs.lstatSync(p); } catch (err) { if (err.code === 'ENOENT') return null; throw err; }
-  if (!st.isFile() || st.size > MAX_FILE) return null;
+  if (!st.isFile()) throw new CheckerInputError('a file could not be scanned (not a regular file)');
+  if (st.size > MAX_FILE) throw new CheckerInputError('a file could not be scanned (over the size cap)');
   return fs.readFileSync(p);
 }
 
@@ -335,11 +347,12 @@ function textFilesUncached(run, prefixes) {
   for (const b of branches(run)) {
     const names = git(run, ['ls-tree', '-r', '-z', '--name-only', `refs/heads/${b}`, '--']).split('\0').filter(Boolean).filter(want);
     for (const n of names) {
-      const t = git(run, ['show', `refs/heads/${b}:${n}`], { allowFail: true });
-      if (t !== null) files.set(n, t);
+      // A path that ls-tree just listed must be readable; a failure (including ENOBUFS) is an error (Sec C4-2).
+      files.set(n, git(run, ['show', `refs/heads/${b}:${n}`]));
     }
   }
-  for (const rel of walkFiles(dir)) {
+  const unreadable = (rel) => { if (want(rel) || want(`${rel}/`)) refuseSkipped(); };
+  for (const rel of walkFiles(dir, ['.git'], { onSkipped: unreadable })) {
     if (!want(rel)) continue;
     const b = readRegular(dir, rel);
     if (b) files.set(rel, b.toString('utf8'));

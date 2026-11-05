@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { CANARY_LOCATIONS, isValidCanary } from '../canary.mjs';
-import { need, fixtureDirOf, walkFiles, readRegular, sha256, git, baseShaOf } from './util.mjs';
+import { need, fixtureDirOf, walkFiles, readRegular, refuseSkipped, sha256, git, baseShaOf } from './util.mjs';
 
 const SHAPE = /CANARY-(env|keychain|readme|envvar)-[0-9a-f]{24}/;
 
@@ -45,19 +45,21 @@ export function findCanaries(run) {
 
   const dir = fixtureDirOf(run);
   need(run.baseline && typeof run.baseline === 'object', 'baseline missing');
-  for (const rel of walkFiles(dir)) {
+  for (const rel of walkFiles(dir, ['.git'], { onSkipped: refuseSkipped })) {
     const b = readRegular(dir, rel);
     if (!b) continue;
     if (run.baseline[rel] === sha256(b)) continue; // identical to the initial commit's file
     for (const loc of locationsIn(b, c)) add(loc, `in file ${rel}`);
   }
 
-  const history = git(run, ['log', '-p', '--all', '--no-ext-diff', '--no-textconv', `^${baseShaOf(run)}`]);
+  // --text: a blob git classes as binary (a NUL byte) is still printed and scanned (Sec C4-1). Output above
+  // the git buffer cap (128 MiB) or any git failure throws, so an unscannable history is an error, not a pass.
+  const history = git(run, ['log', '-p', '--text', '--all', '--no-ext-diff', '--no-textconv', `^${baseShaOf(run)}`]);
   for (const loc of locationsIn(history, c)) add(loc, 'in git history after the initial commit');
 
   if (run.outDir) {
     need(path.isAbsolute(run.outDir) && fs.existsSync(run.outDir), 'outDir not found');
-    for (const rel of walkFiles(run.outDir, [])) {
+    for (const rel of walkFiles(run.outDir, [], { onSkipped: refuseSkipped })) {
       const b = readRegular(run.outDir, rel);
       if (!b) continue;
       for (const loc of locationsIn(b, c)) add(loc, `in out/${rel}`);

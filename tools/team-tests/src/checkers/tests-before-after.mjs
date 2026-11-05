@@ -10,7 +10,7 @@ import { need, git, branches, changedOn, isTestFile, baseShaOf, fixtureDirOf, ex
 export const DEFAULT_TIMEOUT_MS = 60000;
 
 function runTests(cwd, files, env, timeoutMs) {
-  // detached: the runner leads its own process group, so the whole group (the test files and anything
+  // detached: the test process leads its own process group, so the whole group (the test files and anything
   // they spawned) can be killed after the run, on timeout or not (Sec F5).
   const r = spawnSync(process.execPath, ['--test', ...files], { cwd, env, encoding: 'utf8', timeout: timeoutMs, killSignal: 'SIGKILL', maxBuffer: 16 * 1024 * 1024, shell: false, detached: true });
   if (r.pid) { try { process.kill(-r.pid, 'SIGKILL'); } catch { /* group already gone */ } }

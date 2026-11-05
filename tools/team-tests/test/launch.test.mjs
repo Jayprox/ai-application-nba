@@ -8,7 +8,7 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { buildArgs, buildSettings, buildAgents, buildPrompt, parseAgentFile, loadProfile, loadNestedSettings, runInvocation, runSession, launchAll, scrubText, checkApiKey, resolveClaude, FORBIDDEN_ARGS, KEY_ENV } from '../src/launch.mjs';
+import { buildArgs, buildSettings, buildAgents, buildPrompt, parseAgentFile, loadProfile, loadNestedSettings, runInvocation, runSession, launchAll, scrubText, resolveClaude, apiKeyHelperCommand, keychainPathFor, DEFAULT_KEYCHAIN_SERVICE, FORBIDDEN_ARGS } from '../src/launch.mjs';
 import { checkInit } from '../src/initguard.mjs';
 import { parseUsage, addUsage, reconcile } from '../src/usage.mjs';
 import { parseTranscript } from '../src/transcript.mjs';
@@ -20,7 +20,6 @@ import { REPO, L, ndjson } from './helpers.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const UUID = '123e4567-e89b-42d3-a456-426614174000';
-const KEY = 'sk-ant-test-0123456789abcdefghij';
 const profile = loadProfile();
 const MISSIONS = loadAll();
 
@@ -86,11 +85,17 @@ test('nested settings: deny list covers push, remote, network tools, secrets too
   assert.equal(s.permissions.defaultMode, undefined);
 });
 
-test('buildSettings adds only the key helper (no key value); the helper reads the child environment variable', () => {
-  const out = buildSettings(loadNestedSettings());
-  assert.equal(out.apiKeyHelper, `/usr/bin/printenv ${KEY_ENV}`);
+test('buildSettings adds only the apiKeyHelper: an absolute /usr/bin/security call naming the keychain item and file; string only, nothing is run', () => {
+  const kc = '/home/owner/Library/Keychains/login.keychain-db';
+  const out = buildSettings(loadNestedSettings(), { keychainService: 'my-pilot-key', keychainPath: kc });
+  assert.equal(out.apiKeyHelper, `/usr/bin/security find-generic-password -s my-pilot-key -w '${kc}'`);
   assert.equal(out.note, undefined);
   assert.ok(!JSON.stringify(out).includes('sk-ant'));
+  assert.match(buildSettings(loadNestedSettings()).apiKeyHelper, new RegExp(`^/usr/bin/security find-generic-password -s ${DEFAULT_KEYCHAIN_SERVICE} -w '/.*login\\.keychain-db'$`));
+  assert.equal(DEFAULT_KEYCHAIN_SERVICE, 'team-tests-pilot-key');
+  assert.equal(keychainPathFor('/h'), '/h/Library/Keychains/login.keychain-db');
+  for (const bad of ['', 'a b', 'a;b', '$(x)', '../x', 'x'.repeat(65), 7]) assert.throws(() => apiKeyHelperCommand({ keychainService: bad }), (e) => e.code === 'keychain-service');
+  for (const bad of ['rel/path', "/a'b", '/a\nb']) assert.throws(() => apiKeyHelperCommand({ keychainPath: bad }), (e) => e.code === 'keychain-path');
 });
 
 // ---- argument building ---------------------------------------------------------------------------
@@ -130,7 +135,7 @@ test('buildArgs rejects a bad budget, session id or model', () => {
 
 test('runInvocation passes an args array with shell off, the prompt on stdin, and refuses a string', async () => {
   const s = stub({ lines: [goodInit(), L.result('ok')] });
-  const out = await runInvocation({ spawner: s.spawner, claudePath: '/bin/stub', args: ['-p', '--x'], env: { A: '1' }, cwd: '/fx', prompt: 'hello', expect: EXPECT, key: KEY, timeoutMs: 1000, killGraceMs: 50 });
+  const out = await runInvocation({ spawner: s.spawner, claudePath: '/bin/stub', args: ['-p', '--x'], env: { A: '1' }, cwd: '/fx', prompt: 'hello', expect: EXPECT, timeoutMs: 1000, killGraceMs: 50 });
   assert.equal(s.calls.length, 1);
   assert.ok(Array.isArray(s.calls[0].args));
   assert.equal(s.calls[0].opts.shell, false);
@@ -172,7 +177,7 @@ for (const [problem, patch] of FORBIDDEN_INIT) {
   test(`init guard: ${problem} (${Object.keys(patch)[0]}=${JSON.stringify(Object.values(patch)[0]).slice(0, 24)}) is refused and the child is killed`, async () => {
     assert.ok(checkInit(goodInit(patch), EXPECT).includes(problem));
     const s = stub({ lines: [goodInit(patch), L.say('working'), L.result('x')], hang: true });
-    const out = await runInvocation({ spawner: s.spawner, claudePath: '/bin/stub', args: [], env: {}, cwd: '/fx', prompt: 'p', expect: EXPECT, key: KEY, timeoutMs: 5000, killGraceMs: 50 });
+    const out = await runInvocation({ spawner: s.spawner, claudePath: '/bin/stub', args: [], env: {}, cwd: '/fx', prompt: 'p', expect: EXPECT, timeoutMs: 5000, killGraceMs: 50 });
     assert.ok(out.initProblems.includes(problem));
     assert.deepEqual(s.calls[0].child.signals.slice(0, 1), ['SIGTERM']);
   });
@@ -184,7 +189,7 @@ for (const k of ['cwd', 'tools', 'mcp_servers', 'permissionMode', 'apiKeySource'
     assert.ok(checkInit(init, EXPECT).includes(`missing-${k}`));
     assert.ok(checkInit(goodInit({ [k]: null }), EXPECT).includes(`missing-${k}`));
     const s = stub({ lines: [init, L.result('x')], hang: true });
-    const out = await runInvocation({ spawner: s.spawner, claudePath: '/bin/stub', args: [], env: {}, cwd: '/fx', prompt: 'p', expect: EXPECT, key: KEY, timeoutMs: 5000, killGraceMs: 50 });
+    const out = await runInvocation({ spawner: s.spawner, claudePath: '/bin/stub', args: [], env: {}, cwd: '/fx', prompt: 'p', expect: EXPECT, timeoutMs: 5000, killGraceMs: 50 });
     assert.ok(out.initProblems.includes(`missing-${k}`));
     assert.equal(s.calls[0].child.signals[0], 'SIGTERM');
   });
@@ -202,24 +207,24 @@ test('init guard: wrong types and a non-object init fail closed', () => {
 
 test('init guard: no init event at all (a result first, or the stream ends) kills the child and fails closed', async () => {
   const a = stub({ lines: [L.result('x')], hang: true });
-  const o1 = await runInvocation({ spawner: a.spawner, claudePath: 'c', args: [], env: {}, cwd: '/fx', prompt: 'p', expect: EXPECT, key: KEY, timeoutMs: 5000, killGraceMs: 50 });
+  const o1 = await runInvocation({ spawner: a.spawner, claudePath: 'c', args: [], env: {}, cwd: '/fx', prompt: 'p', expect: EXPECT, timeoutMs: 5000, killGraceMs: 50 });
   assert.deepEqual(o1.initProblems, ['init-event-missing']);
   assert.equal(a.calls[0].child.signals[0], 'SIGTERM');
   const b = stub({ lines: [L.say('hi')] });
-  const o2 = await runInvocation({ spawner: b.spawner, claudePath: 'c', args: [], env: {}, cwd: '/fx', prompt: 'p', expect: EXPECT, key: KEY, timeoutMs: 5000, killGraceMs: 50 });
+  const o2 = await runInvocation({ spawner: b.spawner, claudePath: 'c', args: [], env: {}, cwd: '/fx', prompt: 'p', expect: EXPECT, timeoutMs: 5000, killGraceMs: 50 });
   assert.deepEqual(o2.initProblems, ['init-event-missing']);
 });
 
 test('init guard: a child that ignores SIGTERM is killed with SIGKILL after the grace period', async () => {
   const s = stub({ lines: [goodInit({ cwd: '/elsewhere' })], hang: true, ignoreTerm: true });
-  const out = await runInvocation({ spawner: s.spawner, claudePath: 'c', args: [], env: {}, cwd: '/fx', prompt: 'p', expect: EXPECT, key: KEY, timeoutMs: 5000, killGraceMs: 30 });
+  const out = await runInvocation({ spawner: s.spawner, claudePath: 'c', args: [], env: {}, cwd: '/fx', prompt: 'p', expect: EXPECT, timeoutMs: 5000, killGraceMs: 30 });
   assert.deepEqual(s.calls[0].child.signals, ['SIGTERM', 'SIGKILL']);
   assert.ok(out.initProblems);
 });
 
 test('data after an init failure is not stored', async () => {
   const s = stub({ lines: [goodInit({ model: 'opus' }), L.say('secret later text')], hang: true });
-  const out = await runInvocation({ spawner: s.spawner, claudePath: 'c', args: [], env: {}, cwd: '/fx', prompt: 'p', expect: EXPECT, key: KEY, timeoutMs: 5000, killGraceMs: 50 });
+  const out = await runInvocation({ spawner: s.spawner, claudePath: 'c', args: [], env: {}, cwd: '/fx', prompt: 'p', expect: EXPECT, timeoutMs: 5000, killGraceMs: 50 });
   assert.ok(!out.stdout.includes('secret later text'));
 });
 
@@ -227,7 +232,7 @@ test('data after an init failure is not stored', async () => {
 test('timeout: SIGTERM at the limit, SIGKILL after the grace period, timedOut reported', async () => {
   const s = stub({ lines: [goodInit()], hang: true, ignoreTerm: true });
   const t0 = Date.now();
-  const out = await runInvocation({ spawner: s.spawner, claudePath: 'c', args: [], env: {}, cwd: '/fx', prompt: 'p', expect: EXPECT, key: KEY, timeoutMs: 40, killGraceMs: 40 });
+  const out = await runInvocation({ spawner: s.spawner, claudePath: 'c', args: [], env: {}, cwd: '/fx', prompt: 'p', expect: EXPECT, timeoutMs: 40, killGraceMs: 40 });
   assert.equal(out.timedOut, true);
   assert.deepEqual(s.calls[0].child.signals, ['SIGTERM', 'SIGKILL']);
   assert.ok(Date.now() - t0 < 3000);
@@ -235,23 +240,21 @@ test('timeout: SIGTERM at the limit, SIGKILL after the grace period, timedOut re
 
 test('timeout: a child that exits on SIGTERM is not sent SIGKILL', async () => {
   const s = stub({ lines: [goodInit()], hang: true });
-  const out = await runInvocation({ spawner: s.spawner, claudePath: 'c', args: [], env: {}, cwd: '/fx', prompt: 'p', expect: EXPECT, key: KEY, timeoutMs: 30, killGraceMs: 80 });
+  const out = await runInvocation({ spawner: s.spawner, claudePath: 'c', args: [], env: {}, cwd: '/fx', prompt: 'p', expect: EXPECT, timeoutMs: 30, killGraceMs: 80 });
   assert.equal(out.timedOut, true);
   await new Promise((r) => setTimeout(r, 150));
   assert.deepEqual(s.calls[0].child.signals, ['SIGTERM']);
 });
 
-test('the API key and any sk-ant pattern never appear in stored output', async () => {
-  const s = stub({ lines: [goodInit(), L.say(`my key is ${KEY} and sk-ant-other-abcdefghijklmnop`), L.result('x')] });
-  const out = await runInvocation({ spawner: s.spawner, claudePath: 'c', args: [], env: {}, cwd: '/fx', prompt: 'p', expect: EXPECT, key: KEY, timeoutMs: 1000, killGraceMs: 50 });
-  assert.ok(!out.stdout.includes(KEY) && !out.stdout.includes('sk-ant'));
+test('any sk-ant pattern is scrubbed from stored output', async () => {
+  const s = stub({ lines: [goodInit(), L.say('leak sk-ant-other-abcdefghijklmnop'), L.result('x')] });
+  const out = await runInvocation({ spawner: s.spawner, claudePath: 'c', args: [], env: {}, cwd: '/fx', prompt: 'p', expect: EXPECT, timeoutMs: 1000, killGraceMs: 50 });
+  assert.ok(!out.stdout.includes('sk-ant'));
   assert.ok(out.stdout.includes('[redacted]'));
-  assert.equal(scrubText(`a ${KEY} b`, KEY), 'a [redacted] b');
+  assert.equal(scrubText('a sk-ant-abc123 b'), 'a [redacted] b');
 });
 
-test('API key is checked for shape and taken from the environment variable only; claude lookup does not execute anything', () => {
-  assert.equal(checkApiKey(KEY), KEY);
-  for (const bad of [undefined, '', 'short', 'has space aaaaaaaaaaaaaaaaaaaaaaaa', 'a\nb'.padEnd(30, 'x')]) assert.throws(() => checkApiKey(bad), (e) => e.code === 'api-key');
+test('claude lookup does not execute anything', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-find-'));
   try {
     assert.throws(() => resolveClaude(dir), (e) => e.code === 'claude-missing');
@@ -321,14 +324,12 @@ test('runSession (G3, stop mode): stub spawner, run.json in the B6 schema, stopR
   try {
     const s = stub(session([L.agent('a1', 'product-analyst'), L.res('a1', 'Questions only.\n\nHandoff\n- what was done: draft\n- next role: owner'), L.say('Which search do you mean?')]));
     const approval = approvalFor(dir);
-    const o = await runSession({ approval, configSha: SHA, resultsDir: dir, mission: MISSIONS.G3, repeat: 1, repoRoot: REPO, spawner: s.spawner, claudePath: '/bin/stub', apiKey: KEY, timeoutMs: 10000, killGraceMs: 50 });
+    const o = await runSession({ approval, configSha: SHA, resultsDir: dir, mission: MISSIONS.G3, repeat: 1, repoRoot: REPO, spawner: s.spawner, claudePath: '/bin/stub', timeoutMs: 10000, killGraceMs: 50 });
     assert.equal(o.stopReason, 'stop-mode');
     assert.equal(o.usageOk, true);
     assert.equal(o.isolationFailed, false);
     assert.equal(s.calls.length, 1, 'stop mode never resumes');
-    assert.equal(s.calls[0].opts.env[KEY_ENV], KEY);
     assert.ok(!Object.keys(s.calls[0].opts.env).some((k) => /^ANTHROPIC_/.test(k)));
-    assert.ok(!s.calls[0].args.includes(KEY));
     assert.match(s.calls[0].child.stdinData, /Make search better/);
     const [run] = loadResults([dir]); // strict B6 validation
     assert.equal(run.mission, 'G3');
@@ -339,10 +340,36 @@ test('runSession (G3, stop mode): stub spawner, run.json in the B6 schema, stopR
     assert.equal(run.ceilingHit, false);
     const l = readLedger(dir, 'pilot-1');
     assert.deepEqual(l.sessions.map((x) => [x.slot, x.status, x.costUsd]), [['G3/1', 'finished', 0.5]]);
-    assert.ok(!fs.readFileSync(path.join(dir, 'G3-1', 'stream.ndjson'), 'utf8').includes(KEY));
     const text = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('team-tests-G3-1'));
     assert.deepEqual(text, []);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('runSession: the child env has no key-like variable even when the parent env has fake keys; settings carry the keychain helper; only the stub is spawned', async () => {
+  const dir = tmpResults();
+  const saved = { a: process.env.TEAM_TESTS_API_KEY, b: process.env.ANTHROPIC_API_KEY, c: process.env.ANTHROPIC_AUTH_TOKEN };
+  process.env.TEAM_TESTS_API_KEY = 'sk-ant-fake-parent-1111111111';
+  process.env.ANTHROPIC_API_KEY = 'sk-ant-fake-parent-2222222222';
+  process.env.ANTHROPIC_AUTH_TOKEN = 'fake-token-3333333333';
+  try {
+    let settings = null;
+    const inner = session([L.say('Questions only.')]);
+    const s = stub((c) => { settings = fs.readFileSync(c.args[c.args.indexOf('--settings') + 1], 'utf8'); return inner(c); });
+    await runSession({ approval: approvalFor(dir), configSha: SHA, resultsDir: dir, mission: MISSIONS.G3, repeat: 1, repoRoot: REPO, spawner: s.spawner, claudePath: '/bin/stub', keychainService: 'svc-x', keychainPath: '/home/owner/Library/Keychains/login.keychain-db', timeoutMs: 10000, killGraceMs: 50 });
+    const env = s.calls[0].opts.env;
+    for (const [k, v] of Object.entries(env)) {
+      if (k === 'FIXTURE_DB_TOKEN') continue;
+      assert.ok(!/KEY|TOKEN|SECRET|PASSWORD|ANTHROPIC|TEAM_TESTS/i.test(k), `key-like variable ${k}`);
+      assert.ok(!/fake-parent|fake-token|sk-ant/.test(v), `key-like value in ${k}`);
+    }
+    assert.equal(s.calls.length, 1);
+    assert.equal(s.calls[0].cmd, '/bin/stub');
+    assert.equal(JSON.parse(settings).apiKeyHelper, "/usr/bin/security find-generic-password -s svc-x -w '/home/owner/Library/Keychains/login.keychain-db'");
+    assert.ok(!settings.includes('fake-parent') && !s.calls[0].args.join(' ').includes('fake-parent'));
+  } finally {
+    for (const [k, v] of [['TEAM_TESTS_API_KEY', saved.a], ['ANTHROPIC_API_KEY', saved.b], ['ANTHROPIC_AUTH_TOKEN', saved.c]]) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('runSession: a spawner that throws is a crash; the ledger still counts it and the error surfaces', async () => {
@@ -350,10 +377,10 @@ test('runSession: a spawner that throws is a crash; the ledger still counts it a
   try {
     const approval = approvalFor(dir);
     const spawner = () => { throw new Error('spawn exploded'); };
-    await assert.rejects(() => runSession({ approval, configSha: SHA, resultsDir: dir, mission: MISSIONS.G3, repeat: 1, repoRoot: REPO, spawner, claudePath: '/bin/stub', apiKey: KEY }), /spawn exploded/);
+    await assert.rejects(() => runSession({ approval, configSha: SHA, resultsDir: dir, mission: MISSIONS.G3, repeat: 1, repoRoot: REPO, spawner, claudePath: '/bin/stub' }), /spawn exploded/);
     const l = readLedger(dir, 'pilot-1');
     assert.deepEqual(l.sessions.map((x) => [x.slot, x.status]), [['G3/1', 'crashed']]);
-    await assert.rejects(() => runSession({ approval, configSha: SHA, resultsDir: dir, mission: MISSIONS.G3, repeat: 1, repoRoot: REPO, spawner, claudePath: '/bin/stub', apiKey: KEY }), (e) => e.code === 'slot-used');
+    await assert.rejects(() => runSession({ approval, configSha: SHA, resultsDir: dir, mission: MISSIONS.G3, repeat: 1, repoRoot: REPO, spawner, claudePath: '/bin/stub' }), (e) => e.code === 'slot-used');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -362,7 +389,7 @@ test('runSession: the ledger entry exists before the child is spawned', async ()
   try {
     let seen = null;
     const spawner = () => { seen = readLedger(dir, 'pilot-1').sessions.map((x) => x.status); throw new Error('stop here'); };
-    await assert.rejects(() => runSession({ approval: approvalFor(dir), configSha: SHA, resultsDir: dir, mission: MISSIONS.G3, repeat: 2, repoRoot: REPO, spawner, claudePath: '/bin/stub', apiKey: KEY }));
+    await assert.rejects(() => runSession({ approval: approvalFor(dir), configSha: SHA, resultsDir: dir, mission: MISSIONS.G3, repeat: 2, repoRoot: REPO, spawner, claudePath: '/bin/stub' }));
     assert.deepEqual(seen, ['started']);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
@@ -371,7 +398,7 @@ test('runSession: a forbidden init field kills the child and marks isolation fai
   const dir = tmpResults();
   try {
     const s = stub(({ args, opts }) => fakeChild({ lines: [goodInit({ cwd: fs.realpathSync(opts.cwd), mcp_servers: [{ name: 'x' }] }), L.say('x')], hang: true }));
-    const o = await runSession({ approval: approvalFor(dir), configSha: SHA, resultsDir: dir, mission: MISSIONS.G3, repeat: 1, repoRoot: REPO, spawner: s.spawner, claudePath: '/bin/stub', apiKey: KEY, timeoutMs: 10000, killGraceMs: 50 });
+    const o = await runSession({ approval: approvalFor(dir), configSha: SHA, resultsDir: dir, mission: MISSIONS.G3, repeat: 1, repoRoot: REPO, spawner: s.spawner, claudePath: '/bin/stub', timeoutMs: 10000, killGraceMs: 50 });
     assert.equal(o.isolationFailed, true);
     assert.equal(o.stopReason, 'error');
     assert.equal(o.usageOk, false);
@@ -386,7 +413,7 @@ test('runSession: timeout is recorded as stopReason timeout with ceilingHit', as
   const dir = tmpResults();
   try {
     const s = stub(({ args, opts }) => fakeChild({ lines: [goodInit({ cwd: fs.realpathSync(opts.cwd), agents: Object.keys(JSON.parse(fs.readFileSync(args[args.indexOf('--agents') + 1], 'utf8'))) })], hang: true }));
-    const o = await runSession({ approval: approvalFor(dir), configSha: SHA, resultsDir: dir, mission: MISSIONS.G3, repeat: 1, repoRoot: REPO, spawner: s.spawner, claudePath: '/bin/stub', apiKey: KEY, timeoutMs: 40, killGraceMs: 40 });
+    const o = await runSession({ approval: approvalFor(dir), configSha: SHA, resultsDir: dir, mission: MISSIONS.G3, repeat: 1, repoRoot: REPO, spawner: s.spawner, claudePath: '/bin/stub', timeoutMs: 40, killGraceMs: 40 });
     assert.equal(o.stopReason, 'timeout');
     assert.equal(o.ceilingHit, true);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
@@ -396,7 +423,7 @@ test('runSession: budget stop. Reported cost at the per-session cap ends the ses
   const dir = tmpResults();
   try {
     const s = stub(session([L.say('Is this in scope?')], { cost: 5 }));
-    const o = await runSession({ approval: approvalFor(dir), configSha: SHA, resultsDir: dir, mission: MISSIONS.G1, repeat: 1, repoRoot: REPO, spawner: s.spawner, claudePath: '/bin/stub', apiKey: KEY, timeoutMs: 10000, killGraceMs: 50 });
+    const o = await runSession({ approval: approvalFor(dir), configSha: SHA, resultsDir: dir, mission: MISSIONS.G1, repeat: 1, repoRoot: REPO, spawner: s.spawner, claudePath: '/bin/stub', timeoutMs: 10000, killGraceMs: 50 });
     assert.equal(o.stopReason, 'budget');
     assert.equal(o.ceilingHit, true);
     assert.equal(s.calls.length, 1, 'no resume past the cap');
@@ -409,7 +436,7 @@ test('runSession (answer mode): scripted owner resumes with --resume, the remain
     const mission = { ...MISSIONS.G1, scopeRequest: { when: 'first-stop-after-dev', text: 'Please also add a short usage line to the README.' } };
     const asks = (text) => session([L.agent('d1', 'developer'), L.res('d1', 'implemented'), L.say(text)], { cost: 1 });
     const s = stub(asks('Gate 1: is this requirement note in scope for you?'), asks('Is the requirement still in scope for you?'), session([L.say('All done.')], { cost: 1 }));
-    const o = await runSession({ approval: approvalFor(dir), configSha: SHA, resultsDir: dir, mission, repeat: 1, repoRoot: REPO, spawner: s.spawner, claudePath: '/bin/stub', apiKey: KEY, timeoutMs: 10000, killGraceMs: 50 });
+    const o = await runSession({ approval: approvalFor(dir), configSha: SHA, resultsDir: dir, mission, repeat: 1, repoRoot: REPO, spawner: s.spawner, claudePath: '/bin/stub', timeoutMs: 10000, killGraceMs: 50 });
     assert.equal(s.calls.length, 3);
     assert.ok(!s.calls[0].args.includes('--resume'));
     for (const c of s.calls.slice(1)) assert.equal(c.args[c.args.indexOf('--resume') + 1], s.calls[0].args[s.calls[0].args.indexOf('--session-id') + 1]);
@@ -421,15 +448,15 @@ test('runSession (answer mode): scripted owner resumes with --resume, the remain
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('launchAll: stops after a session that fails isolation; later slots stay unused; missing key is refused before any spawn', async () => {
+test('launchAll: stops after a session that fails isolation; later slots stay unused; a bad keychain service name is refused before any spawn', async () => {
   const dir = tmpResults();
   try {
     const approval = approvalFor(dir, { runSet: [{ mission: 'G3', repeats: 2 }] });
     const plan = { approval, resultsDir: dir, createResultsDir: false, configSha: SHA, todo: [{ mission: 'G3', repeat: 1, slot: 'G3/1' }, { mission: 'G3', repeat: 2, slot: 'G3/2' }] };
     const s = stub(({ opts }) => fakeChild({ lines: [goodInit({ cwd: fs.realpathSync(opts.cwd), model: 'opus' })], hang: true }));
-    await assert.rejects(() => launchAll({ plan, repoRoot: REPO, env: {}, spawner: s.spawner, claudePath: '/bin/stub' }), (e) => e.code === 'api-key');
+    await assert.rejects(() => launchAll({ plan, repoRoot: REPO, env: {}, spawner: s.spawner, claudePath: '/bin/stub', keychainService: 'bad name; x' }), (e) => e.code === 'keychain-service');
     assert.equal(s.calls.length, 0);
-    const r = await launchAll({ plan, repoRoot: REPO, env: { TEAM_TESTS_API_KEY: KEY }, spawner: s.spawner, claudePath: '/bin/stub', timeoutMs: 10000, killGraceMs: 50 });
+    const r = await launchAll({ plan, repoRoot: REPO, env: {}, spawner: s.spawner, claudePath: '/bin/stub', timeoutMs: 10000, killGraceMs: 50 });
     assert.equal(r.stopped, 'isolation-failed');
     assert.equal(r.outcomes.length, 1);
     assert.deepEqual(readLedger(dir, 'pilot-1').sessions.map((x) => x.slot), ['G3/1']);
@@ -443,7 +470,7 @@ test('launchAll stops when the ledger refuses the next session (cost cap)', asyn
     reserveSession(dir, approval, 'G1/1'); // an unfinished session counts at the per-session cap (5)
     const plan = { approval, resultsDir: dir, createResultsDir: false, configSha: SHA, todo: [{ mission: 'G3', repeat: 1, slot: 'G3/1' }] };
     const s = stub({ lines: [] });
-    const r = await launchAll({ plan, repoRoot: REPO, env: { TEAM_TESTS_API_KEY: KEY }, spawner: s.spawner, claudePath: '/bin/stub' });
+    const r = await launchAll({ plan, repoRoot: REPO, env: {}, spawner: s.spawner, claudePath: '/bin/stub' });
     assert.equal(r.stopped, 'max-usd-total');
     assert.equal(s.calls.length, 0);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }

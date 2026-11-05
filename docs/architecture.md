@@ -896,7 +896,7 @@ Install per package: `npm ci` (or `npm install`) in `/`, `backend/`,
 | Package | Command | Runner | Needs Postgres? | Env vars | Result on an empty-schema DB |
 |---|---|---|---|---|---|
 | root | `npm test` | `node --test 'scripts/lib/*.test.mjs'` | No | none (`sources.test.mjs` stubs `fetch`, unsets `SEED_FIXTURES`) | 110/110 pass (M6) |
-| root (team-tests) | `npm test` (same command; glob also covers `tools/team-tests/test/*.test.mjs`) | `node --test` | No | none | `tools/team-tests/` (M8 PR B, B1-B7): dry run over synthetic samples, checkers, scripted owner, `score`/`report`/`compare`, refusal guard, ledger, estimate, launcher with a stub spawner. 482/482 pass in about 173 s (whole root `npm test`, 2026-11-04). No model, no network, no real `claude` process, no API key |
+| root (team-tests) | `npm test` (same command; glob also covers `tools/team-tests/test/*.test.mjs`) | `node --test` | No | none | `tools/team-tests/` (M8 PR B, B1-B7): dry run over synthetic samples, checkers, scripted owner, `score`/`report`/`compare`, refusal guard, ledger, estimate, launcher with a stub spawner. 483/483 pass in about 177 s (whole root `npm test`, 2026-11-04). No model, no network, no real `claude` process, no API key |
 | root (schema) | `npm run db:apply` | SQL constraint tests | Yes, empty DB | `DATABASE_PUBLIC_URL` | PASSED |
 | backend | `npm test` | `node --test --test-concurrency=1 'test/*.test.js'` | **Yes, with real loaded data** | `TEST_DATABASE_URL` (falls back to `DATABASE_URL`); `JWT_SECRET` is generated if unset | 21 pass / 44 fail / 3 skip (see below) |
 | worker | `npm test` | `node --test --test-concurrency=1 'test/*.test.js'` | Optional | `WORKER_TEST_DATABASE_URL` | without it: 40 pass, 51 skip. With it: 91 pass, 0 skip (M6 added the Highlightly weekly client, schedule, backfill and CLI tests) |
@@ -920,7 +920,7 @@ dir, and scores the result mechanically. Commands (`node tools/team-tests/bin/te
   owned by the user, not group- or world-writable, no symlinks, matching run set and estimate hash,
   not expired, `CI` unset, hard cap `MAX_SESSIONS = 6`); `src/ledger.mjs` counts each session before it
   starts. Real runs happen only by hand, never in tests or CI, and need the owner's approval file and
-  a dedicated API key in `TEAM_TESTS_API_KEY`. Nothing has run a real session yet; the pilot is the
+  a dedicated API key that the owner stores in their keychain (reached only through `apiKeyHelper`; the harness never reads it). Nothing has run a real session yet; the pilot is the
   owner's launch (plan `docs/plans/M8-standing-decisions-and-team-tests.md` sections 4 and 5).
 - Nested session isolation: `config/launch-profile.json` (no permission bypass, empty strict MCP, no
   prompts), `config/nested-settings.json` (allow and deny lists), allowlisted child env and fake `HOME`

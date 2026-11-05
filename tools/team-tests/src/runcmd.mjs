@@ -29,15 +29,16 @@ export function estimateCommand(argv) {
 }
 
 /**
- * `run --approval <file> --run G3:3,G1:3`. Throws GuardRefusal before any spawn if the guard fails.
+ * `run --approval <file> --run G3:3,G1:3 [--keychain-service <name>]`. Throws GuardRefusal before any spawn if the guard fails.
  * `deps.importLauncher` exists so tests can prove the launcher is not imported on a refusal.
  */
 export async function runCommand(argv, { env = process.env, repoRoot, now = new Date(), importLauncher = () => import('./launch.mjs'), guardOpts = {}, launchOpts = {}, log = () => {} } = {}) {
-  const f = flags(argv, ['--approval', '--run']);
+  const f = flags(argv, ['--approval', '--run', '--keychain-service']);
   if (!('--run' in f)) throw new GuardRefusal('run-set', '--run <G3:3,...> is required');
   let runSet;
   try { runSet = parseRunSet(f['--run']); } catch { throw new GuardRefusal('run-set', 'run set is not valid'); }
   const plan = checkRun({ approvalPath: f['--approval'], runSet, env, now, repoRoot, ...guardOpts });
   const launcher = await importLauncher();
-  return launcher.launchAll({ plan, repoRoot, env, log, ...launchOpts });
+  const keychain = f['--keychain-service'] ? { keychainService: f['--keychain-service'] } : {};
+  return launcher.launchAll({ plan, repoRoot, env, log, ...keychain, ...launchOpts });
 }

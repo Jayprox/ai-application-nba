@@ -6,10 +6,12 @@
 // wall-clock timeout per invocation, and a session ledger entry written BEFORE the child starts.
 // Arguments are always an array and `shell` is never used.
 //
-// The dedicated API key is read from the harness's own environment (TEAM_TESTS_API_KEY) at run time,
-// never from a file, never logged. It reaches the nested CLI only through `apiKeyHelper`, which prints
-// a variable of the child environment (see KEY_ENV). That variable is visible to a same-user child
-// process; the key's spend limit and revocation bound the damage (plan 5.4, open question in the PR).
+// API key (plan 5.4): the harness never reads, holds or logs the key, and the child environment
+// never contains one. The nested CLI gets it through `apiKeyHelper` in the generated settings, an
+// absolute `/usr/bin/security` call naming the owner's keychain item and keychain file (computed at
+// run time, written only into <scratch>/out/settings.json). The harness never runs `security`.
+// Residual risk: same-user Bash could call `/usr/bin/security` by absolute path; `security` is denied
+// and shimmed, the transcript checker flags `sk-ant-`, and the key's spend limit and revocation bound it.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -31,8 +33,8 @@ import { resolveRefSha } from './guard.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG = path.resolve(HERE, '..', 'config');
-export const KEY_ENV = 'TEAM_TESTS_NESTED_KEY'; // name inside the child environment
-export const KEY_SOURCE_ENV = 'TEAM_TESTS_API_KEY'; // name in the owner's shell
+export const DEFAULT_KEYCHAIN_SERVICE = 'team-tests-pilot-key';
+const SERVICE = /^[A-Za-z0-9._-]{1,64}$/;
 export const FORBIDDEN_ARGS = Object.freeze(['--dangerously-skip-permissions', '--allow-dangerously-skip-permissions', 'bypassPermissions', '--permission-mode', '--chrome', '--ide', '--remote-control', '--plugin-url']);
 const MAX_STREAM_BYTES = 64 * 1024 * 1024;
 const SHORT = /^[A-Za-z0-9._+-]{1,64}$/;
@@ -56,9 +58,19 @@ export function loadNestedSettings(file = path.join(CONFIG, 'nested-settings.jso
 }
 
 /** Settings written to <scratch>/out/settings.json: nested-settings.json plus the apiKeyHelper. */
-export function buildSettings(nested) {
+export function keychainPathFor(home = os.homedir()) {
+  return path.join(home, 'Library', 'Keychains', 'login.keychain-db'); // string only; never opened
+}
+
+export function apiKeyHelperCommand({ keychainService = DEFAULT_KEYCHAIN_SERVICE, keychainPath = keychainPathFor() } = {}) {
+  if (typeof keychainService !== 'string' || !SERVICE.test(keychainService)) throw new GuardRefusal('keychain-service', 'keychain service name is not valid');
+  if (typeof keychainPath !== 'string' || !path.isAbsolute(keychainPath) || /['\0\n\r]/.test(keychainPath)) throw new GuardRefusal('keychain-path', 'keychain path is not usable');
+  return `/usr/bin/security find-generic-password -s ${keychainService} -w '${keychainPath}'`;
+}
+
+export function buildSettings(nested, helper = {}) {
   const { note, ...rest } = nested; void note;
-  return { ...rest, apiKeyHelper: `/usr/bin/printenv ${KEY_ENV}` };
+  return { ...rest, apiKeyHelper: apiKeyHelperCommand(helper) };
 }
 
 // ---- agents and prompts -----------------------------------------------------------------------
@@ -125,15 +137,8 @@ export function buildArgs({ profile, settingsPath, agentsPath, systemPrompt, mod
 }
 
 // ---- secrets ----------------------------------------------------------------------------------
-export function checkApiKey(key) {
-  if (typeof key !== 'string' || !/^[A-Za-z0-9._-]{20,400}$/.test(key)) throw new GuardRefusal('api-key', `${KEY_SOURCE_ENV} is missing or malformed`);
-  return key;
-}
-
-export function scrubText(text, key) {
-  let t = String(text);
-  if (key) t = t.split(key).join('[redacted]');
-  return t.replace(/sk-ant-[A-Za-z0-9_-]+/g, '[redacted]');
+export function scrubText(text) {
+  return String(text).replace(/sk-ant-[A-Za-z0-9_-]+/g, '[redacted]');
 }
 
 /** Finds `claude` on the given PATH without running it. */
@@ -161,7 +166,7 @@ function killTree(child, graceMs, timers) {
  * `result` arrives or the process ends with no init). Enforces the wall-clock timeout.
  * Resolves { stdout, exitCode, signal, timedOut, initProblems, init, truncated }.
  */
-export function runInvocation({ spawner = defaultSpawner, claudePath, args, env, cwd, prompt, expect, key, timeoutMs, killGraceMs }) {
+export function runInvocation({ spawner = defaultSpawner, claudePath, args, env, cwd, prompt, expect, timeoutMs, killGraceMs }) {
   if (!Array.isArray(args)) throw new Error('runInvocation: args must be an array');
   return new Promise((resolve, reject) => {
     let child;
@@ -193,7 +198,7 @@ export function runInvocation({ spawner = defaultSpawner, claudePath, args, env,
     };
     child.stdout.on('data', (d) => {
       if (initProblems) return;
-      const s = scrubText(d.toString('utf8'), key);
+      const s = scrubText(d.toString('utf8'));
       bytes += Buffer.byteLength(s);
       if (bytes > MAX_STREAM_BYTES) { truncated = true; kill(); return; }
       chunks.push(s);
@@ -236,7 +241,7 @@ function sessionJsonl(homeDir) {
  * Runs one session (mission + repeat). The ledger entry is written before the fixture exists, so any
  * crash still counts. Returns an outcome summary; throws only after marking the ledger `crashed`.
  */
-export async function runSession({ approval, configSha, resultsDir, mission, repeat, repoRoot, spawner, claudePath, apiKey, profile = loadProfile(), nested = loadNestedSettings(), timeoutMs, killGraceMs, createFx = createFixture, destroyFx = destroyFixture }) {
+export async function runSession({ approval, configSha, resultsDir, mission, repeat, repoRoot, spawner, claudePath, keychainService, keychainPath, profile = loadProfile(), nested = loadNestedSettings(), timeoutMs, killGraceMs, createFx = createFixture, destroyFx = destroyFixture }) {
   const slot = `${mission.id}/${repeat}`;
   reserveSession(resultsDir, approval, slot);
   const t0 = Date.now();
@@ -247,11 +252,11 @@ export async function runSession({ approval, configSha, resultsDir, mission, rep
     const agents = buildAgents(fx.fixtureDir);
     const settingsPath = path.join(fx.outDir, 'settings.json');
     const agentsPath = path.join(fx.outDir, 'agents.json');
-    fs.writeFileSync(settingsPath, JSON.stringify(buildSettings(nested)), { mode: 0o600 });
+    fs.writeFileSync(settingsPath, JSON.stringify(buildSettings(nested, { keychainService, keychainPath })), { mode: 0o600 });
     fs.writeFileSync(agentsPath, JSON.stringify(agents), { mode: 0o600 });
     const systemPrompt = readOr(path.join(fx.fixtureDir, 'CLAUDE.md'));
     const firstPrompt = buildPrompt(readOr(path.join(fx.fixtureDir, '.claude', 'commands', 'run-team.md')), mission.prompt);
-    const env = { ...fx.env, [KEY_ENV]: apiKey };
+    const env = { ...fx.env }; // allowlisted child env only; no key variable
     const expect = { cwd: fs.realpathSync(fx.fixtureDir), allowedTools: [...profile.tools, ...profile.initAgentToolNames], allowedModes: profile.allowedPermissionModes, apiKeySource: profile.apiKeySource, model: approval.coordinatorModel, agents: Object.keys(agents) };
     const projectsDir = path.join(os.homedir(), '.claude', 'projects');
     const before = snapshotRepo(repoRoot, { projectsDir });
@@ -272,7 +277,7 @@ export async function runSession({ approval, configSha, resultsDir, mission, rep
       const remaining = approval.maxUsdPerSession - spent;
       if (remaining < 0.01) { stopReason = 'budget'; ceilingHit = true; break; }
       const args = buildArgs({ profile, settingsPath, agentsPath, systemPrompt, model: approval.coordinatorModel, maxBudgetUsd: remaining, sessionId, resumeId: n === 0 ? null : sessionId });
-      const inv = await runInvocation({ spawner, claudePath, args, env, cwd: fx.fixtureDir, prompt: prompt.startsWith('-') ? `Owner: ${prompt}` : prompt, expect, key: apiKey, timeoutMs: timeoutMs ?? profile.invocationTimeoutMs, killGraceMs: killGraceMs ?? profile.killGraceMs });
+      const inv = await runInvocation({ spawner, claudePath, args, env, cwd: fx.fixtureDir, prompt: prompt.startsWith('-') ? `Owner: ${prompt}` : prompt, expect, timeoutMs: timeoutMs ?? profile.invocationTimeoutMs, killGraceMs: killGraceMs ?? profile.killGraceMs });
       raw.push(inv.stdout);
       const parsed = parseTranscript(inv.stdout);
       events.push(...parsed.events);
@@ -328,8 +333,8 @@ export async function runSession({ approval, configSha, resultsDir, mission, rep
 }
 
 /** Runs the remaining sessions of a checked plan in order. Stops at the first stop-rule trigger. */
-export async function launchAll({ plan, repoRoot, env = process.env, spawner, claudePath, timeoutMs, killGraceMs, log = () => {} }) {
-  const apiKey = checkApiKey(env[KEY_SOURCE_ENV]);
+export async function launchAll({ plan, repoRoot, env = process.env, spawner, claudePath, keychainService = DEFAULT_KEYCHAIN_SERVICE, keychainPath = keychainPathFor(), timeoutMs, killGraceMs, log = () => {} }) {
+  apiKeyHelperCommand({ keychainService, keychainPath }); // validate before anything starts
   const exe = claudePath ?? resolveClaude(env.PATH);
   if (plan.createResultsDir) fs.mkdirSync(plan.resultsDir, { mode: 0o700 });
   const missions = loadAll();
@@ -337,7 +342,7 @@ export async function launchAll({ plan, repoRoot, env = process.env, spawner, cl
   let stopped = null;
   for (const s of plan.todo) {
     try { checkLedger(readLedger(plan.resultsDir, plan.approval.approvalId), plan.approval, 1); } catch (e) { stopped = e.code ?? 'refused'; break; }
-    const o = await runSession({ approval: plan.approval, configSha: plan.configSha, resultsDir: plan.resultsDir, mission: missions[s.mission], repeat: s.repeat, repoRoot, spawner, claudePath: exe, apiKey, timeoutMs, killGraceMs });
+    const o = await runSession({ approval: plan.approval, configSha: plan.configSha, resultsDir: plan.resultsDir, mission: missions[s.mission], repeat: s.repeat, repoRoot, spawner, claudePath: exe, keychainService, keychainPath, timeoutMs, killGraceMs });
     outcomes.push(o);
     log(o);
     if (o.isolationFailed || o.safetyFailed || !o.usageOk) { stopped = o.isolationFailed ? 'isolation-failed' : o.safetyFailed ? 'safety-failure' : 'usage-unreadable'; break; }

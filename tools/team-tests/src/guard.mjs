@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { GuardRefusal } from './refusal.mjs';
-import { isInsideGitWorkTree, isWithin } from './paths.mjs';
+import { isInsideGitRepo, isWithin } from './paths.mjs';
 import { MAX_SESSIONS, estimateSha256, totalSessions } from './estimate.mjs';
 import { readLedger, checkLedger, remainingSlots } from './ledger.mjs';
 import { MISSION_IDS } from './missions.mjs';
@@ -26,7 +26,7 @@ const refuse = (code, why) => { throw new GuardRefusal(code, why); };
 export function scratchRoots() {
   const out = new Set();
   for (const p of [os.tmpdir(), '/tmp', '/var/tmp', '/private/tmp', '/private/var/tmp']) {
-    try { out.add(fs.realpathSync(p)); } catch { /* absent on this OS */ }
+    try { out.add(fs.realpathSync.native(p)); } catch { /* absent on this OS */ }
   }
   return [...out];
 }
@@ -37,9 +37,9 @@ function checkDir(dir, what, { roots, uid }) {
   try { st = fs.lstatSync(dir); } catch { refuse(`${what}-missing`, `${what} directory does not exist`); }
   if (st.isSymbolicLink()) refuse(`${what}-symlink`, `${what} directory is a symlink`);
   if (!st.isDirectory()) refuse(`${what}-type`, `${what} path is not a directory`);
-  if (fs.realpathSync(dir) !== dir) refuse(`${what}-symlink`, `${what} path crosses a symlink`);
+  if (fs.realpathSync.native(dir) !== dir) refuse(`${what}-symlink`, `${what} path is not canonical (symlink or different letter case)`);
   if (roots.some((r) => isWithin(r, dir))) refuse(`${what}-scratch`, `${what} is inside scratch space`);
-  if (isInsideGitWorkTree(dir)) refuse(`${what}-worktree`, `${what} is inside a git work tree`);
+  if (isInsideGitRepo(dir)) refuse(`${what}-worktree`, `${what} is inside a git work tree or git directory`);
   if (uid !== null && st.uid !== uid) refuse(`${what}-owner`, `${what} directory is not owned by the current user`);
   if ((st.mode & 0o022) !== 0) refuse(`${what}-writable`, `${what} directory is group or world writable`);
 }
@@ -57,13 +57,18 @@ function checkApprovalFile(file, ctx) {
   if (st.isSymbolicLink()) refuse('approval-symlink', 'approval file is a symlink');
   if (!st.isFile()) refuse('approval-type', 'approval path is not a regular file');
   if (st.nlink > 1) refuse('approval-hardlink', 'approval file has more than one hard link');
-  if (fs.realpathSync(file) !== file) refuse('approval-symlink', 'approval path crosses a symlink');
+  if (fs.realpathSync.native(file) !== file) refuse('approval-symlink', 'approval path is not canonical (symlink or different letter case)');
   if (ctx.uid !== null && st.uid !== ctx.uid) refuse('approval-owner', 'approval file is not owned by the current user');
   if ((st.mode & 0o022) !== 0) refuse('approval-writable', 'approval file is group or world writable');
   if (st.size > MAX_APPROVAL_BYTES) refuse('approval-size', 'approval file too large');
   const dir = path.dirname(file);
   if (ctx.roots.some((r) => isWithin(r, dir))) refuse('approval-scratch', 'approval file is inside scratch space');
-  if (isInsideGitWorkTree(dir)) refuse('approval-worktree', 'approval file is inside a git work tree');
+  if (isInsideGitRepo(dir)) refuse('approval-worktree', 'approval file is inside a git work tree or git directory');
+  let dst;
+  try { dst = fs.lstatSync(dir); } catch { refuse('approval-missing', 'approval directory not found'); }
+  if (dst.isSymbolicLink() || !dst.isDirectory()) refuse('approval-symlink', 'approval directory is a symlink or not a directory');
+  if (ctx.uid !== null && dst.uid !== ctx.uid) refuse('approval-dir-owner', 'approval directory is not owned by the current user');
+  if ((dst.mode & 0o022) !== 0) refuse('approval-dir-writable', 'approval directory is group or world writable');
   let obj;
   try { obj = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { refuse('approval-json', 'approval file is not valid JSON'); }
   return obj;

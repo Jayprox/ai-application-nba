@@ -24,6 +24,29 @@ export function isInsideGitWorkTree(dir) {
   return r.status === 0 && r.stdout.trim() === 'true';
 }
 
+/**
+ * True if `dir` is, or lies inside, a git work tree OR a git directory (Sec F7): `rev-parse --git-dir`
+ * also succeeds inside `.git/`, where `--is-inside-work-tree` prints `false`. Also true when any path
+ * component is `.git` or any ancestor holds a `.git` entry, so a repo git refuses to open (for
+ * example another owner) still counts. Fails closed.
+ */
+export function isInsideGitRepo(dir) {
+  const parts = path.resolve(dir).split(path.sep);
+  if (parts.includes('.git')) return true;
+  for (let d = path.resolve(dir); ; d = path.dirname(d)) {
+    try { fs.lstatSync(path.join(d, '.git')); return true; } catch { /* no .git entry here */ }
+    if (path.dirname(d) === d) break;
+  }
+  const r = spawnSync('git', ['-C', dir, 'rev-parse', '--git-dir'], {
+    encoding: 'utf8',
+    env: { PATH: process.env.PATH ?? '', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: os.devNull },
+  });
+  return r.status === 0;
+}
+
+/** Canonical absolute path as the filesystem spells it (case and symlinks resolved). */
+export const canonical = (p) => fs.realpathSync.native(p);
+
 export function markerPath(root) {
   return path.join(root, MARKER_NAME);
 }
@@ -37,15 +60,15 @@ export function createScratch(runId) {
   if (typeof runId !== 'string' || !/^[A-Za-z0-9._-]{1,64}$/.test(runId)) {
     throw new Error('createScratch: invalid runId');
   }
-  const base = fs.realpathSync(os.tmpdir());
+  const base = fs.realpathSync.native(os.tmpdir());
   const made = fs.mkdtempSync(path.join(base, SCRATCH_PREFIX));
   try {
-    const real = fs.realpathSync(made);
+    const real = fs.realpathSync.native(made);
     if (fs.lstatSync(made).isSymbolicLink() || real !== made) {
       throw new Error('createScratch: scratch path is or crosses a symlink');
     }
     if (!isWithin(base, real) || real === base) throw new Error('createScratch: scratch outside tmpdir');
-    if (isInsideGitWorkTree(real)) throw new Error('createScratch: scratch is inside a git work tree');
+    if (isInsideGitRepo(real)) throw new Error('createScratch: scratch is inside a git work tree');
     fs.writeFileSync(
       markerPath(real),
       JSON.stringify({ tool: MARKER_TOOL, runId, createdAt: new Date().toISOString() }) + '\n',

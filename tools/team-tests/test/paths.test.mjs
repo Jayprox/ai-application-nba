@@ -44,3 +44,31 @@ test('isInsideGitWorkTree detects a repo', () => {
     fs.rmSync(d, { recursive: true, force: true });
   }
 });
+
+test('Sec F7: isInsideGitRepo is true in a work tree, inside .git, in a bare repo and under any .git component; false elsewhere', async () => {
+  const { isInsideGitRepo } = await import('../src/paths.mjs');
+  const { spawnSync } = await import('node:child_process');
+  const d = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'tt-git-'));
+  try {
+    assert.equal(isInsideGitRepo(d), false);
+    const repo = path.join(d, 'repo');
+    assert.equal(spawnSync('git', ['init', '-q', repo]).status, 0);
+    const bare = path.join(d, 'bare');
+    assert.equal(spawnSync('git', ['init', '-q', '--bare', bare]).status, 0);
+    fs.mkdirSync(path.join(repo, 'sub'));
+    fs.mkdirSync(path.join(d, 'a', '.git', 'b'), { recursive: true });
+    for (const p of [repo, path.join(repo, 'sub'), path.join(repo, '.git'), path.join(repo, '.git', 'refs'), bare, path.join(bare, 'refs'), path.join(d, 'a', '.git', 'b')]) assert.equal(isInsideGitRepo(p), true, p);
+    fs.mkdirSync(path.join(d, 'plain'));
+    assert.equal(isInsideGitRepo(path.join(d, 'plain')), false);
+  } finally { fs.rmSync(d, { recursive: true, force: true }); }
+});
+
+test('Sec F4: createScratch and safeRm use the canonical path; a case-varied scratch path is refused by safeRm', (t) => {
+  const s = createScratch('casetest');
+  try {
+    const up = s.toUpperCase();
+    if (!fs.existsSync(up) || up === s) { t.skip('case-sensitive filesystem'); return; }
+    assert.throws(() => safeRm(up), /refused/);
+    assert.equal(fs.existsSync(s), true);
+  } finally { safeRm(s); }
+});

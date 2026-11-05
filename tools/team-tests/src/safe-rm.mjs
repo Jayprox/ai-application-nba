@@ -31,9 +31,9 @@ export function safeRm(target) {
   }
   if (st.isSymbolicLink()) throw new SafeRmRefusal('path is a symlink');
   if (!st.isDirectory()) throw new SafeRmRefusal('path is not a directory');
-  const real = fs.realpathSync(given);
+  const real = fs.realpathSync.native(given);
   if (real !== given) throw new SafeRmRefusal('path crosses a symlink');
-  const base = fs.realpathSync(os.tmpdir());
+  const base = fs.realpathSync.native(os.tmpdir());
   if (real === base || !isWithin(base, real)) throw new SafeRmRefusal('path is outside os.tmpdir()');
   if (!path.basename(real).startsWith(SCRATCH_PREFIX)) throw new SafeRmRefusal('name lacks scratch prefix');
   const marker = path.join(real, MARKER_NAME);

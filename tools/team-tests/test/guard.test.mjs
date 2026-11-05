@@ -327,3 +327,62 @@ test('run: every refusal happens before the launcher import; a fully valid reque
   assert.deepEqual(ok.calls, ['import']);
   assert.equal(r.stopped, null);
 });
+
+// ---- M8 PR B cycle 2: Sec F4, F7, QA Minor 2 ---------------------------------------------------------------
+const gitInit = (dir) => { fs.mkdirSync(dir, { mode: 0o700, recursive: true }); assert.equal(spawnSync('git', ['init', '-q', dir]).status, 0); };
+
+test('Sec F4: a case-varied path to the approval file or results dir does not get past the scratch-root check', (t) => {
+  const w = world(); put(w);
+  const nativeTmp = fs.realpathSync.native(os.tmpdir());
+  const up = (p) => p.toUpperCase();
+  if (!fs.existsSync(up(w.file))) { t.skip('case-sensitive filesystem: an upper-case path does not exist'); return; }
+  // Sanity: the lower-case path is refused as scratch.
+  refused('approval-scratch', () => check(w, { roots: [nativeTmp] }));
+  // Upper-case approval path: must be refused, never accepted.
+  assert.throws(() => check(w, { approvalPath: up(w.file), roots: [nativeTmp] }), (e) => e instanceof GuardRefusal);
+  // Upper-case results dir with an approval outside the temp root (roots: [] stands for "not scratch" for the file).
+  const w2 = world(); put(w2, { resultsDir: up(w2.resultsDir) });
+  assert.throws(() => check(w2, { roots: [nativeTmp] }), (e) => e instanceof GuardRefusal);
+  assert.throws(() => check(w2, { roots: [] }), (e) => e instanceof GuardRefusal && /results/.test(e.code));
+});
+
+test('Sec F7: an approval file under a repository .git directory is refused, even when git calls it "not inside a work tree"', () => {
+  const w = world(); put(w);
+  const repo = path.join(w.base, 'repo');
+  gitInit(repo);
+  for (const dir of [path.join(repo, '.git'), path.join(repo, '.git', 'refs')]) {
+    const f = path.join(dir, 'approval.json');
+    put({ ...w, file: f });
+    refused('approval-worktree', () => check(w, { approvalPath: f }));
+  }
+  // A bare repository directory and a path with a .git component that is not a repo are refused too.
+  const bare = path.join(w.base, 'bare.git');
+  assert.equal(spawnSync('git', ['init', '-q', '--bare', bare]).status, 0);
+  put({ ...w, file: path.join(bare, 'approval.json') });
+  refused('approval-worktree', () => check(w, { approvalPath: path.join(bare, 'approval.json') }));
+  const odd = path.join(w.base, 'x', '.git', 'sub');
+  fs.mkdirSync(odd, { recursive: true, mode: 0o700 });
+  put({ ...w, file: path.join(odd, 'approval.json') });
+  refused('approval-worktree', () => check(w, { approvalPath: path.join(odd, 'approval.json') }));
+});
+
+test('Sec F7: a results dir (or its missing parent) under .git is refused', () => {
+  const w = world();
+  const repo = path.join(w.base, 'repo');
+  gitInit(repo);
+  put(w, { resultsDir: path.join(repo, '.git', 'results') });
+  refused('results-parent-worktree', () => check(w));
+  fs.mkdirSync(path.join(repo, '.git', 'results'), { mode: 0o700 });
+  refused('results-worktree', () => check(w));
+});
+
+test('QA Minor 2: an approval file in a group- or world-writable directory is refused; a user-only directory is accepted', () => {
+  const w = world(); put(w);
+  assert.equal(check(w).approval.approvalId, 'pilot-1');
+  for (const mode of [0o770, 0o707, 0o777, 0o720]) {
+    fs.chmodSync(w.approvalDir, mode);
+    refused('approval-dir-writable', () => check(w));
+  }
+  fs.chmodSync(w.approvalDir, 0o700);
+  assert.equal(check(w).approval.approvalId, 'pilot-1');
+});

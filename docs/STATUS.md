@@ -224,7 +224,8 @@ PA skipped: requirements are concrete and owner-specified.
 **Reviewer disagreements:** none.
 **Recommendation:** Ready to merge, with conditions: (1) owner adds the `.env.example` lines (agents can't read it; text in `docs/reviews/M5/lead.md` finding 5); (2) owner's first real run by hand before installing the plist: `WEEKLY_CONFIRM_PROD=1 BACKUP_CONFIRM_PROD=1 npm run db:weekly`, then check `logs/weekly.log`, the notification, and that `pgrep -fl 'ssh .*-L 127.0.0.1:5543'` and `pgrep -fl 'railway connect'` print nothing.
 **Still owner-gated:** merge approval (Gate 2); first real run; installing/reloading the weekly plist.
-- [ ] T6 Readiness report -> Gate 2
+- [x] T6a Readiness report PR A (below) -> **Gate 2: waiting on owner merge approval**
+- [ ] T6b Readiness report PR B -> Gate 2
 
 ### Approvals
 - 2026-11-03 — Owner (Gate 1): mission text accepted as the requirement, plus:
@@ -367,9 +368,12 @@ PA skipped: requirements are concrete and owner-specified.
 - [x] Re-review cycle 2. QA: READY WITH CONDITIONS, cycle-1 Major closed; Minors: "never counts as approval on its own" softer than approved; no instruction for a subagent whose brief has no quote. Sec: READY WITH CONDITIONS, R1-R6 closed; C2-1 Minor (security-relevant) approval paragraph deviates from owner text ("on its own"); Notes C2-2 forged briefs via nested `claude` sessions, C2-3 "owner's message" less precise than cycle-1 text, C2-4 exact-wording rule should cover the whole Always-ask section; only the Coordinator writes Approvals.
 - **Coordinator error:** the words "on its own" came from the Coordinator's cycle-2 brief to Dev, not from Dev and not from the owner-approved text. Reported to the owner.
 - [x] Owner decision on cycle 3 wording: 2026-11-04 Option A with an owner change to the second sentence (see Approvals)
-- [ ] Fix cycle 3/3 (Dev) PR A
-- [ ] T5 Lead review
-- [ ] T6 Readiness report -> Gate 2
+- [x] Fix cycle 3/3 (Dev) PR A: `dee8116` (reviews + STATUS), `11e2d14` (owner cycle-3 text; Coordinator script check: intro paragraph equals STATUS text exactly). CI run 41963319602 green on `11e2d14` (headSha verified).
+- [x] Final re-review at `11e2d14`. QA: **READY** (follow-ups: "relayed from another agent" vs quoted Coordinator brief wording tension; section named three ways; re-ask after summary; small-change definition near docs-only, dead Sec trigger). Sec: **READY**, no Blocker/Major/Minor (follow-ups: D3-1 optional "through the session's own question tool"; D3-2 item 17 not enforced by the approver, re-check in PR B; C2-4(b) exact owner wording for standing-decision changes).
+- [x] T5a Lead review PR A (`docs/reviews/M8/lead-prA.md`, at `11e2d14`): READY WITH CONDITIONS. Content ready; exact-wording checks pass; nothing unapproved; existing text intact except the approved small-change line; no `.claude/`, `.github/`, `tools/approver/` changes; Story 1 AC1-6 pass; 3/3 cycles used. Condition: commit the final review docs and confirm green CI on the new head (not a fix cycle). Notes: AC4/AC5 owner-approved deviations; D3-2 (item 17 enforcement) is an owner decision before PR B; PR B brief points.
+- [ ] T5b Lead review PR B
+- [x] T6a Readiness report PR A (below) -> **Gate 2: waiting on owner merge approval**
+- [ ] T6b Readiness report PR B -> Gate 2
 - [ ] Owner approval before any real golden-mission run (cost estimate)
 
 ### Approvals
@@ -389,3 +393,11 @@ PA skipped: requirements are concrete and owner-specified.
 - PR A cycle-2 notes: small-change "contained fix" wording near-empty; small-change Sec trigger lists items the definition excludes; standing-decision changes do not need exact owner wording.
 - Sec PR A notes: backup freshness for reuse (item 2); "reversible" judgement in item 7; preamble "never grant a permission" vs process relaxations.
 - `fix/` PR to clean existing committed docs of home paths, usernames, hostnames (after M8; mount names out of scope per owner).
+
+### Readiness report — PR A (2026-11-04)
+**What changed:** PR #10 https://github.com/Jayprox/ai-application-nba/pull/10 (`feat/m8a-standing-decisions`; CLAUDE.md content at `11e2d14`). `CLAUDE.md`: new "Standing decisions" (9 items, each with source missions and approval date) and "Always ask the owner" (approval paragraph + 17 items + precedence line) sections; the small-change line in "Lightweight paths" gains a definition and the Sec trigger. Plus M8 requirements, plan, reviews and STATUS. No `.claude/`, `.github/`, `tools/approver/`, settings, hooks or `.env` touched.
+**CI:** run 41963319602 green on `11e2d14`; final CI on the docs-commit head is cited in the chat report.
+**Verdicts:** QA READY, Sec READY (both at `11e2d14`), Lead READY WITH CONDITIONS (condition: commit review docs, green CI on new head). 3 of 3 fix cycles used (cycle 1: eight owner-approved fixes; cycle 2: five; cycle 3: approval paragraph with owner edit, item 6 "section", item 17).
+**Deviations:** "hostnames" read as including infrastructure/service hostnames (Coordinator reading, written into item 9); ambiguous bugs run PA and Gate 1 (item 6); small-change line changed (owner-approved); standing decisions 5 and 6 longer than the 1-2 line target; Coordinator error in the cycle-2 brief ("on its own"), fixed in cycle 3.
+**Follow-ups:** D3-2 item 17 not enforced by the approver (owner decision before PR B); D3-1 optional "through the session's own question tool"; C2-4(b) exact owner wording for standing-decision changes; QA: "relayed from another agent" vs quoted brief wording, section named three ways, re-ask after summary, small-change definition near docs-only and dead Sec trigger; Sec PR A notes (backup freshness, "reversible", preamble).
+**Recommendation:** ready to merge once the docs-commit head is green.

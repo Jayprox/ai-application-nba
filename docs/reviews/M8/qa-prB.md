@@ -203,3 +203,65 @@ Scope: PR #11, branch `feat/m8b-team-tests`, code at `e4d2f31` (checkout HEAD is
 VERDICT: READY WITH CONDITIONS
 
 Cycle 4 does what the brief says: no test was weakened, the R3-1 regression tests are sound, the new diagnostics show enough to diagnose a recurrence of the AC6 failure, and the dry run was stable (5 of 5, and the dry-run test passed under heavy load). My one full local run did not match the Dev's 522/522. It failed on a different, load-sensitive test (Finding 1), which I reproduced 2 of 4 times under CPU load. That test predates this cycle and CI is green on the head, so I do not block this cycle's diff on it. The condition: the Coordinator reports Finding 1 to the owner as a known flaky test, then either gets a fix in a separately authorized cycle or records a follow-up, and does not present 522/522 as stable. The original AC6 flake's root cause is still unknown; this cycle only made it diagnosable.
+
+## Re-review cycle 5 (at 5efe404)
+
+Scope: PR #11, branch `feat/m8b-team-tests`, code at `5efe404` (main checkout HEAD `51b310d` is docs on top; `git diff --stat 5efe404 HEAD -- tools/` is empty). CI run 42091010817: `gh run view --json` gives conclusion success, status completed, headSha `5efe404`. I did not trigger a re-run. All runs and all deliberate breakage were in a scratch `git clone` under the session temp dir; the main checkout's tree, index and stash were not touched. Code diff reviewed: `git diff e4d2f31..5efe404 -- tools/` (5 files, +202/-16: `canary.mjs`, `util.mjs`, new `checkers-cycle5.test.mjs`, and the two F5 test files).
+
+### 1. F5 test diff (Spot check cycle 4 Finding 1)
+
+The diff removes 4 test lines in total (plus 12 non-test source lines in `canary.mjs`/`util.mjs`, which are the C4 fixes, not in this check).
+
+| Removed line | Status |
+|---|---|
+| `makeRun('G1', { ..., r.testTimeoutMs = 1500 })` (checker test) | Restructured: now `makeRun` inside a loop over `[1500, 3000, 6000]`. |
+| `assert.throws(() => H(run), /timeout/)` | Still enforced. It is now the first statement in each loop attempt, inside a try that cleans up and rethrows on failure. A run that does not time out still fails the test. |
+| `runInvocation({... timeoutMs: 800 ...})` (launcher test) | Restructured: loop over `[800, 1600, 3200, 6400]`, all other arguments identical. |
+| `assert.equal(out.timedOut, true)` | Still enforced, inside every loop attempt, before the pid-file check. |
+
+- "Whole process group is dead" assertion: byte-for-byte unchanged. The diff has no hunk touching `waitDead`, `assert.equal(dead, true, 'grandchild must be dead after the timeout')`, or the launcher's `alive()` loop and `assert.equal(alive(), false, ...)`. Both still wait 3 s for death.
+- Bound: checker test timeouts sum to 1.5 + 3 + 6 = 10.5 s; launcher test 0.8 + 1.6 + 3.2 + 6.4 = 12 s (plus 100 ms kill grace per attempt). Both are inside 10 to 15 s. This is a retry on timeout rather than a poll, and the bound is on the timeout windows, not on total test wall time (see Finding 1).
+- Failure message: both tests call `assert.fail('child never started / pid file not written within 10.5 s')` (12 s in the launcher test) when the last window ends with no pid file. I confirmed this by reading the code; I did not force that path, since the only way to do so is to edit the test.
+- Retained semantic: a retry only happens when the pid file is missing after a timeout, so a child that started is checked on the first attempt exactly as before.
+
+### 2. Broken kill (done by QA, not the Dev's own check)
+
+Scratch clone at `5efe404`; one line changed per run, then `git checkout tools/` to restore. Command: `node --test --test-name-pattern='Sec F5' <both test files>`.
+
+| Variant | Change | Result |
+|---|---|---|
+| Real code | none | 2 of 2 pass, 8 s wall (launcher 0.9 s, checker 6.7 s) |
+| Broken checker | `tests-before-after.mjs:16` `process.kill(-r.pid, 'SIGKILL')` to `process.kill(r.pid, 'SIGKILL')` | checker F5 **FAILS** with `AssertionError: grandchild must be dead after the timeout` at 9.4 s; launcher F5 passes (it does not use that path). 10 s wall, no hang. |
+| Broken launcher | `launch.mjs:170` `process.kill(-child.pid, sig)` to `process.kill(child.pid, sig)` | launcher F5 **FAILS** with the same assertion message at 3.8 s; checker F5 passes. 7 s wall, no hang. |
+
+Each test is sensitive to exactly its own code path and fails fast, inside its bound. The two broken runs leaked one grandchild each, as expected (the product kill was disabled); I confirmed and killed both afterwards. Under load, real code (clone restored, `git status` clean), 20 busy-loop `node` processes on a 10-core machine, 5 repeats of both tests: 5 of 5 runs 2/2 pass. Wall times 8 s, 8 s, 19 s, 18 s, 19 s. Per-test durations in the slow runs: checker F5 16.6 s and 17.0 s, launcher F5 0.8 s to 2.5 s. I did not run the broken variants under load.
+
+### 3. Full run
+
+| Check | Result |
+|---|---|
+| Root `npm test`, scratch clone at `5efe404` | 532 tests, 532 pass, 0 fail, 0 skipped, duration 252.0 s (wall 4:13.7). The previous cycle's F5 failure did not recur. |
+| Dry run | `dry run OK`, 28 samples, 28 as expected, 0 mismatched (21 positive controls reported as failed), exit 0, 49.2 s |
+| `checkers-cycle5.test.mjs` on `5efe404` | 10 of 10 pass |
+| Same file against `e4d2f31` `tools/team-tests/src` (scratch, restored afterwards) | 8 fail, 2 pass. Failing: both C4-1, all C4-2 G7 and G4 large-file and symlink cases, the side-branch `git show` failure, and both C4-3 read-tree cases. The two passing ones are the controls ("symlink outside the scanned prefixes does not trip G7", "clean samples still pass"). So each new test discriminates old from new. |
+| Count reconciliation | 522 (cycle 4) + 10 new tests = 532. |
+| Weakening check | `git diff e4d2f31..5efe404 -- tools/ \| grep '^-'` shows 16 removed lines: 12 source lines (C4 fixes in `util.mjs`/`canary.mjs`) and the 4 F5 test lines accounted for above. No removed assertion elsewhere. A grep of the added lines for `skip`, `todo`, `only(` finds none. No timeout was raised outside the two F5 tests. |
+
+### Findings
+
+1. **Note - the F5 bound applies to the timeout windows, not the test's total time.** Under 2x CPU load the checker F5 test took 16.6 s and 17.0 s end to end (up to 10.5 s of windows, plus git fixture setup per attempt and the 3 s death wait). Under no load it already took 6.6 s, which suggests it often needs the second or third window on this machine. It passed every time, so this is not a defect. If a CI step or runner imposes a per-test limit below about 20 s, note it. The 10 to 15 s requirement is met for the pid-file wait.
+2. **Note - the "child never started" failure path was verified by reading, not by running.** Forcing it needs a test edit. It is a plain `assert.fail` with a clear message after the last window, and the earlier iterations clean up their fixtures (`cleanup()` before the next attempt).
+3. **Note (carried) - cycle 4 Notes remain open:** mismatch diagnostics omit a nonexistent expected-failed id (Minor 2 there), the dry run is 49 s against the 30 s plan target, and the AC6 flake root cause is still unknown (it did not recur here, in 1 full run and 1 dry run).
+
+No Blocker, Major or new Minor.
+
+### Owner F5 conditions (STATUS Approvals, 2026-11-05)
+
+- Upper bound of 10 to 15 s on the wait: MET (10.5 s checker, 12 s launcher).
+- Fails clearly if the child never starts: MET by code reading (explicit `assert.fail` message), not by a forced run.
+- "Whole process group is dead" assertion still fails when the kill is deliberately broken: MET. Shown by QA in the scratch clone for both code paths, each failing with `grandchild must be dead after the timeout` and without a hang.
+- Assertion itself unchanged: MET, no diff hunk touches it.
+
+VERDICT: READY
+
+Rationale: At `5efe404` CI is green, root `npm test` is 532/532 with nothing skipped, and the dry run is 28/28 as expected with exit 0. The F5 change keeps every removed assertion (`timeout` throw and `timedOut === true` now run on each attempt), leaves the dead-group assertion untouched, bounds the wait at 10.5 s and 12 s, and fails with a clear message if the child never starts. Deliberately breaking the group kill in either the checker or the launcher makes the matching F5 test fail quickly, and with real code both pass 5 of 5 under heavy CPU load. The 8 behavioural cycle 5 tests fail on `e4d2f31` code and pass now, and no other test was weakened. Remaining items are Notes. QA still cannot certify real `claude` behaviour.

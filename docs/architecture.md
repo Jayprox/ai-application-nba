@@ -896,6 +896,7 @@ Install per package: `npm ci` (or `npm install`) in `/`, `backend/`,
 | Package | Command | Runner | Needs Postgres? | Env vars | Result on an empty-schema DB |
 |---|---|---|---|---|---|
 | root | `npm test` | `node --test 'scripts/lib/*.test.mjs'` | No | none (`sources.test.mjs` stubs `fetch`, unsets `SEED_FIXTURES`) | 110/110 pass (M6) |
+| root (team-tests) | `npm test` (same command; glob also covers `tools/team-tests/test/*.test.mjs`) | `node --test` | No | none | scaffold tests only (M8 B1: `paths`, `safe-rm`); no model, no network, never spawns `claude` |
 | root (schema) | `npm run db:apply` | SQL constraint tests | Yes, empty DB | `DATABASE_PUBLIC_URL` | PASSED |
 | backend | `npm test` | `node --test --test-concurrency=1 'test/*.test.js'` | **Yes, with real loaded data** | `TEST_DATABASE_URL` (falls back to `DATABASE_URL`); `JWT_SECRET` is generated if unset | 21 pass / 44 fail / 3 skip (see below) |
 | worker | `npm test` | `node --test --test-concurrency=1 'test/*.test.js'` | Optional | `WORKER_TEST_DATABASE_URL` | without it: 40 pass, 51 skip. With it: 91 pass, 0 skip (M6 added the Highlightly weekly client, schedule, backfill and CLI tests) |

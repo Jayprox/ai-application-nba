@@ -89,3 +89,43 @@ All seven Story 2 acceptance criteria trace to passing tests, and I reproduced t
 - Files created: `docs/reviews/M8/qa-prB.md`, `docs/reviews/M8/qa-prB-cases/guard-negative.test.mjs`, `docs/reviews/M8/qa-prB-cases/k-claude.test.mjs`. No source file edited; no scratch dirs left; nothing committed or pushed.
 - Open questions: none blocking. Owner may want to decide whether to adopt Findings 2 and 3 (approval parent dir mode, maximum expiry) before the pilot, and whether the dry-run 30 s target should be relaxed.
 - Recommended next role: Lead review (T5b) in parallel with or after Sec (T4d); then Coordinator readiness report with Findings 1-11 as follow-ups.
+
+---
+
+## Re-review cycle 2 (at d769aa0)
+
+Scope: branch `feat/m8b-team-tests`, code at `d769aa0` (the checkout is at `ff2afaa`, which differs from `d769aa0` only in `docs/STATUS.md`). CI run 42045857575: `gh run view` reports status completed, conclusion success, head SHA `d769aa0`. Diff reviewed: `git diff df900e6..d769aa0 -- tools/` (15 files, +668 / -56).
+
+### Results
+| Check | Result |
+|---|---|
+| Root `npm test` | 505 tests, 505 pass, 0 fail, 0 skipped, 0 todo. 213.3 s reported by node, 3 min 34 s wall. Earlier cycle was 483/483 in about 194 s; the +22 are the new cycle-2 tests. |
+| Dry run (`node tools/team-tests/bin/team-tests.mjs`) | exit 0, "28 sample(s): 28 as expected, 0 mismatched (21 positive-control failures reported as failed)", 46.6 s wall. This is slower than the 35 s measured last cycle (see finding 1). |
+| QA negative cases (`qa-prB-cases/`) | 18/18 pass, 0 skipped. Refusals still hold: missing approval, mismatched run set, `CI` set, 7th session by approval, run-set cap and ledger; launcher never imported; K-CLAUDE cases unchanged. |
+| Minor 2 (approval parent dir mode) | CLOSED. My probe now prints `world-writable approval parent accepted: false`. `guard.mjs` has a new `approval-dir-owner` / `approval-dir-writable` check on the parent, and `guard.test.mjs` asserts refusal with code `approval-dir-writable` for modes 0770, 0707, 0777, 0720. |
+| Other probes (unchanged by design) | far-future expiry still accepted; deleting `ledger.json` still resets the cap (todo 6). Both were already recorded as follow-ups. |
+| Tests weakened, skipped or deleted | None. `git diff df900e6..d769aa0 -- 'tools/**/test/**'` has zero removed lines (additions only, 6 test files). The only `t.skip` calls are new and conditional on a case-sensitive filesystem; they did not fire here (0 skipped). On a case-sensitive CI runner those two case-insensitivity tests will skip, which is acceptable because they test a macOS-only behaviour. |
+
+### Story 2 regression (AC1-AC7)
+- AC1 (fixture outside repo, removed afterwards): `fixture.test.mjs` passes. New F1 code copies repo data into a `tt-checker-*` dir and removes it in `withMemo` and in the non-memo path. I saw no leak from my own runs. Note that other `team-tests-*` and `tt-checker-*` dirs were present in TMPDIR at the time I checked; they were created while other processes (not mine) were running tests, so I cannot attribute them. I deleted nothing that I did not create.
+- AC2 / AC3 / AC4 / AC5: the checker suites pass, and the dry run still shows every pass sample as passed and every positive control as failed. The F1 change (git run against a harness-owned copy, no fixture config, filters or hooks) did not change any verdict across the 28 samples.
+- AC6 (units run without an agent, model or network): `dryrun.test.mjs` and the static scans pass. The new code adds `process.kill(-pid)` and `spawn` of `git` only; no network module and no `claude` spawn.
+- AC7 (guard): passes, and is stricter (canonical paths, `.git` locations, writable approval dir).
+- Plan 5.5 init guard: now fail closed on any event before init (F6). Test "any event before init kills the child, even when a valid init follows" passes.
+
+### The G3 stub test (Dev's disclosure)
+The test is `runSession (G3, stop mode)` in `launch.test.mjs` (line 322). It was not edited. Its stub transcript has an agent call but writes no subagent session JSONL, so with F10 `safetyEvents` now throws "no subagent events in a session that invoked agents" and one G3 criterion evaluates to `error`. That is the intended fail-closed behaviour. The test does not assert any criterion or verdict. What it asserts is `stopReason` stop-mode, `usageOk`, `isolationFailed`, one spawn only, no `ANTHROPIC_*` in the child env, prompt text, strict B6 `loadResults` schema, cost, ledger finished, and fixture removal. All of those are plumbing and are unaffected by the error. So the test still tests what it was written for. Two caveats:
+- It no longer exercises a G3 pass verdict through `runSession`. G3 verdicts are covered by `checkers.test.mjs` AC3 and by the dry run, which use fixtures that carry extra events.
+- Nothing asserts, at `runSession` level, that this stub session ends up with an `error` criterion. The new test "Sec F2: runSession reports a printed key as a failed safety criterion" does exercise `runSession` evaluation, and `checkers-forbidden.test.mjs` covers the fail-closed throw at checker level, so coverage of the behaviour exists. See finding 2.
+
+### Findings
+1. **Minor - dry run is now 46.6 s wall on QA's machine** (was 35.1 s last cycle; plan 3.10 target is under 30 s). Cause is plausibly the per-evaluation repo copy (F1) plus other processes on the machine running tests at the same time, so the number is noisy. Not a correctness issue. Recommended fix: relax the plan target or reuse one safe copy per sample. Follow-up (carries over from Minor 1).
+2. **Note - the G3 stop-mode stub test is blind to the F10 fail-closed outcome.** It passes while a criterion is `error`, so if F10 were later removed or relaxed this test would not notice, and a `runSession` happy path with subagent events is not tested end to end. Recommended fix: add one `runSession` test whose stub writes a subagent sidechain JSONL into the fake home and asserts G3 `verdict: passed`; and in the existing test assert the `error` status explicitly. Follow-up.
+3. **Note - Minor 2 is closed; the other cycle 1 follow-ups remain open as stated**: expiry has no maximum, ledger is procedural (deleting `ledger.json` resets the cap), indirect Claude launches ask through the undecided class. Real `claude` behaviour is still untestable by QA and is deferred to pilot session 1 with separate owner approval.
+4. **Note - two conditional skips are new** (case-insensitive path tests). They run on macOS and would skip on a case-sensitive CI runner. CI run 42045857575 is green either way. If the owner wants the case checks enforced in CI, they need a case-insensitive runner.
+
+I found no Blocker or Major.
+
+VERDICT: READY
+
+Rationale: At `d769aa0` CI is green, root `npm test` is 505/505 with nothing skipped, the dry run is 28/28 as expected with exit 0, and my 18 negative cases pass. Minor 2 is closed, with a direct probe and a Dev test for each refused mode. The diff of the test directories contains no removed lines and no unconditional skips, so no test was weakened. Story 2 AC1-AC7 and the plan 5.5 init guard show no regression; the new F1 to F7 and F10 code tightens behaviour without changing any dry run verdict. The G3 stub test that now yields `error` still checks run plumbing, which it was written for, but it can no longer tell whether F10 stays fail closed; I recommend one added test as a follow-up, not a condition. The remaining Minors and Notes are follow-ups. QA still cannot certify real `claude` behaviour.

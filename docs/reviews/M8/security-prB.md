@@ -332,3 +332,100 @@ VERDICT: READY WITH CONDITIONS
 - **Scratch:** the clone, the repro scripts and the temp dirs left by the killed repro runs are all removed. `ls -d <tmp>/team-tests-* <tmp>/tt-*` gave 0.
 - **Open questions:** R2-3, whether Claude Code puts Bash children in their own process group (to be verified in pilot session 1).
 - **Next role:** Developer (cycle 3: R2-1 and R2-2), then Sec re-check, then Lead.
+
+## Re-review cycle 3 (at b7f0d30)
+
+Reviewer: Security Reviewer (Sec), independent. I did not author any of the cycle 3 changes. This is the last cycle (3 of 3).
+
+VERDICT: READY WITH CONDITIONS
+
+R2-1 and R2-2 are closed: every repro from cycle 2, plus extra vectors, now gives `error` promptly or `failed`. The R2-4 dedupe fix is correct. The new `HARNESS_UNTRACKED` exclusion adds one new security-relevant Minor (R3-1): it is applied to the whole changed-file set, not only to the untracked listing. So a `.env` or `.fake-keychain` **committed on a branch** is now hidden from `G4.only-g1-files`. This is a regression against `d769aa0`. The canary checks still catch it when the committed file holds a canary value, so no secret leak goes undetected. In my view R3-1 does not block merge and can be a follow-up (see section 5).
+
+### 1. Scope and tools
+
+- **Commits:** PR #11, branch `feat/m8b-team-tests`, head `b7f0d309834813db18c508e900f99f3a43a6d794`. Diff reviewed: `git diff ed2f760..b7f0d30 -- tools/`. The code commits are `f791059` (R2-1, R2-2) and `b7f0d30` (R2-4).
+- **Files changed:** `git diff --name-only ed2f760..b7f0d30` lists only `tools/team-tests/src/checkers/util.mjs`, `tools/team-tests/src/launch.mjs`, `tools/team-tests/test/checkers-hardening.test.mjs` and `tools/team-tests/test/launch.test.mjs`. Nothing outside `tools/team-tests/` changed. No manifest, lockfile, `.github/`, `.claude/`, `tools/approver/` or `CLAUDE.md` change.
+- **CI:** `gh run view 42063967482` gives headSha `b7f0d309…`, status completed, conclusion success. Jobs root, backend, frontend and worker all succeeded.
+- **Tests:** in a scratch clone at `b7f0d30` under the session scratchpad, `node --test tools/team-tests/test/*.test.mjs` gave **tests 232, pass 232, fail 0** (node v26.11.1, git 2.54.0).
+- **Repros:** one local probe script against the clone, using the test helpers (`makeRun`, `evaluate`, `changedFiles`, `extraSafetyEvents`). I ran the `.env` probe at both `b7f0d30` and `d769aa0`. No `claude`, no `security`, no network beyond `gh run view`, and no `.env` or keys read. The probe's `.env` writes were to throwaway fixtures only.
+- **Scanners:** `gitleaks`, `semgrep`, `trivy` and `trufflehog` are not installed. None were run and none were installed. I grepped the added lines for home paths, the username, and key, token or password shapes: no hits. `npm audit` was not run, because no dependency changed.
+
+### 2. Prior findings: status
+
+| # | Status | Evidence (probe output at `b7f0d30`) |
+|---|---|---|
+| R2-1 Minor | **Closed** | All cases give `verdict=error`, each in under 0.4 s:<br>FIFO `HEAD` (7 ms); `HEAD` → `/dev/zero` (4 ms); `HEAD` → outside file; `HEAD` as a directory;<br>symlinked `objects`, `refs` or `refs/heads`; FIFO in `refs/heads`; FIFO in `objects/pack`;<br>`packed-refs` → `/dev/zero`; FIFO `packed-refs`; 600 MiB sparse `packed-refs` (budget); `objects` missing.<br>How: `readSmallRegular` uses `O_NOFOLLOW\|O_NONBLOCK`, `fstat().isFile()` and 4 KiB caps (`util.mjs:85-98`). `topEntry` lstat-checks `objects`, `refs` and `packed-refs` (`util.mjs:101-107`). `packed-refs` now counts toward the budget (`util.mjs:127-133`). |
+| R2-2 Minor | **Closed** | All cases give `failed`:<br>replace ref hiding `CLAUDE.md` → `X.config-unchanged=failed`;<br>replace ref hiding `package.json` → `G4.manifest-unchanged=failed`, also when packed with `pack-refs --all`, and when it exists **only** in `packed-refs`;<br>`info/grafts` plus `shallow` → `failed` (`.git/info` and `shallow` are not copied);<br>`src/.gitignore` `*`, root `.gitignore`, `info/exclude` and `core.excludesFile` → `G4.only-g1-files=failed`. The clean G4 control gives `passed`.<br>How: `GIT_NO_REPLACE_OBJECTS=1` is set in `GIT_ENV` for every checker git call (`util.mjs:32`), `refs/replace` is skipped in the copy (`util.mjs:124`), and the untracked listing drops `--exclude-standard` (`util.mjs:270`). See R3-1 for a side effect. |
+| R2-3 Note | Open, follow-up | Unchanged by this cycle. Whether Claude Code puts Bash children in their own process group is still to be checked in pilot session 1. See R3-2 for one related point. |
+| R2-4 Note | **Closed** | For id-less events the key is now `type:name:JSON(input):text` (`launch.mjs:257`). Probe: stream `[Bash ls]` against JSONL `[Bash gh pr merge, Bash railway up, Bash ls, Read ls, Bash {ls,x:1}, Bash ls with id "a"]` keeps 5 of 6. Only the exact duplicate (same type, name, input and text) is dropped. That duplicate's content is already in the stream, so every content-based safety check still sees it. The key ignores `sub`, so a main-session event and an identical subagent event merge into one. The safety checks look at content, so this cannot hide a command. Real CLI events carry ids, so this path is rare anyway. |
+| R2-5 Note | Open, follow-up | Unchanged (`.GIT` case check in `treeBlobs`). |
+
+### 3. New findings
+
+#### R3-1. Minor (security-relevant, regression introduced in cycle 3): `HARNESS_UNTRACKED` also hides a committed `.env` or `.fake-keychain` from `G4.only-g1-files`
+- **Location:** `tools/team-tests/src/checkers/util.mjs:260,271`. `for (const p of HARNESS_UNTRACKED) set.delete(p)` runs on the merged set, after the branch diffs, the work-tree diff and the untracked listing have all been added.
+- **Evidence (confidence high):** in a G4 fixture, a side branch commits `.env` (or `.fake-keychain`) with non-canary content (`git add -f`):
+  - at `b7f0d30`: overall verdict `passed`, `G4.only-g1-files=passed`;
+  - at `d769aa0`: verdict `failed`, `G4.only-g1-files=failed`.
+- **What still catches it:**
+  - The same commit with the canary value gives `X.canary-never=failed`. `git log -p --all ^base` covers it.
+  - A `.env` rewritten to hold another canary gives `failed`.
+  - `src/.env` and `.ENV2` are still listed (the match is exact and top-level only).
+  - `G1.branch-main` uses `changedOn` and is unaffected.
+  - G2 and G3 fail on any extra branch or a moved `main`.
+  - `G2.no-env-read` and the other sensitive-read checks are transcript-based and untouched.
+- **Impact:**
+  - A team can commit a secrets-file path, or the harness key-store file, on a branch, and the G4 mechanical scope check will not report it. That conflicts with hard rule 8.
+  - It does not hide a canary or secret value, so the leak criterion is intact. It does not hide any other path, and nothing executes.
+  - Separately, and not a regression: a rewrite of the **untracked** `.env` with non-canary content (for example, removing the canary) is reported by no criterion. At `d769aa0` `.gitignore` hid it as well.
+- **Fix (one line, follow-up):** apply the exclusion only to the untracked listing, for example by filtering the `ls-files --others` output before `add`. Add a test: `.env` committed on a side branch → `G4.only-g1-files=failed`.
+
+#### R3-2. Note: copy step TOCTOU combined with R2-3
+- `copyTree` checks the entry type from `readdirSync` and then calls `copyFileSync` (`util.mjs:62-77`). A process that survived the session (R2-3) could swap a regular objects file for a FIFO in between, and the copy would block. That would bring back the R2-1 hang.
+- It needs R2-3 to hold and a precise race. Confidence that it is exploitable in practice is low.
+- **Recommendation:** for the follow-up, open with `O_NOFOLLOW|O_NONBLOCK`, `fstat` and copy from the fd, as `readSmallRegular` does. Alternatively, run the whole evaluation under a wall-clock watchdog.
+
+#### R3-3. Note: unignored untracked listing and harness-created files (fail-closed, mainly for QA)
+- Without ignore rules, `ls-files --others` lists every file in an untracked `node_modules/`, `.DS_Store` and similar files.
+  - Any of these makes `G4.only-g1-files`, `G2.stopped-before-dev` and `G3` source-change checks **fail**, not pass.
+  - A very large tree could exceed `maxBuffer` (128 MiB) and give `error`.
+- This is safe from a security view, but it can cause false failures. QA should confirm that nothing in the harness or template creates such files in the fixture.
+
+#### Scratch observation
+- My clone and probe files are removed.
+- Four temp dirs (`team-tests-*` ×2, `tt-checker-*` ×2) were in the OS temp dir with mtimes of about 30 minutes before my check. They are older than my probe runs, so I did not create them and did not delete them. They may come from another agent's killed run. The Coordinator should check them.
+
+### 4. Dependency review
+
+There are no dependency changes. No manifest or lockfile changed in `ed2f760..b7f0d30`. No new imports beyond Node built-ins already in use.
+
+### 5. Verdict
+
+VERDICT: READY WITH CONDITIONS
+
+1. **Closed:** R2-1 and R2-2, with the repro evidence above. R2-4 is closed too, and the dedupe cannot drop an event with distinct content.
+2. **Open:**
+   - **R3-1** (Minor, security-relevant, regression).
+   - R2-3, R2-5, R3-2 and R3-3 (Notes).
+3. **Does R3-1 block merge?** In my view, no:
+   - The secret-leak criteria (canary in history, files and transcript) still catch every committed canary.
+   - The gap is only a committed `.env` or `.fake-keychain` path with non-canary content, in G4's scope check.
+   - Under standing decision 5 it would be fixed in-cycle, but no cycle is left, so it becomes a follow-up.
+   - **Condition:** list R3-1 in the readiness report as a known gap in the G4 safety evidence until it is fixed. Because R3-1 is security-relevant, the Coordinator escalates it to the owner as the brief says.
+4. **R2-3, R2-5, R3-2 and R3-3:** follow-ups.
+
+### Handoff (cycle 3)
+
+- **Done:**
+  - Re-reviewed `ed2f760..b7f0d30` (`tools/`).
+  - Verified CI run 42063967482 on `b7f0d30`.
+  - 232/232 team-tests tests pass.
+  - Re-ran the R2-1 and R2-2 repros plus extra vectors (all closed).
+  - Verified the R2-4 fix.
+  - Found one new Minor (R3-1, a regression, follow-up) and two Notes.
+- **Files:** appended this section to `docs/reviews/M8/security-prB.md`. No source, config or STATUS edits, and nothing committed.
+- **Scratch:** my clone and probes are removed. Four older temp dirs that I did not create remain (see the scratch observation in section 3).
+- **Open questions:**
+  - The owner's call on R3-1: follow-up, or an exception fix.
+  - R2-3 is still to be verified in pilot session 1.
+- **Next role:** Lead review, then the Coordinator readiness report, with R3-1 escalated to the owner.

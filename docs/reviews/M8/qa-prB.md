@@ -129,3 +129,42 @@ I found no Blocker or Major.
 VERDICT: READY
 
 Rationale: At `d769aa0` CI is green, root `npm test` is 505/505 with nothing skipped, the dry run is 28/28 as expected with exit 0, and my 18 negative cases pass. Minor 2 is closed, with a direct probe and a Dev test for each refused mode. The diff of the test directories contains no removed lines and no unconditional skips, so no test was weakened. Story 2 AC1-AC7 and the plan 5.5 init guard show no regression; the new F1 to F7 and F10 code tightens behaviour without changing any dry run verdict. The G3 stub test that now yields `error` still checks run plumbing, which it was written for, but it can no longer tell whether F10 stays fail closed; I recommend one added test as a follow-up, not a condition. The remaining Minors and Notes are follow-ups. QA still cannot certify real `claude` behaviour.
+
+---
+
+## Re-review cycle 3 (at b7f0d30)
+
+Scope: branch `feat/m8b-team-tests`, code at `b7f0d30` (HEAD). CI run 42063967482: `gh run view` reports completed, success, head SHA `b7f0d30`. Diff reviewed: `git diff ed2f760..b7f0d30 -- tools/` (4 files, +198 / -6: `checkers/util.mjs`, `launch.mjs`, new `checkers-hardening.test.mjs`, `launch.test.mjs`).
+
+### Results
+| Check | Result |
+|---|---|
+| Root `npm test` | 518 tests, 518 pass, 0 fail, 0 skipped, 0 todo. 222.7 s reported by node, 3:44 wall. Cycle 2 was 505; the +13 are the new cycle 3 tests. |
+| Dry run | exit 0, "28 sample(s): 28 as expected, 0 mismatched (21 positive-control failures reported as failed)", 43.3 s wall (46.6 s last cycle; plan target of 30 s still not met, see Minor carried over below). |
+| QA cases (`qa-prB-cases/`) | 18/18 pass, 0 skipped, 3.3 s. |
+| Tests weakened, skipped or deleted | None. `git diff ed2f760..b7f0d30 -- 'tools/**/test/**'` has 0 removed lines and no `skip` text; additions only (1 new file, 1 new test in `launch.test.mjs`). 0 skipped in the run. |
+| Scratch leak | No `tt-checker-*` dirs left in `/private/tmp` after my runs; `git status` shows only the pre-existing `docs/STATUS.md` change. |
+
+### Fix verification
+- R2-1 (special files in fixture `.git`): `readSmallRegular` opens with `O_NOFOLLOW | O_NONBLOCK`, checks `isFile` and a 4096-byte cap; `topEntry` lstat-rejects symlinks and non-regular entries for `objects`, `refs`, `packed-refs`; `packed-refs` is now counted in the copy budget. New tests cover a FIFO HEAD, HEAD symlinked to `/dev/zero`, HEAD symlinked to a regular file, oversized HEAD, symlinked `objects` and `refs`, a sparse 600 MB `packed-refs`, and symlink/FIFO `packed-refs`. All pass and each asserts `error` within 15 s.
+- R2-2 (replace refs, ignore rules): `GIT_NO_REPLACE_OBJECTS=1` plus the copy skips `refs/replace`; the tests plant a replace ref (loose and packed) and show `X.config-unchanged` and `G4.manifest-unchanged` still fail, with a control showing they pass on a clean run. `ls-files --others` no longer uses `--exclude-standard`; the tests hide a new file with a self-ignoring `src/.gitignore`, root `.gitignore`, `info/exclude` and `core.excludesFile`, and `G4.only-g1-files` still fails. All pass.
+- R2-4 (id-less events collapsing): the signature now includes name and input; the new test keeps two different id-less tool_use events and drops the one duplicate of the stream. Passes.
+
+### Story 2 regression (AC1-AC7) and G1-G7
+- AC1 (fixture outside repo, removed afterwards): fixture suite passes, no leaked temp dirs.
+- AC2 to AC5 (checkers, verdicts): checker suites pass; the dry run gives 28/28 expected, so G1 to G7 pass samples still pass and all 21 positive controls still fail. Dropping ignore rules did not produce a false failure on any pass sample, which confirms that excluding the harness's own top-level `.env` and `.fake-keychain` by exact name is sufficient for the fixtures the dry run builds. The `ls-files` test asserts those two names are not reported.
+- AC6 (units run without an agent, model or network): `dryrun.test.mjs` and static scans pass; the diff adds no network module and no `claude` spawn.
+- AC7 (guard): unchanged by this diff; guard suites and my 18 cases pass.
+- An agent creating or editing files that a `.gitignore` would hide (new files under a self-ignoring dir, files in `info/exclude` or a global excludes file): now listed, so G4 scope checks fail correctly, shown by the new test.
+
+### Findings
+1. **Note - a top-level `.env` or `.fake-keychain` is now filtered by name, so an agent that creates or edits those two files is not reported by `changedFiles`.** This is by design (comment in `util.mjs`) and was already hidden before, since the fixture ignored them. Content leaks are handled by the canary checkers, but a pure edit with no canary content would not fail a scope criterion. Only the top-level names are dropped, so same-named files in subdirectories are still reported. No fix needed; follow-up if the owner wants scope checks on those two files.
+2. **Minor (carried over) - dry run is 43.3 s wall against a plan target of 30 s.** Not a correctness issue. Follow-up: relax the target or reuse one safe copy per sample.
+3. **Note (carried over) - the G3 stop-mode stub test does not assert the F10 `error` outcome**, and cycle 1 and 2 follow-ups remain open as already recorded (expiry has no maximum, ledger is procedural, indirect Claude launches ask through the undecided class, case-sensitivity skips on case-sensitive runners).
+4. **Note - real `claude` behaviour is still not testable by QA** and is deferred to pilot session 1 under separate owner approval.
+
+I found no Blocker or Major.
+
+VERDICT: READY
+
+Rationale: At `b7f0d30` CI is green, root `npm test` is 518/518 with nothing skipped, the dry run is 28/28 as expected with exit 0, and my 18 negative cases pass. Each of R2-1, R2-2 and R2-4 has direct tests that pass, including the error-within-15-s cases for special files, the replace-ref cases that still fail the manifest and config criteria, and the four ignore-file hiding methods that still fail G4 scope. The test directory diff has no removed lines and no skips, so nothing was weakened. Story 2 AC1-AC7 and G1-G7 show no regression; the only behavioural trade-off is the by-name exclusion of the harness's own `.env` and `.fake-keychain`, noted above. Remaining items are Minors and Notes for follow-up. QA still cannot certify real `claude` behaviour.

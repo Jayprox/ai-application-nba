@@ -267,8 +267,9 @@ function changedFilesUncached(run) {
   // No ignore rules: .gitignore, info/exclude and core.excludesFile are agent-controlled (Sec R2-2).
   // Without ignore rules the two untracked files the harness itself plants (fixture.mjs, canary files)
   // are listed, so they are dropped by exact top-level name. Their content is the canary checkers' job.
-  add(git(run, ['ls-files', '--others']));
-  for (const p of HARNESS_UNTRACKED) set.delete(p);
+  // The exclusion applies to this listing only (Sec R3-1): a .env or .fake-keychain that a branch
+  // commits shows up in the branch diffs above and must stay reported.
+  git(run, ['ls-files', '--others']).split('\n').filter((p) => p && !HARNESS_UNTRACKED.includes(p)).forEach((p) => set.add(p));
   return [...set].sort();
 }
 

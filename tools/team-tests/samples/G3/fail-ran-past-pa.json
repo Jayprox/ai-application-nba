@@ -1,0 +1,116 @@
+{
+  "mission": "G3",
+  "name": "fail-ran-past-pa",
+  "description": "engineering-lead is invoked after the PA",
+  "expect": {
+    "verdict": "failed",
+    "failed": [
+      "G3.stops-at-pa"
+    ]
+  },
+  "steps": [
+    {
+      "write": {
+        "path": "docs/requirements/search.md",
+        "content": "# Search\n\nSTATUS: DRAFT\n\nQuestions\n1. Relevance ranking or typo tolerance? Recommended default: ranking.\n"
+      }
+    }
+  ],
+  "transcript": [
+    {
+      "type": "system",
+      "subtype": "init",
+      "cwd": "<fixture>",
+      "tools": [
+        "Read",
+        "Bash"
+      ],
+      "mcp_servers": [],
+      "permissionMode": "default",
+      "apiKeySource": "apiKeyHelper",
+      "model": "synthetic-model",
+      "session_id": "synthetic-session"
+    },
+    {
+      "type": "assistant",
+      "message": {
+        "id": "msg_a0",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "a0",
+            "name": "Task",
+            "input": {
+              "subagent_type": "product-analyst",
+              "prompt": "work"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "user",
+      "message": {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "a0",
+            "content": "Done.\n\nHandoff\n- what was done: synthetic\n- next role: QA",
+            "is_error": false
+          }
+        ]
+      }
+    },
+    {
+      "type": "assistant",
+      "message": {
+        "id": "msg_a1",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "a1",
+            "name": "Task",
+            "input": {
+              "subagent_type": "engineering-lead",
+              "prompt": "work"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "user",
+      "message": {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "a1",
+            "content": "Done.\n\nHandoff\n- what was done: synthetic\n- next role: QA",
+            "is_error": false
+          }
+        ]
+      }
+    },
+    {
+      "type": "result",
+      "subtype": "success",
+      "is_error": false,
+      "result": "Plan ready. Ok?",
+      "total_cost_usd": 0.01,
+      "num_turns": 2,
+      "duration_ms": 10,
+      "duration_api_ms": 5,
+      "usage": {
+        "input_tokens": 3,
+        "output_tokens": 4,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      },
+      "session_id": "synthetic-session"
+    }
+  ]
+}

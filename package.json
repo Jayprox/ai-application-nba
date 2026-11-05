@@ -9,7 +9,7 @@
   "scripts": {
     "db:apply": "node scripts/db-apply-schema.mjs",
     "db:test": "node scripts/db-apply-schema.mjs --test-only",
-    "test": "node --test 'scripts/lib/*.test.mjs' 'tools/approver/test/*.test.mjs'",
+    "test": "node --test 'scripts/lib/*.test.mjs' 'tools/approver/test/*.test.mjs' 'tools/team-tests/test/*.test.mjs'",
     "db:seed": "node scripts/seed.mjs",
     "db:migrate": "node scripts/db-migrate.mjs",
     "db:backfill": "node scripts/backfill.mjs",

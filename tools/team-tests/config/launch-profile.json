@@ -1,0 +1,18 @@
+{
+  "note": "Launch profile for a nested `claude -p` session (plan 5.1, Flag F7 option a). Read by src/launch.mjs only. Names and behaviours marked UNCONFIRMED in plan 5.6 are verified by pilot session 1; a rejected flag stops the pilot.",
+  "id": "pilot-a1",
+  "flags": ["-p", "--bare", "--restricted", "--strict-mcp-config", "--verbose"],
+  "valueFlags": {
+    "--setting-sources": "project",
+    "--permission-prompts": "none",
+    "--output-format": "stream-json"
+  },
+  "mcpConfig": "{\"mcpServers\":{}}",
+  "tools": ["Bash", "Read", "Edit", "Write", "Glob", "Grep"],
+  "agentTool": "Agent",
+  "initAgentToolNames": ["Agent", "Task"],
+  "allowedPermissionModes": ["default", "acceptEdits", "dontAsk"],
+  "apiKeySource": "apiKeyHelper",
+  "invocationTimeoutMs": 1200000,
+  "killGraceMs": 10000
+}

@@ -123,13 +123,18 @@ const errorCode = (r) => {
   return m ? m[1] : 'unknown';
 };
 
+// Up to two evidence lines of a mismatched criterion. Checker evidence is counts and fixture-relative names
+// by construction; a line that still looks like an absolute path or a canary value is dropped.
+const safeEvidence = (r) => (r.evidence ?? []).map((e) => String(e).slice(0, 160))
+  .filter((e) => !/(^|[\s(\[])\/[A-Za-z0-9._-]+\//.test(e) && !/CANARY-/.test(e)).slice(0, 2);
+
 /** Per mismatched criterion: its id, actual status (passed, failed, error, human) and, for an error, a short code. */
 function mismatches(results, expectedFailed) {
   const out = [];
   for (const r of results) {
     const want = r.kind !== 'M' ? 'human' : expectedFailed.includes(r.id) ? 'failed' : 'passed';
     if (r.status === want) continue;
-    out.push({ id: r.id, status: r.status, expectedStatus: want, ...(r.status === 'error' ? { code: errorCode(r) } : {}) });
+    out.push({ id: r.id, status: r.status, expectedStatus: want, ...(r.status === 'error' ? { code: errorCode(r) } : {}), evidence: safeEvidence(r) });
   }
   return out;
 }
@@ -198,7 +203,10 @@ export function formatSummary(r) {
     const label = `${c.mission}/${c.name}`.padEnd(w);
     const detail = c.ok ? `${c.actual} as expected` : `MISMATCH expected ${c.expected}${c.expectedFailed.length ? ` (${c.expectedFailed.join(', ')})` : ''}, got ${c.actual}${c.failed.length ? ` (${c.failed.join(', ')})` : ''}${c.errored.length ? ` errors: ${c.errored.join(', ')}` : ''}`;
     lines.push(`${c.ok ? 'ok  ' : 'FAIL'} ${label}  ${detail}`);
-    for (const m of c.mismatches ?? []) lines.push(`       ${m.id}: ${m.status} (expected ${m.expectedStatus})${m.code ? `, code: ${m.code}` : ''}`);
+    for (const m of c.mismatches ?? []) {
+      lines.push(`       ${m.id}: ${m.status} (expected ${m.expectedStatus})${m.code ? `, code: ${m.code}` : ''}`);
+      for (const e of m.evidence ?? []) lines.push(`         ${scrub(e)}`);
+    }
   }
   const bad = r.cases.filter((c) => !c.ok).length;
   const neg = r.cases.filter((c) => c.expected === 'failed').length;

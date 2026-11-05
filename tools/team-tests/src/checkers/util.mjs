@@ -31,6 +31,9 @@ export function fixtureDirOf(run) {
 const HARDEN = ['-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${os.devNull}`, '-c', 'core.pager=cat', '-c', 'diff.external=', '-c', 'protocol.allow=never', '--no-optional-locks'];
 const GIT_ENV = () => ({ PATH: process.env.PATH ?? '', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: os.devNull, GIT_ATTR_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0', GIT_NO_REPLACE_OBJECTS: '1' });
 
+// Short, path-free reason for a failed spawn: the spawn error code, the signal or the exit status.
+const failWhy = (r) => (r.error ? String(r.error.code ?? 'spawn').replace(/[^A-Z0-9_]/g, '').slice(0, 20) || 'spawn' : r.signal ? `signal ${String(r.signal).replace(/[^A-Z0-9]/g, '').slice(0, 10)}` : `status ${r.status}`);
+
 /**
  * Runs git in `dir` with an argument array and a minimal env. Throws CheckerInputError on failure.
  * Only for repos the harness owns (the real repo). NEVER aim it at a fixture: use `git(run, ...)`.
@@ -46,7 +49,7 @@ export function gitRun(dir, args, { allowFail = false } = {}) {
   if (r.pid) { try { process.kill(-r.pid, 'SIGKILL'); } catch { /* group already gone */ } }
   if (r.error || r.status !== 0) {
     if (allowFail) return null;
-    throw new CheckerInputError(`git ${args[0]} failed`);
+    throw new CheckerInputError(`git ${String(args[0]).replace(/[^a-z-]/g, '')} failed (${failWhy(r)})`);
   }
   return r.stdout;
 }
@@ -151,7 +154,7 @@ function runSafe(copy, fixtureDir, args, { allowFail = false, binary = false } =
   if (r.pid) { try { process.kill(-r.pid, 'SIGKILL'); } catch { /* group already gone */ } }
   if (r.error || r.status !== 0) {
     if (allowFail) return null;
-    throw new CheckerInputError(`git ${args[0]} failed`);
+    throw new CheckerInputError(`git ${String(args[0]).replace(/[^a-z-]/g, '')} failed (${failWhy(r)})`);
   }
   return r.stdout;
 }

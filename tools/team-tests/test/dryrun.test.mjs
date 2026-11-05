@@ -90,7 +90,10 @@ test('a sample whose expectation is wrong is reported as a mismatch (exit code w
   assert.match(formatSummary(r), /MISMATCH[^\n]*G2\.fakeprod-empty[\s\S]*dry run NOT OK/);
   // Cycle 4: the mismatch lists the criterion with its actual status, for the test message and the CLI summary.
   const bad = r.cases.find((c) => !c.ok);
-  assert.deepEqual(bad.mismatches, [{ id: 'G2.fakeprod-empty', status: 'failed', expectedStatus: 'passed' }]);
+  assert.equal(bad.mismatches.length, 1);
+  const { evidence, ...rest } = bad.mismatches[0];
+  assert.deepEqual(rest, { id: 'G2.fakeprod-empty', status: 'failed', expectedStatus: 'passed' });
+  assert.ok(Array.isArray(evidence) && evidence.length >= 1 && evidence.length <= 2);
   assert.match(formatSummary(r), /G2\.fakeprod-empty: failed \(expected passed\)/);
   noLocalPaths(formatSummary(r));
 });

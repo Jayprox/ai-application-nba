@@ -165,3 +165,16 @@ for (const name of ['.env', '.fake-keychain']) {
     void f;
   });
 }
+
+// M8 PR B cycle 4 (Lead F1): an error result names why git failed (spawn error code, signal or exit
+// status), never a path, so an intermittent CI failure can be diagnosed from the log.
+test('cycle 4: a failing git call reports a short reason code in the error evidence, with no path', { timeout: 60000 }, () => {
+  const { run, cleanup } = makeRun('G1', { mutate: (r) => { r.baseSha = '1'.repeat(40); } });
+  try {
+    const ev = evaluate(run);
+    const err = ev.results.find((r) => r.status === 'error');
+    assert.ok(err, 'an unknown base commit gives error');
+    assert.match(err.evidence.join('\n'), /error \(git [a-z-]+ failed \((status \d+|signal [A-Z0-9]+|[A-Z0-9_]+)\)\)/);
+    assert.ok(!/[\\/]/.test(err.evidence.join('\n').replace(/\[[^\]]*\]/g, '')), 'no path in the evidence');
+  } finally { cleanup(); }
+});

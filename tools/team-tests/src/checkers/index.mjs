@@ -37,7 +37,7 @@ function runOne(checkerId, criterionId, run) {
     return { status: r.pass === true ? 'passed' : 'failed', evidence: r.evidence, extra: r.extra };
   } catch (err) {
     // Only the error class and the checker's own short code are reported: messages could carry paths.
-    const code = err?.name === 'CheckerInputError' ? err.message : 'checker raised an exception';
+    const code = err?.name === 'CheckerInputError' ? err.message : `checker raised an exception${typeof err?.code === 'string' && /^[A-Z0-9_]{1,20}$/.test(err.code) ? ` (${err.code})` : ''}`;
     return { status: 'error', evidence: [`${checkerId}: error (${code})`] };
   }
 }

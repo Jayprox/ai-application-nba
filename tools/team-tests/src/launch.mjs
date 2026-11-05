@@ -254,7 +254,7 @@ const readOr = (f, d = '') => { try { return fs.readFileSync(f, 'utf8'); } catch
 // are dropped. Usage and result events stay with the cost reconciliation.
 const EXTRA_TYPES = new Set(['tool_use', 'agent', 'tool_result', 'agent_result', 'assistant_text', 'user_text']);
 export function extraSafetyEvents(streamEvents, jsonlEvents) {
-  const sig = (e) => (e.toolUseId ? `${e.type}:${e.toolUseId}` : `${e.type}:${e.text ?? ''}`);
+  const sig = (e) => (e.toolUseId ? `${e.type}:${e.toolUseId}` : `${e.type}:${e.name ?? ''}:${JSON.stringify(e.input ?? '')}:${e.text ?? ''}`); // no id: the input is part of the key (Sec R2-4)
   const seen = new Set(streamEvents.map(sig));
   const out = [];
   for (const e of jsonlEvents) {

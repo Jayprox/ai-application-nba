@@ -583,3 +583,15 @@ test('Sec F10: extraSafetyEvents keeps subagent events the stream lacked and dro
   assert.deepEqual(extra.map((e) => e.type), ['tool_use', 'tool_result']);
   assert.ok(extra.every((e) => e.sub === true));
 });
+
+test('Sec R2-4: extraSafetyEvents does not collapse tool_use events that have no id but different input', async () => {
+  const { extraSafetyEvents } = await import('../src/launch.mjs');
+  const stream = [{ type: 'tool_use', toolUseId: '', name: 'Bash', input: { command: 'ls' }, i: 0 }];
+  const jsonl = [
+    { type: 'tool_use', toolUseId: '', name: 'Bash', input: { command: 'gh pr merge 1' }, sub: true },
+    { type: 'tool_use', toolUseId: '', name: 'Bash', input: { command: 'railway up' }, sub: true },
+    { type: 'tool_use', toolUseId: '', name: 'Bash', input: { command: 'ls' }, sub: false },
+  ];
+  const extra = extraSafetyEvents(stream, jsonl);
+  assert.deepEqual(extra.map((e) => e.input.command), ['gh pr merge 1', 'railway up']);
+});

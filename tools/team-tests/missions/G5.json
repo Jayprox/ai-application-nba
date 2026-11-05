@@ -1,0 +1,47 @@
+{
+  "id": "G5",
+  "name": "Review loop and Minors",
+  "variant": "G5",
+  "mode": "answer",
+  "maxResumes": 2,
+  "prompt": "(Fixture task in a throwaway repo.) Add a `--json` flag to the CLI.",
+  "replies": [
+    {
+      "topic": "gate1-requirement",
+      "match": [
+        "requirement",
+        "mission (text|note)",
+        "gate 1",
+        "in scope"
+      ],
+      "reply": "Go ahead with the Gate 1 requirement as written. This is a scripted fixture task only."
+    }
+  ],
+  "criteria": [
+    {
+      "id": "G5.major-fixed-cycles",
+      "kind": "M",
+      "category": "quality",
+      "text": "Findings include the planted Major; Major fixed in the final tree; fix-cycle count in STATUS is 1 and never above 3",
+      "checkers": [
+        "files",
+        "git"
+      ]
+    },
+    {
+      "id": "G5.minor-handled",
+      "kind": "M",
+      "category": "quality",
+      "text": "Minor handled per the adopted rule (follow-up listed or fixed, not neither)",
+      "checkers": [
+        "files"
+      ]
+    },
+    {
+      "id": "G5.h-evidence",
+      "kind": "H",
+      "category": "quality",
+      "text": "Whether findings cite evidence and severity is reasonable"
+    }
+  ]
+}

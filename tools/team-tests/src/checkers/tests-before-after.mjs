@@ -1,30 +1,36 @@
 // `tests-before-after` checker (G1): the new test fails on the original commit and passes on the fix.
-// It RUNS AGENT-WRITTEN CODE, so: the B2 child env only (never the parent env), a detached git
-// worktree inside the scratch dir, a timeout, and spawn with an argument array (no shell).
+// It RUNS AGENT-WRITTEN CODE, so: the B2 child env only (never the parent env), an extracted tree
+// (blob reads, no checkout) inside the scratch dir, a timeout, and spawn with an argument array (no shell).
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { isWithin } from '../paths.mjs';
-import { need, git, branches, changedOn, isTestFile, baseShaOf, fixtureDirOf } from './util.mjs';
+import { need, git, branches, changedOn, isTestFile, baseShaOf, fixtureDirOf, extractTree } from './util.mjs';
 
 export const DEFAULT_TIMEOUT_MS = 60000;
 
 function runTests(cwd, files, env, timeoutMs) {
-  const r = spawnSync(process.execPath, ['--test', ...files], { cwd, env, encoding: 'utf8', timeout: timeoutMs, killSignal: 'SIGKILL', maxBuffer: 16 * 1024 * 1024, shell: false });
+  // detached: the runner leads its own process group, so the whole group (the test files and anything
+  // they spawned) can be killed after the run, on timeout or not (Sec F5).
+  const r = spawnSync(process.execPath, ['--test', ...files], { cwd, env, encoding: 'utf8', timeout: timeoutMs, killSignal: 'SIGKILL', maxBuffer: 16 * 1024 * 1024, shell: false, detached: true });
+  if (r.pid) { try { process.kill(-r.pid, 'SIGKILL'); } catch { /* group already gone */ } }
   if (r.error?.code === 'ETIMEDOUT' || r.signal === 'SIGKILL') return { status: 'timeout' };
   if (r.error || r.status === null) return { status: 'error' };
   return { status: r.status === 0 ? 'pass' : 'fail' };
 }
 
-function withWorktree(run, name, ref, fn) {
+// No git checkout: the tree is written from blob reads against the harness-owned repo copy, so no
+// smudge filter or hook of the agent's can run (Sec F1).
+function withTree(run, name, ref, fn) {
   const scratch = fs.realpathSync(run.scratch);
   const dir = path.join(scratch, name);
   need(isWithin(scratch, dir), 'worktree outside scratch');
-  git(run, ['worktree', 'add', '--detach', '--force', dir, ref]);
+  fs.mkdirSync(dir, { mode: 0o700 }); // fails if the name already exists
   try {
+    extractTree(run, ref, dir);
     return fn(dir);
   } finally {
-    git(run, ['worktree', 'remove', '--force', dir], { allowFail: true });
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 }
 
@@ -43,7 +49,7 @@ export const handlers = {
     if (newTests.length === 0) return { pass: false, evidence: ['no new or changed test file on the fix branch'] };
     for (const t of newTests) need(!t.startsWith('-') && !t.includes('..'), 'bad test path');
 
-    const before = withWorktree(run, 'tba-before', base, (dir) => {
+    const before = withTree(run, 'tba-before', base, (dir) => {
       for (const t of newTests) {
         const content = git(run, ['show', `${fixRef}:${t}`]);
         fs.mkdirSync(path.dirname(path.join(dir, t)), { recursive: true });
@@ -51,7 +57,7 @@ export const handlers = {
       }
       return runTests(dir, newTests, run.env, timeoutMs);
     });
-    const after = withWorktree(run, 'tba-after', fixRef, (dir) => runTests(dir, newTests, run.env, timeoutMs));
+    const after = withTree(run, 'tba-after', fixRef, (dir) => runTests(dir, newTests, run.env, timeoutMs));
     if ([before.status, after.status].some((s) => s === 'timeout' || s === 'error')) {
       need(false, `test run ${before.status === 'pass' || before.status === 'fail' ? after.status : before.status}`); // fail closed: error, never passed
     }

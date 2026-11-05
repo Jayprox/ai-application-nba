@@ -29,36 +29,171 @@ export function fixtureDirOf(run) {
 }
 
 const HARDEN = ['-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${os.devNull}`, '-c', 'core.pager=cat', '-c', 'diff.external=', '-c', 'protocol.allow=never', '--no-optional-locks'];
+const GIT_ENV = () => ({ PATH: process.env.PATH ?? '', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: os.devNull, GIT_ATTR_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' });
 
-/** Runs git in `dir` with an argument array and a minimal env. Throws CheckerInputError on failure. */
+/**
+ * Runs git in `dir` with an argument array and a minimal env. Throws CheckerInputError on failure.
+ * Only for repos the harness owns (the real repo). NEVER aim it at a fixture: use `git(run, ...)`.
+ */
 export function gitRun(dir, args, { allowFail = false } = {}) {
   const r = spawnSync('git', [...HARDEN, '-C', dir, ...args], {
     encoding: 'utf8',
     maxBuffer: 128 * 1024 * 1024,
     timeout: 60000,
-    env: { PATH: process.env.PATH ?? '', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: os.devNull, GIT_TERMINAL_PROMPT: '0' },
+    detached: true,
+    env: GIT_ENV(),
   });
+  if (r.pid) { try { process.kill(-r.pid, 'SIGKILL'); } catch { /* group already gone */ } }
   if (r.error || r.status !== 0) {
     if (allowFail) return null;
     throw new CheckerInputError(`git ${args[0]} failed`);
   }
   return r.stdout;
 }
-export const git = (run, args, o) => gitRun(fixtureDirOf(run), args, o);
 
-// A per-evaluation memo for the repeated read-only git queries. Active only inside withMemo(),
-// so a later evaluation of a changed repo never sees stale data.
+// ---- harness-owned copy of the fixture repository (Sec F1) --------------------------------------
+// The agent can write the fixture's .git/config, .gitattributes and hooks. Any git command run in
+// the fixture could therefore run an agent-chosen program (filter, textconv, fsmonitor, hook...).
+// So the checkers never run git against the fixture's .git directory. They copy only the DATA of
+// the repository (HEAD, refs, packed-refs, objects) into a directory the harness owns, with a
+// config the harness writes, and run git there with --work-tree pointing at the fixture. No filter
+// or textconv driver is defined in that config, so attributes in the tree are inert.
+const MAX_COPY_FILES = 50000;
+const MAX_COPY_BYTES = 512 * 1024 * 1024;
+
+function copyTree(src, dst, budget, { skip = [] } = {}) {
+  fs.mkdirSync(dst, { recursive: true, mode: 0o700 });
+  for (const e of fs.readdirSync(src, { withFileTypes: true })) {
+    if (skip.includes(e.name)) continue;
+    const from = path.join(src, e.name);
+    const to = path.join(dst, e.name);
+    if (e.isSymbolicLink()) throw new CheckerInputError('fixture repo holds a symlink');
+    if (e.isDirectory()) copyTree(from, to, budget);
+    else if (e.isFile()) {
+      const st = fs.lstatSync(from);
+      budget.files += 1;
+      budget.bytes += st.size;
+      if (budget.files > MAX_COPY_FILES || budget.bytes > MAX_COPY_BYTES) throw new CheckerInputError('fixture repo too large');
+      fs.copyFileSync(from, to);
+    } else throw new CheckerInputError('fixture repo holds a special file');
+  }
+}
+
+function makeSafeRepo(fixtureDir) {
+  const gd = path.join(fixtureDir, '.git');
+  let st;
+  try { st = fs.lstatSync(gd); } catch { throw new CheckerInputError('fixture .git missing'); }
+  if (!st.isDirectory()) throw new CheckerInputError('fixture .git is not a directory');
+  const copy = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'tt-checker-'));
+  try {
+    const head = fs.readFileSync(path.join(gd, 'HEAD'), 'utf8').trim();
+    if (!/^(ref: refs\/[A-Za-z0-9._\/-]{1,200}|[0-9a-f]{40,64})$/.test(head)) throw new CheckerInputError('fixture HEAD is not usable');
+    fs.writeFileSync(path.join(copy, 'HEAD'), `${head}\n`);
+    fs.writeFileSync(path.join(copy, 'config'), '[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n');
+    const budget = { files: 0, bytes: 0 };
+    copyTree(path.join(gd, 'objects'), path.join(copy, 'objects'), budget, { skip: ['info'] }); // info/alternates would point elsewhere
+    fs.mkdirSync(path.join(copy, 'objects', 'info'));
+    if (fs.existsSync(path.join(gd, 'refs'))) copyTree(path.join(gd, 'refs'), path.join(copy, 'refs'), budget);
+    else fs.mkdirSync(path.join(copy, 'refs'));
+    const packed = path.join(gd, 'packed-refs');
+    if (fs.existsSync(packed)) { const ps = fs.lstatSync(packed); if (ps.isFile()) fs.copyFileSync(packed, path.join(copy, 'packed-refs')); }
+    return copy;
+  } catch (err) {
+    fs.rmSync(copy, { recursive: true, force: true });
+    throw err;
+  }
+}
+
+function runSafe(copy, fixtureDir, args, { allowFail = false, binary = false } = {}) {
+  const r = spawnSync('git', [...HARDEN, '-c', 'core.attributesFile=', `--git-dir=${copy}`, `--work-tree=${fixtureDir}`, ...args], {
+    cwd: copy,
+    encoding: binary ? null : 'utf8',
+    maxBuffer: 128 * 1024 * 1024,
+    timeout: 60000,
+    detached: true,
+    env: { ...GIT_ENV(), GIT_INDEX_FILE: path.join(copy, 'index') },
+  });
+  if (r.pid) { try { process.kill(-r.pid, 'SIGKILL'); } catch { /* group already gone */ } }
+  if (r.error || r.status !== 0) {
+    if (allowFail) return null;
+    throw new CheckerInputError(`git ${args[0]} failed`);
+  }
+  return r.stdout;
+}
+
+// A per-evaluation memo for the repeated read-only git queries and the safe copy. Active only
+// inside withMemo(), so a later evaluation of a changed repo never sees stale data.
 let memo = null;
 export function withMemo(fn) {
   const outer = memo;
   memo = outer ?? new Map();
-  try { return fn(); } finally { memo = outer; }
+  try { return fn(); } finally {
+    if (!outer) {
+      for (const v of memo.values()) if (v && v.__safeRepo) fs.rmSync(v.__safeRepo, { recursive: true, force: true });
+      memo = null;
+    } else memo = outer;
+  }
 }
 const memoised = (key, fn) => {
   if (!memo) return fn();
   if (!memo.has(key)) memo.set(key, fn());
   return memo.get(key);
 };
+
+/** Runs `fn(copyDir)` with the harness-owned repo copy of the run's fixture (cached inside withMemo). */
+function withSafeRepo(run, fn) {
+  const dir = fixtureDirOf(run);
+  need(fs.lstatSync(path.join(dir, '.git'), { throwIfNoEntry: false })?.isDirectory() === true, 'fixture .git is not a directory');
+  if (memo) {
+    if (!memo.has('safeRepo')) {
+      const copy = makeSafeRepo(dir);
+      memo.set('safeRepo', { __safeRepo: copy });
+      runSafe(copy, dir, ['read-tree', baseShaOf(run)]);
+    }
+    return fn(memo.get('safeRepo').__safeRepo, dir);
+  }
+  const copy = makeSafeRepo(dir);
+  try {
+    runSafe(copy, dir, ['read-tree', baseShaOf(run)]);
+    return fn(copy, dir);
+  } finally { fs.rmSync(copy, { recursive: true, force: true }); }
+}
+
+/** Read-only git query against the fixture through the harness-owned copy. */
+export const git = (run, args, o) => withSafeRepo(run, (copy, dir) => runSafe(copy, dir, args, o));
+
+/** Runs `fn(gitFn)` with one safe copy for several queries (for callers outside withMemo). */
+export const withGit = (run, fn) => withSafeRepo(run, (copy, dir) => fn((args, o) => runSafe(copy, dir, args, o), copy));
+
+/** A fixture tree at `ref` as [{path, sha}] blobs; refuses symlinks, submodules and odd paths. */
+export function treeBlobs(run, ref) {
+  const out = git(run, ['ls-tree', '-r', '-z', '--full-tree', ref, '--']);
+  const files = [];
+  for (const rec of out.split('\0').filter(Boolean)) {
+    const m = rec.match(/^(\d{6}) (\w+) ([0-9a-f]{40,64})\t([\s\S]+)$/);
+    need(m, 'unreadable tree entry');
+    const [, mode, type, sha, p] = m;
+    need(type === 'blob' && (mode === '100644' || mode === '100755'), 'tree holds a symlink or submodule');
+    need(!p.startsWith('/') && !p.split('/').some((c) => c === '..' || c === '.git' || c === '' || c === '.'), 'unsafe path in tree');
+    files.push({ path: p, sha, mode });
+  }
+  need(files.length <= 5000, 'tree too large');
+  return files;
+}
+
+/** Writes the tree at `ref` into the empty directory `dest` by blob reads (no checkout, no filters). */
+export function extractTree(run, ref, dest) {
+  withGit(run, (g) => {
+    for (const f of treeBlobs(run, ref)) {
+      const buf = g(['cat-file', 'blob', f.sha], { binary: true });
+      const to = path.join(dest, f.path);
+      need(isUnder(dest, to), 'path escapes extraction dir');
+      fs.mkdirSync(path.dirname(to), { recursive: true });
+      fs.writeFileSync(to, buf, { mode: f.mode === '100755' ? 0o755 : 0o644 });
+    }
+  });
+}
+const isUnder = (root, p) => { const rel = path.relative(root, p); return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel); };
 
 export function baseShaOf(run) {
   need(typeof run.baseSha === 'string' && /^[0-9a-f]{40}$/.test(run.baseSha), 'baseSha missing');

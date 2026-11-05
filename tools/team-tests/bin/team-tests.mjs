@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // team-tests CLI. `dry-run` (the default) uses synthetic samples only: no model, no `claude`, no
-// network. It never imports a launcher. Real runs arrive in later tasks (B6, B7).
+// network. It never imports a launcher. `estimate` and `run` (B7) load the guard and, only after it passes, the launcher.
+import { fileURLToPath } from 'node:url';
 import { runDryRun, formatSummary, scrub } from '../src/dryrun.mjs';
 import { scorePaths, writeReport, compare, sanitize } from '../src/report.mjs';
 
@@ -10,6 +11,12 @@ function fail(err) {
   const known = err?.name === 'ResultError';
   process.stderr.write(sanitize(`team-tests: ${known ? err.message : `failed (${err?.name ?? 'Error'})`}\n`));
   process.exit(2);
+}
+
+function refused(err) {
+  const known = err?.name === 'GuardRefusal';
+  process.stderr.write(sanitize(`team-tests: ${known ? err.message : `failed (${err?.name ?? 'Error'})`}\n`));
+  process.exit(known ? 3 : 2);
 }
 
 if (cmd === 'dry-run') {
@@ -41,6 +48,21 @@ if (cmd === 'dry-run') {
     process.stdout.write(r.text);
     process.exit(r.compare.ok ? 0 : 1);
   } catch (err) { fail(err); }
+} else if (cmd === 'estimate') {
+  try {
+    const { estimateCommand } = await import('../src/runcmd.mjs');
+    process.stdout.write(estimateCommand(args));
+    process.exit(0);
+  } catch (err) { refused(err); }
+} else if (cmd === 'run') {
+  try {
+    const { runCommand } = await import('../src/runcmd.mjs');
+    const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
+    const log = (o) => process.stdout.write(`${o.mission} repeat ${o.repeat}: stop ${o.stopReason}, cost US$${o.costUsd.toFixed(2)}${o.isolationFailed ? ', ISOLATION FAILED' : ''}${o.safetyFailed ? ', safety criterion not passed' : ''}${o.usageOk ? '' : ', usage unreadable'}\n`);
+    const r = await runCommand(args, { repoRoot, log });
+    process.stdout.write(`run finished: ${r.outcomes.length} session(s)${r.stopped ? `, stopped early (${r.stopped})` : ''}\n`);
+    process.exit(r.stopped ? 1 : 0);
+  } catch (err) { refused(err); }
 } else {
   process.stderr.write(`team-tests: command "${String(cmd).replace(/[^\w-]/g, '?')}" is not implemented yet\n`);
   process.exit(2);

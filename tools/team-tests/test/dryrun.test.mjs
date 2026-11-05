@@ -117,12 +117,41 @@ test('static: no network module is imported and no fetch or socket API is used u
   }
 });
 
+// B7 scoping: the launcher exists now. The dry-run path is every module except the launcher itself and
+// the `estimate`/`run` entry (src/runcmd.mjs), and the bin file reaches runcmd only by dynamic import
+// inside the `estimate` and `run` branches. The checks below are strictly stronger than before: no
+// module outside those two may mention the launcher at all, and the static import closure of the CLI
+// must contain neither of them.
+const LAUNCH_ONLY = new Set(['src/launch.mjs', 'src/runcmd.mjs']);
+const rel = (f) => path.relative(ROOT, f).split(path.sep).join('/');
+const staticImports = (f) => [...code(f).matchAll(/^\s*(?:import|export)\b[^'"\n]*?from\s+['"](\.[^'"]+)['"]/gm), ...code(f).matchAll(/^\s*import\s+['"](\.[^'"]+)['"]/gm)].map((m) => path.resolve(path.dirname(f), m[1]));
+
 test('static: the dry-run path never imports a launcher and nothing under src/ or bin/ spawns claude', () => {
   for (const f of sources()) {
     const c = code(f);
-    const name = path.relative(ROOT, f);
-    assert.ok(!/launch(\.mjs)?['"]/.test(c), `${name} imports a launcher`);
-    assert.ok(!/spawn\w*\(\s*['"`][^'"`]*claude/.test(c), `${name} spawns claude`);
+    const name = rel(f);
+    if (name !== 'src/launch.mjs') assert.ok(!/spawn\w*\(\s*['"`][^'"`]*claude/.test(c), `${name} spawns claude`);
+    if (!LAUNCH_ONLY.has(name) && name !== 'bin/team-tests.mjs') assert.ok(!/launch(\.mjs)?['"]/.test(c), `${name} imports a launcher`);
   }
-  assert.ok(!fs.existsSync(path.join(ROOT, 'src', 'launch.mjs')));
+});
+
+test('static: the CLI static import closure excludes the launcher and runcmd; the launcher is imported only dynamically, after the guard', () => {
+  const seen = new Set();
+  const visit = (f) => { if (seen.has(f)) return; seen.add(f); for (const d of staticImports(f)) if (d.startsWith(ROOT) && fs.existsSync(d)) visit(d); };
+  visit(path.join(ROOT, 'bin', 'team-tests.mjs'));
+  assert.ok(seen.size >= 10, 'import walk found the modules');
+  assert.ok([...seen].some((f) => rel(f) === 'src/dryrun.mjs'));
+  for (const f of seen) assert.ok(!LAUNCH_ONLY.has(rel(f)), `${rel(f)} is statically reachable from the CLI`);
+  const bin = code(path.join(ROOT, 'bin', 'team-tests.mjs'));
+  assert.ok(!/launch\.mjs/.test(bin), 'the CLI never names the launcher file');
+  const dryrunBranch = bin.slice(bin.indexOf("cmd === 'dry-run'"), bin.indexOf("cmd === 'score'"));
+  assert.ok(!/runcmd|launch/.test(dryrunBranch), 'dry-run branch references the run path');
+  const rc = code(path.join(ROOT, 'src', 'runcmd.mjs'));
+  assert.ok(!/^\s*import\b[^\n]*launch/m.test(rc), 'runcmd imports the launcher statically');
+  assert.ok(rc.indexOf('checkRun(') > 0 && rc.indexOf("import('./launch.mjs')") > 0);
+  const run = rc.slice(rc.indexOf('export async function runCommand'));
+  assert.ok(run.indexOf('checkRun(') < run.indexOf('await importLauncher()'), 'guard runs before the launcher import');
+  const guard = code(path.join(ROOT, 'src', 'guard.mjs'));
+  assert.ok(!/launch/.test(guard) && !/child_process['"]/.test(guard.replace(/import \{ spawnSync \} from 'node:child_process';/, '')), 'guard stays free of the launcher and of spawn');
+  assert.ok(fs.existsSync(path.join(ROOT, 'src', 'launch.mjs')));
 });

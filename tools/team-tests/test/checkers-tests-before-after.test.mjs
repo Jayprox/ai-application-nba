@@ -162,9 +162,21 @@ test('orphan', () => {
     commitAll(f);
   };
   try {
-    const { run, cleanup } = makeRun('G1', { apply, mutate: (r) => { r.testTimeoutMs = 1500; } });
+    // The timeout window must not count the child's start-up: if the pid file is not there after a timeout,
+    // the child had not started yet, so retry with a longer window. Total wait is bounded (1.5 + 3 + 6 = 10.5 s).
+    let run, cleanup;
+    for (const ms of [1500, 3000, 6000]) {
+      ({ run, cleanup } = makeRun('G1', { apply, mutate: (r) => { r.testTimeoutMs = ms; } }));
+      let started = false;
+      try {
+        assert.throws(() => H(run), /timeout/);
+        started = fs.existsSync(pidFile) && Number(fs.readFileSync(pidFile, 'utf8')) > 1;
+      } catch (err) { cleanup(); throw err; }
+      if (started) break;
+      cleanup();
+      if (ms === 6000) assert.fail('child never started / pid file not written within 10.5 s');
+    }
     try {
-      assert.throws(() => H(run), /timeout/);
       const pid = Number(fs.readFileSync(pidFile, 'utf8'));
       assert.ok(pid > 1);
       const dead = await waitDead(pid);

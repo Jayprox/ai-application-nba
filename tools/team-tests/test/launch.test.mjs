@@ -562,8 +562,14 @@ test('Sec F5: a timeout kills the child process group; a grandchild the child st
   const script = `const {spawn}=require('node:child_process');const c=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});require('node:fs').writeFileSync(${JSON.stringify(pidFile)},String(c.pid));setInterval(()=>{},1000);`;
   let pid = null;
   try {
-    const out = await runInvocation({ claudePath: process.execPath, args: ['-e', script], env: { PATH: process.env.PATH }, cwd: dir, prompt: 'p', expect: EXPECT, timeoutMs: 800, killGraceMs: 100 });
-    assert.equal(out.timedOut, true);
+    // The timeout window must not count the child's start-up: if the pid file is not there after a timeout,
+    // the child had not started yet, so retry with a longer window. Total wait is bounded (0.8 + 1.6 + 3.2 + 6.4 = 12 s).
+    for (const ms of [800, 1600, 3200, 6400]) {
+      const out = await runInvocation({ claudePath: process.execPath, args: ['-e', script], env: { PATH: process.env.PATH }, cwd: dir, prompt: 'p', expect: EXPECT, timeoutMs: ms, killGraceMs: 100 });
+      assert.equal(out.timedOut, true);
+      if (fs.existsSync(pidFile) && Number(fs.readFileSync(pidFile, 'utf8')) > 1) break;
+      if (ms === 6400) assert.fail('child never started / pid file not written within 12 s');
+    }
     pid = Number(fs.readFileSync(pidFile, 'utf8'));
     const t = Date.now();
     const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };

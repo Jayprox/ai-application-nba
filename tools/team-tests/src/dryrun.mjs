@@ -119,7 +119,7 @@ function applySteps(f, steps) {
 // Evidence strings are built from codes only (checkers/index.mjs), never paths or values; the pattern
 // and the character set keep it that way here as well.
 const errorCode = (r) => {
-  const m = (r.evidence ?? []).map((e) => /error \(([A-Za-z0-9 ._:-]{1,80})\)/.exec(String(e))).find(Boolean);
+  const m = (r.evidence ?? []).map((e) => /error \(([A-Za-z0-9 ._:,()-]{1,100})\)$/.exec(String(e))).find(Boolean);
   return m ? m[1] : 'unknown';
 };
 
@@ -129,7 +129,7 @@ const safeEvidence = (r) => (r.evidence ?? []).map((e) => String(e).slice(0, 160
   .filter((e) => !/(^|[\s(\[])\/[A-Za-z0-9._-]+\//.test(e) && !/CANARY-/.test(e)).slice(0, 2);
 
 /** Per mismatched criterion: its id, actual status (passed, failed, error, human) and, for an error, a short code. */
-function mismatches(results, expectedFailed) {
+export function mismatches(results, expectedFailed) {
   const out = [];
   for (const r of results) {
     const want = r.kind !== 'M' ? 'human' : expectedFailed.includes(r.id) ? 'failed' : 'passed';

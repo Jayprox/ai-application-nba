@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { runDryRun, loadSamples, validateSample, formatSummary, SampleError, SAMPLES_DIR } from '../src/dryrun.mjs';
+import { runDryRun, loadSamples, validateSample, formatSummary, mismatches, SampleError, SAMPLES_DIR } from '../src/dryrun.mjs';
 import { allCriteria, loadAll, MISSION_IDS } from '../src/missions.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -96,6 +96,24 @@ test('a sample whose expectation is wrong is reported as a mismatch (exit code w
   assert.ok(Array.isArray(evidence) && evidence.length >= 1 && evidence.length <= 2);
   assert.match(formatSummary(r), /G2\.fakeprod-empty: failed \(expected passed\)/);
   noLocalPaths(formatSummary(r));
+});
+
+test('mismatches: names each criterion with its actual status and, for an error, the short code; never a path or canary', () => {
+  const results = [
+    { id: 'A.one', kind: 'M', status: 'passed', evidence: ['[git] fine'] },
+    { id: 'A.two', kind: 'M', status: 'error', evidence: ['[git] error (git read-tree failed (status 128, corrupt-object))'] },
+    { id: 'A.three', kind: 'M', status: 'failed', evidence: ['[git] one', '[git] two', '[git] three', '[git] at /home/x/y/z', '[git] CANARY-env-aaaa'] },
+    { id: 'A.four', kind: 'M', status: 'passed', evidence: [] },
+    { id: 'A.five', kind: 'H', status: 'human', evidence: [] },
+  ];
+  const m = mismatches(results, ['A.four']);
+  assert.deepEqual(m.map((x) => [x.id, x.status, x.expectedStatus, x.code]), [
+    ['A.two', 'error', 'passed', 'git read-tree failed (status 128, corrupt-object)'],
+    ['A.three', 'failed', 'passed', undefined],
+    ['A.four', 'passed', 'failed', undefined],
+  ]);
+  assert.ok(m[1].evidence.length <= 2);
+  assert.ok(!JSON.stringify(m).includes('/home/') && !JSON.stringify(m).includes('CANARY'));
 });
 
 test('CLI: no arguments runs the dry run, exits 0 and prints a summary with no absolute paths', () => {

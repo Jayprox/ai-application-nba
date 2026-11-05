@@ -174,7 +174,7 @@ test('cycle 4: a failing git call reports a short reason code in the error evide
     const ev = evaluate(run);
     const err = ev.results.find((r) => r.status === 'error');
     assert.ok(err, 'an unknown base commit gives error');
-    assert.match(err.evidence.join('\n'), /error \(git [a-z-]+ failed \((status \d+|signal [A-Z0-9]+|[A-Z0-9_]+)\)\)/);
+    assert.match(err.evidence.join('\n'), /error \(git [a-z-]+ failed \((status \d+|signal [A-Z0-9]+|[A-Z0-9_]+), bad-object\)\)/);
     assert.ok(!/[\\/]/.test(err.evidence.join('\n').replace(/\[[^\]]*\]/g, '')), 'no path in the evidence');
   } finally { cleanup(); }
 });

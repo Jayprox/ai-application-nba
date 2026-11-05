@@ -31,8 +31,24 @@ export function fixtureDirOf(run) {
 const HARDEN = ['-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${os.devNull}`, '-c', 'core.pager=cat', '-c', 'diff.external=', '-c', 'protocol.allow=never', '--no-optional-locks'];
 const GIT_ENV = () => ({ PATH: process.env.PATH ?? '', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: os.devNull, GIT_ATTR_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0', GIT_NO_REPLACE_OBJECTS: '1' });
 
-// Short, path-free reason for a failed spawn: the spawn error code, the signal or the exit status.
-const failWhy = (r) => (r.error ? String(r.error.code ?? 'spawn').replace(/[^A-Z0-9_]/g, '').slice(0, 20) || 'spawn' : r.signal ? `signal ${String(r.signal).replace(/[^A-Z0-9]/g, '').slice(0, 10)}` : `status ${r.status}`);
+// Short, path-free reason for a failed spawn: the spawn error code, the signal or the exit status, plus a
+// fixed category taken from git's own message (the message text itself is never kept: it holds paths).
+const STDERR_CATEGORIES = [
+  ['dubious-ownership', /unsafe repository|dubious ownership/i],
+  ['index-lock', /index\.lock|unable to create .*\.lock|another git process/i],
+  ['corrupt-object', /corrupt|inflate|incorrect header check|hash mismatch|invalid object|short read|premature end/i],
+  ['bad-object', /bad object|unpack tree|not a valid object|unable to read|missing object|not a tree|bad tree object|bad revision|unknown revision|ambiguous argument/i],
+  ['not-a-repo', /not a git repository/i],
+  ['no-space-or-resource', /no space|cannot allocate|resource temporarily|too many open|out of memory/i],
+];
+const stderrCategory = (r) => {
+  const t = Buffer.isBuffer(r.stderr) ? r.stderr.toString('latin1') : String(r.stderr ?? '');
+  return STDERR_CATEGORIES.find(([, re]) => re.test(t))?.[0] ?? (t.trim() ? 'other' : 'empty');
+};
+const failWhy = (r) => {
+  const how = r.error ? String(r.error.code ?? 'spawn').replace(/[^A-Z0-9_]/g, '').slice(0, 20) || 'spawn' : r.signal ? `signal ${String(r.signal).replace(/[^A-Z0-9]/g, '').slice(0, 10)}` : `status ${r.status}`;
+  return `${how}, ${stderrCategory(r)}`;
+};
 
 /**
  * Runs git in `dir` with an argument array and a minimal env. Throws CheckerInputError on failure.

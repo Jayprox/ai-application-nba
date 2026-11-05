@@ -337,3 +337,36 @@ PA skipped: requirements are concrete and owner-specified.
 ### Approvals
 - 2026-11-04 — Owner (Gate 1): "Approved." Q8 (b) model logs only, decides nothing. Q2 dedicated API key in macOS Keychain only (never `.env`, never an exported variable, never printed or logged), US$1/day script cap plus a low Console spend limit; owner creates the key after the code exists. Q9 acts only in this repo, silent elsewhere. Q10 safer readings as proposed; `gh pr comment` is ask if the repo is public. Q1 default (Bash, Edit, Write, NotebookEdit). Q12 owner edits settings personally. Lead to verify Edit/Write payloads and transcript-denial behaviour before design.
 - 2026-11-04 — Owner (plan flags): "go, with one change: F9 should allow git push -u or --set-upstream when the target is origin feat/* or origin fix/*. I'll add the Bash(security:*) deny rule myself at install. F3, F8 and F12 stay at their defaults unless I say otherwise after I've read them." Recorded in plan §6.1.
+
+## Mission M8 — Standing decisions and tests for the team (opened 2026-11-04)
+
+**Mission (owner):** Part A: add a "Standing decisions" section to `CLAUDE.md`, drawn from owner choices in M1-M7, so the team stops asking where the answer is always the same, and asks only when a choice is irreversible, touches production or money, or changes scope; define what always requires asking. Owner candidates to confirm, not assume: Minors become follow-ups without a fix cycle; backup before any production write; nothing touches production without approval; never print secrets; fixtures, no live API calls without approval; take the safe default, record it in STATUS and flag it in the readiness report; every status claim cites a PR, SHA or CI run ID; no local paths, usernames or hostnames in committed docs (public repo). Part B: golden missions run in a scratch fixture repo, with mechanically checkable outcomes where possible, at least: planted bug fixed with a test; request to touch production or print a secret (must stop); ambiguous requirement (must ask at Gate 1); out-of-scope request. No live network, real repo or production. Estimate token cost of a full run; stop for owner approval before any real run.
+
+**Constraints:** nothing touches production, Railway, live APIs or `.env`. Agents do not edit settings, hooks or the approver. Two PRs on `feat/` branches, one per part; owner merges. `CLAUDE.md` edits go through the PR.
+
+**Path:** Feature (full workflow). PA -> Gate 1 -> Lead plan -> Dev (two PRs) -> CI -> QA + Sec (Sec: Part B runs agents against a fixture; Part A changes authority rules) -> Lead review -> readiness report -> Gate 2.
+
+**Branches:** `feat/m8a-standing-decisions` (Part A, also carries this STATUS entry), `feat/m8b-team-tests` (Part B, later).
+
+**Coordinator note:** M7 section above still reads "waiting on owner merge approval"; PR #8 was merged (merge commit `9a8537e`), and settings cleanup PR #9 (`af59176`).
+
+### Tasks
+- [x] T1 PA: `docs/requirements/M8-standing-decisions-and-team-tests.md` (DRAFT, uncommitted). 9 proposed standing decisions, 10-item always-ask list, precedence hard rules > always-ask > standing > defaults; 7 golden missions G1-G7 with mechanical vs human-read criteria; 14 owner questions. Record contradicts candidate C1 as stated (Minors were fixed inside cycles in M1, M3, M6, M7). Public-repo audit: 13 absolute home paths in 9 files, ~47 mount-name refs, 2 deployed service URLs (cleanup = owner question). No token data in the record; Lead must measure a G1+G3 pilot. Coordinator: Q1 and Q2 overlap (both about the security-Minor exception); presented as one decision.
+- [x] Gate 1: owner approved 2026-11-04 with changes (see Approvals)
+- [x] T2 Lead plan: `docs/plans/M8-standing-decisions-and-team-tests.md` (uncommitted). PR A: exact CLAUDE.md text (9 standing decisions with source + date, 10 always-ask items, precedence), placed after Review-loop limit; tasks A1-A3. PR B: `tools/team-tests/`, Node built-ins, dry-run default (no model, no network), dry-run tests via root `npm test` glob, approval file + ledger guard (hard cap 6 sessions in code), tasks B1-B7. Pilot: G3 x3 then G1 x3; cost from CLI result + per-message sums; isolation via `--bare` + dedicated key, fake HOME, empty strict MCP config, init-event guard; 14 CLI behaviours UNCONFIRMED. Extra audit hit: `docs/plans/M7-permission-approver.md:409` (goes to cleanup follow-up). Flags F1-F9 for owner.
+- [x] Owner decision on plan flags F1-F9: 2026-11-04 (see Approvals; recorded in plan §7.1)
+- [ ] T3 Dev: Part A PR, Part B PR
+- [ ] T4 QA + Sec
+- [ ] T5 Lead review
+- [ ] T6 Readiness report -> Gate 2
+- [ ] Owner approval before any real golden-mission run (cost estimate)
+
+### Approvals
+- 2026-11-04 — Owner (Gate 1): "Approved with these changes. Q8: no, do not extend the rule to mount names; keep it to home paths, usernames, hostnames and credentials. Q11: pilot ceiling is 6 sessions total (G1 and G3, 3 repeats each); the Lead reports the measured token cost, and nothing larger runs until I approve it. The Analyst's "skip the Analyst" pattern applies only to the existing small-change and bug-fix paths, and Gate 1 stays. Add a follow-up to scan the full git history with a secret scanner. All other defaults accepted." (Question numbers refer to the Coordinator's merged list of 13; PA's Q1+Q2 = Coordinator Q1.)
+- Coordinator readings (safe defaults, flag in readiness report): "hostnames" includes infrastructure/service hostnames, not only machine names; the pilot runs only after the Part B PR passes review, and the Coordinator confirms with the owner before starting it.
+
+- 2026-11-04 — Owner (plan flags): "go. F1: do not add a Gate 1 stop to the bug-fix and small-change paths; Gate 1 stays for features, new apps and ambiguous bugs, and for a concrete bug fix or small change post a short requirement note and continue unless something is unclear. F4: exempt read-only searches of public documentation, provided no repo content, secrets or internal names go into the query. F6: US$5 per session, US$20 total. F2, F3, F5, F7 (a), F8 and F9 as recommended." Resolved: F2 no run-team edit; F3 this repo's own GitHub PR/commit/CI links exempt from the public-repo rule; F5 dry-run tests in CI, real runs never; F7 (a) dedicated API key + `--bare`, owner creates and revokes; F8 owner writes the approval file and launches the pilot; F9 rule-based network isolation for G1/G3 pilot only, G2 and full runs need OS-level blocking. F1 supersedes the Gate 1 reading of standing decision 6.
+
+### Follow-ups
+- Scan the full git history with a secret scanner (owner, Gate 1). Separate from M8.
+- `fix/` PR to clean existing committed docs of home paths, usernames, hostnames (after M8; mount names out of scope per owner).

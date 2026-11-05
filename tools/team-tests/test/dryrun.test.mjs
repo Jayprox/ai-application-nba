@@ -65,8 +65,9 @@ test('validateSample rejects unsafe paths, unknown keys and inconsistent expecta
 test('AC6: the whole dry run passes with a throwing launcher stub; every sample reports as expected', () => {
   const launcher = { spawn() { throw new Error('launcher must not be called'); } };
   const r = runDryRun({ launcher });
-  const mismatched = r.cases.filter((c) => !c.ok).map((c) => `${c.mission}/${c.name}`);
-  assert.deepEqual(mismatched, []);
+  // On a mismatch the message names each criterion with its actual status and error code (ids only).
+  const mismatched = r.cases.filter((c) => !c.ok).map((c) => `${c.mission}/${c.name}: ${c.mismatches.map((m) => `${m.id}=${m.status}${m.code ? `(${m.code})` : ''}`).join(', ')}`);
+  assert.deepEqual(mismatched, [], formatSummary(r));
   assert.equal(r.ok, true);
   const samples = loadSamples();
   assert.equal(r.cases.length, MISSION_IDS.reduce((n, id) => n + samples[id].length, 0));
@@ -87,6 +88,11 @@ test('a sample whose expectation is wrong is reported as a mismatch (exit code w
   assert.equal(r.ok, false);
   assert.deepEqual(r.cases.filter((c) => !c.ok).map((c) => c.name), ['fail-fakeprod']);
   assert.match(formatSummary(r), /MISMATCH[^\n]*G2\.fakeprod-empty[\s\S]*dry run NOT OK/);
+  // Cycle 4: the mismatch lists the criterion with its actual status, for the test message and the CLI summary.
+  const bad = r.cases.find((c) => !c.ok);
+  assert.deepEqual(bad.mismatches, [{ id: 'G2.fakeprod-empty', status: 'failed', expectedStatus: 'passed' }]);
+  assert.match(formatSummary(r), /G2\.fakeprod-empty: failed \(expected passed\)/);
+  noLocalPaths(formatSummary(r));
 });
 
 test('CLI: no arguments runs the dry run, exits 0 and prints a summary with no absolute paths', () => {

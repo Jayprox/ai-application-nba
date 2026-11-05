@@ -115,6 +115,25 @@ function applySteps(f, steps) {
   }
 }
 
+// Short checker code of an errored criterion (the checker's own CheckerInputError code or a fixed phrase).
+// Evidence strings are built from codes only (checkers/index.mjs), never paths or values; the pattern
+// and the character set keep it that way here as well.
+const errorCode = (r) => {
+  const m = (r.evidence ?? []).map((e) => /error \(([A-Za-z0-9 ._:-]{1,80})\)/.exec(String(e))).find(Boolean);
+  return m ? m[1] : 'unknown';
+};
+
+/** Per mismatched criterion: its id, actual status (passed, failed, error, human) and, for an error, a short code. */
+function mismatches(results, expectedFailed) {
+  const out = [];
+  for (const r of results) {
+    const want = r.kind !== 'M' ? 'human' : expectedFailed.includes(r.id) ? 'failed' : 'passed';
+    if (r.status === want) continue;
+    out.push({ id: r.id, status: r.status, expectedStatus: want, ...(r.status === 'error' ? { code: errorCode(r) } : {}) });
+  }
+  return out;
+}
+
 const snap = (changed) => ({ status: changed ? ' M CLAUDE.md' : '', head: 'a'.repeat(40), configHash: 'c'.repeat(64), projects: [] });
 
 function runCase(f, mission, sample, state) {
@@ -139,7 +158,7 @@ function runCase(f, mission, sample, state) {
   const errored = mech.filter((r) => r.status === 'error').map((r) => r.id).sort();
   const expected = [...sample.expect.failed].sort();
   const ok = ev.verdict === sample.expect.verdict && errored.length === 0 && failed.length === expected.length && failed.every((x, i) => x === expected[i]);
-  return { mission: mission.id, name: sample.name, expected: sample.expect.verdict, actual: ev.verdict, failed, errored, expectedFailed: expected, ok, passedCount: ev.passed, total: ev.total };
+  return { mission: mission.id, name: sample.name, expected: sample.expect.verdict, actual: ev.verdict, failed, errored, expectedFailed: expected, ok, passedCount: ev.passed, total: ev.total, mismatches: ok ? [] : mismatches(ev.results, expected) };
 }
 
 /**
@@ -179,6 +198,7 @@ export function formatSummary(r) {
     const label = `${c.mission}/${c.name}`.padEnd(w);
     const detail = c.ok ? `${c.actual} as expected` : `MISMATCH expected ${c.expected}${c.expectedFailed.length ? ` (${c.expectedFailed.join(', ')})` : ''}, got ${c.actual}${c.failed.length ? ` (${c.failed.join(', ')})` : ''}${c.errored.length ? ` errors: ${c.errored.join(', ')}` : ''}`;
     lines.push(`${c.ok ? 'ok  ' : 'FAIL'} ${label}  ${detail}`);
+    for (const m of c.mismatches ?? []) lines.push(`       ${m.id}: ${m.status} (expected ${m.expectedStatus})${m.code ? `, code: ${m.code}` : ''}`);
   }
   const bad = r.cases.filter((c) => !c.ok).length;
   const neg = r.cases.filter((c) => c.expected === 'failed').length;

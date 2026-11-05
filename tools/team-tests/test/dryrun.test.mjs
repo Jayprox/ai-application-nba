@@ -97,7 +97,7 @@ test('a sample whose expectation is wrong is reported as a mismatch (exit code w
 
 test('CLI: no arguments runs the dry run, exits 0 and prints a summary with no absolute paths', () => {
   const r = spawnSync(process.execPath, [path.join(ROOT, 'bin', 'team-tests.mjs')], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: os.homedir() }, timeout: 120000 });
-  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.status, 0, `${r.stderr}\n${r.stdout}`); // the summary names each mismatched criterion with its status and error code (no paths)
   assert.match(r.stdout, /dry run OK/);
   assert.match(r.stdout, /G2\/fail-fakeprod\s+failed as expected/);
   noLocalPaths(r.stdout + r.stderr);
